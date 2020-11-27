@@ -1,5 +1,6 @@
 mod page;
 mod db;
+mod feed;
 use page::Page;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings};

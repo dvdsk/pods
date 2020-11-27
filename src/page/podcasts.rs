@@ -16,12 +16,12 @@ impl Into<crate::Message> for Message {
 }
 
 #[derive(Default)]
-pub struct PodcastSearch {
+pub struct Search {
     input: text_input::State,
     input_value: String, 
 }
 
-impl PodcastSearch {
+impl Search {
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
         match message {
             Message::AddPodcast => Command::none(),
@@ -47,54 +47,68 @@ impl PodcastSearch {
 }
 
 #[derive(Default)]
-pub struct Podcasts {
-    /// the podcasts title
+struct List {
     podcast_buttons: Vec<button::State>,
     podcast_names: Vec<String>,
     scroll_state: scrollable::State,
-    podcast_search: PodcastSearch,
-    // possible opt to do, cache the view
 }
 
-impl Podcasts {
-    pub fn new() -> Self {
-        let titles = ["99percentinvisible", "other_podcast"];
-        let mut list = Podcasts::default();
-        for title in titles.iter() {
-            list.podcast_names.push(title.to_owned().to_string());
-            list.podcast_buttons.push(button::State::new());
-        }
-        list
-    }
-    pub fn update(&mut self, message: Message) -> Command<crate::Message> {
-        match message {
-            Message::AddPodcast => {
-                self.podcast_search.reset();
-                Command::none()}
-            Message::SearchInputChanged(_) => {
-                self.podcast_search.update(message)
-            }
-        }
-    }
-    pub fn view(&mut self) -> Element<crate::Message> {
+impl List {
+    fn view(&mut self, search_term: &str) -> Scrollable<crate::Message> {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
         for (button, name) in self.podcast_buttons.iter_mut()
-            .zip(self.podcast_names.iter()) {
+            .zip(self.podcast_names.iter().filter(|n| n.contains(search_term))) {
 
             scrollable = scrollable.push(
                 Button::new(button, 
                     Text::new(name.to_owned()).horizontal_alignment(HorizontalAlignment::Center)
                 )
                 //Todo replace content of ToEpisode with some key
-                .on_press(crate::Message::ToEpisodes(0)) //FIXME replace 0 with podcasts sled id
+                .on_press(crate::Message::ToEpisodes(0))
                 .padding(12)
                 .width(Length::Fill)
             )
         }
+        scrollable
+    }
+}
+
+#[derive(Default)]
+pub struct Podcasts {
+    /// the podcasts title
+    list: List,
+    search: Search,
+    // possible opt to do, cache the view
+}
+
+impl Podcasts {
+    pub fn new() -> Self {
+        let titles = ["99percentinvisible", "other_podcast"];
+        let mut page = Podcasts::default();
+        for title in titles.iter() {
+            page.list.podcast_names.push(title.to_owned().to_string());
+            page.list.podcast_buttons.push(button::State::new());
+        }
+        page
+    }
+    pub fn update(&mut self, message: Message) -> Command<crate::Message> {
+        match message {
+            Message::AddPodcast => {
+                self.search.reset();
+                Command::none()}
+            Message::SearchInputChanged(_) => {
+                self.search.update(message)
+            }
+        }
+    }
+    pub fn view(&mut self) -> Element<crate::Message> {
+        let scrollable = self.list.view(&self.search.input_value);
+        let search = self.search.view();
+
         let column = Column::new()
-            .push(self.podcast_search.view())
+            .push(search)
             .push(scrollable);
         column.into()
     }
