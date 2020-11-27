@@ -1,18 +1,35 @@
 mod page;
+mod db;
 use page::Page;
 
-use iced::{executor, Application, Command, Element, Column, Settings};
+use iced::{button, executor, Application, Command, Element, Column, Settings};
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    ToEpisodes(String),
+    ToEpisodes(u64),
+    PlayProgress(f32),
+    Back,
+    Pauze,
+    Resume,
+    Podcasts(page::podcasts::Message),
+    Episodes(page::episodes::Message),
+}
+
+pub struct PlayBack {
+    title: String,
+    paused: bool,
+    pos: f32,
+    length: f32,
+    playpauze: button::State,
 }
 
 pub struct App {
     current: Page,
-    home: page::Home,
-    episodes: Option<page::Episodes>,
-    // play_pause:
+    podcasts: page::Podcasts,
+    episodes: page::Episodes,
+    playing: Option<PlayBack>,
+    back_button: button::State, //Should only be needed on desktop platforms
+    db: sled::Db,
 }
 
 impl Application for App {
@@ -20,32 +37,61 @@ impl Application for App {
     type Message = Message;
     type Flags = ();
 
-    fn new(flags: Self::Flags) -> (App, Command<Self::Message>) {
+    fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         (App {
-            home: page::Home::new(), 
-            episodes: None, 
-            current: Page::Home,
+            podcasts: page::Podcasts::new(), 
+            episodes: page::Episodes::new(), 
+            current: Page::Podcasts,
+            playing: None, 
+            back_button: button::State::new(),
+            db: db::open().unwrap(),
         }, Command::none())
     }
     fn title(&self) -> String {
-        String::from("A test title")
+        String::from("Podcasts")
     }
-    fn update(&mut self, _message: Self::Message) -> Command<Self::Message> {
-        match self.current {
-            Page::Home => self.home.update(),
-            Page::Episodes => self.episodes.as_mut().unwrap().update(),
+    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+        dbg!(&message);
+        match message {
+            Message::Back => {
+                self.current.back();
+                Command::none()
+            }
+            Message::ToEpisodes(podcast_id) => {
+                self.current = Page::Episodes;
+                self.episodes.populate(podcast_id);
+                Command::none()
+            }
+            Message::PlayProgress(p) => {
+                self.playing.as_mut().unwrap().pos = p;
+                Command::none()
+            }
+            Message::Pauze => Command::none(),
+            Message::Resume => Command::none(),
+            Message::Podcasts(m) => self.podcasts.update(m),
+            Message::Episodes(m) => self.episodes.update(m),
         }
     }
     fn view(&mut self) -> Element<Self::Message> {
+        dbg!("view");
+        dbg!(&self.current);
         let content = match self.current {
-            Page::Home => self.home.view(),
-            Page::Episodes => self.episodes.as_mut()
-                .map(|e| e.view())
-                .unwrap_or(page::errorpage()),
+            Page::Podcasts => self.podcasts.view(), // TODO load from a cache
+            Page::Episodes => self.episodes.view(),
         };
-        let column: Element<_> = Column::new()
-            .push(content)
-            .into();
+        // let column: Element<_> = Column::new()
+        //     .push(content)
+        //     .into();
+        let column = Column::new();
+        let column = column.push(content);
+        let column = if let Some(playback) = &mut self.playing {
+            column.push(page::draw_play_status(playback))
+        } else {column};
+        #[cfg(feature = "desktop")]
+        let column = if self.current != Page::Podcasts {
+            column.push(page::draw_back_button(&mut self.back_button))
+        } else {column};
+        
         iced::Container::new(column).into()
     }
 }
@@ -64,15 +110,3 @@ fn build_settings() -> Settings<()> {
         antialiasing: false,
     }
 }
-
-// #[tokio::main]
-// async fn main() {
-
-//     let example = include_bytes!("99percentinvisible");
-//     let channel = rss::Channel::read_from(&example[..]).unwrap();
-//     for title in channel.items().iter().filter_map(|x| x.title()) {
-//         println!("{}", title);
-//     }
-    
-//     println!("Hello, world!");
-// }

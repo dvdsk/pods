@@ -5,15 +5,18 @@ authors = ["dskleingeld <11743287+dskleingeld@users.noreply.github.com>"]
 edition = "2018"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = ["desktop"]
+desktop = []
 
 [dependencies]
 rodio = "0.13"
 # iced = { version = "0.1", features = ["tokio"] }
 # using glow causes the app to use opengl instead of vulkan
 # seems to solve "Error: GraphicsAdapterNotFound"
-iced = { git = "https://github.com/hecrj/iced", features = ["tokio", "glow"] }
+iced = { version = "0.2", features = ["tokio", "glow"] }
 sled = "0.34"
 rss = "1"
 reqwest = { version = "0.10", features = ["rustls-tls"] }
 tokio = { version = "0.2", features = ["full"] }
-
+eyre = "0.6"
