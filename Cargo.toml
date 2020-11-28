@@ -14,10 +14,11 @@ rodio = "0.13"
 # iced = { version = "0.1", features = ["tokio"] }
 # using glow causes the app to use opengl instead of vulkan
 # seems to solve "Error: GraphicsAdapterNotFound"
-iced = { version = "0.2", features = ["tokio", "glow"] }
+iced = { version = "0.2", features = ["tokio_old", "glow"] }
 sled = "0.34"
 rss = "1"
 reqwest = { version = "0.10", features = ["rustls-tls"] }
-tokio = { version = "0.3", features = ["full"] }
+tokio = { version = "0.2", features = ["full"] }
 eyre = "0.6"
 sha-1 = "0.9.2"
+regex = "1"
