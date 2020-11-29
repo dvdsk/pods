@@ -36,30 +36,23 @@ impl Search {
                 let term = self.input_value.clone();
                 let search = self.search.clone();
                 Command::perform(
-                    feed::search(term, search),
+                    async move {search.lock().await.search(term, true).await.unwrap()},
                     |r| crate::Message::Podcasts(Message::SearchResults(r))
             )}
-            // Message::SearchSubmit => {
-            //     // always do a web search if a search was submitted
-            //     let term = self.input_value.clone();
-            //     Command::perform(
-            //         feed::search(term),
-            //         |r| crate::Message::Podcasts(Message::SearchResults(r))
-            // )}
             Message::SearchInputChanged(s) => {
                 self.input_value = s;
-                // if is_url() {
-                //     todo!("add podcast")
-                // } else if self.api_budget() > 0 && self.input_value.len() > 4 {
-                //     let term = self.input_value.clone();
-                //     Command::perform(
-                //         feed::search(term),
-                //         |r| crate::Message::Podcasts(Message::SearchResults(r))
-                //     )
-                // } else {
-                //     Command::none() 
-                // }
-                Command::none()
+                if feed::valid_url(&self.input_value) {
+                    todo!();
+                    Command::none()
+                } else if self.input_value.len() > 4 {
+                    let term = self.input_value.clone();
+                    let search = self.search.clone();
+                    Command::perform(
+                        async move {search.lock().await.search(term, true).await.unwrap()},
+                        |r| crate::Message::Podcasts(Message::SearchResults(r)) )
+                } else {
+                    Command::none() 
+                }
             }
             Message::SearchResults(_) => {
                 Command::none()
