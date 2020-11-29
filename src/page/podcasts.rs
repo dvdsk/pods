@@ -2,11 +2,14 @@ use iced::Length;
 use iced::{button, Button, Column, Command, Element, Text, HorizontalAlignment};
 use iced::{scrollable, Scrollable};
 use iced::{TextInput, text_input};
+use crate::feed;
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    AddPodcast,
+    SearchSubmit,
     SearchInputChanged(String),
+    SearchResults(Vec<feed::SearchResult>),
+    AddPodcast(String), //url
 }
 
 impl Into<crate::Message> for Message {
@@ -24,10 +27,32 @@ pub struct Search {
 impl Search {
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
         match message {
-            Message::AddPodcast => Command::none(),
+            Message::SearchSubmit => {
+                // always do a web search if a search was submitted
+                let term = self.input_value.clone();
+                Command::perform(
+                    feed::search(term),
+                    |r| crate::Message::Podcasts(Message::SearchResults(r))
+            )}
             Message::SearchInputChanged(s) => {
                 self.input_value = s;
-                Command::none() 
+                if is_url() {
+                    todo!("add podcast")
+                } else if self.api_budget() > 0 && self.input_value.len() > 4 {
+                    let term = self.input_value.clone();
+                    Command::perform(
+                        feed::search(term),
+                        |r| crate::Message::Podcasts(Message::SearchResults(r))
+                    )
+                } else {
+                    Command::none() 
+                }
+            }
+            Message::SearchResults(_) => {
+                Command::none()
+            }
+            Message::AddPodcast(_) => {
+                Command::none()
             }
         }
     }
@@ -39,7 +64,7 @@ impl Search {
             |s| crate::Message::Podcasts(Message::SearchInputChanged(s)),
         ) 
         .width(Length::Fill)
-        .on_submit(crate::Message::Podcasts(Message::AddPodcast))
+        .on_submit(crate::Message::Podcasts(Message::SearchSubmit))
     }
     pub fn reset(&mut self) {
         self.input_value.clear();
@@ -50,7 +75,28 @@ impl Search {
 struct List {
     podcast_buttons: Vec<button::State>,
     podcast_names: Vec<String>,
+    feedres_buttons: Vec<button::State>,
+    feedres_info: Vec<feed::SearchResult>,
     scroll_state: scrollable::State,
+}
+
+fn feedres_button(button: &mut button::State, res: feed::SearchResult) -> Button<crate::Message> {
+    Button::new(button, 
+        Text::new(res.title).horizontal_alignment(HorizontalAlignment::Center)
+    )
+    //Todo replace content of ToEpisode with some key
+    .on_press(crate::Message::Podcasts(Message::AddPodcast(res.url)))
+    .padding(12)
+    .width(Length::Fill)
+}
+fn podcast_button(button: &mut button::State, text: String, id: u64) -> Button<crate::Message> {
+    Button::new(button, 
+        Text::new(text).horizontal_alignment(HorizontalAlignment::Center)
+    )
+    //Todo replace content of ToEpisode with some key
+    .on_press(crate::Message::ToEpisodes(id))
+    .padding(12)
+    .width(Length::Fill)
 }
 
 impl List {
@@ -58,20 +104,27 @@ impl List {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
+        for (button, info) in self.feedres_buttons.iter_mut()
+            .zip(self.feedres_info.iter()) {
+
+            scrollable = scrollable.push(feedres_button(button, info.clone()));
+        }
         for (button, name) in self.podcast_buttons.iter_mut()
             .zip(self.podcast_names.iter().filter(|n| n.contains(search_term))) {
 
-            scrollable = scrollable.push(
-                Button::new(button, 
-                    Text::new(name.to_owned()).horizontal_alignment(HorizontalAlignment::Center)
-                )
-                //Todo replace content of ToEpisode with some key
-                .on_press(crate::Message::ToEpisodes(0))
-                .padding(12)
-                .width(Length::Fill)
-            )
+            let id = 0;
+            scrollable = scrollable.push(podcast_button(button, name.to_owned(), id));
         }
         scrollable
+    }
+    fn update_feedres(&mut self, results: Vec<feed::SearchResult>) {
+        //TODO add feedres_buttons
+        self.feedres_info = results;
+        let needed_buttons = self.feedres_info.len().saturating_sub(self.feedres_buttons.len());
+        dbg!(&needed_buttons);
+        for _ in 0..needed_buttons {
+            self.feedres_buttons.push(button::State::new());
+        }
     }
 }
 
@@ -95,20 +148,23 @@ impl Podcasts {
     }
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
         match message {
-            Message::AddPodcast => {
-                self.search.reset();
-                Command::none()}
-            Message::SearchInputChanged(_) => {
-                self.search.update(message)
+            Message::SearchSubmit => self.search.update(message),
+            Message::SearchInputChanged(_) => self.search.update(message),
+            Message::SearchResults(r) => {
+                self.list.update_feedres(r);
+                Command::none()
+            }
+            Message::AddPodcast(_) => {
+                Command::none()
             }
         }
     }
     pub fn view(&mut self) -> Element<crate::Message> {
         let scrollable = self.list.view(&self.search.input_value);
-        let search = self.search.view();
+        let searchbar = self.search.view();
 
         let column = Column::new()
-            .push(search)
+            .push(searchbar)
             .push(scrollable);
         column.into()
     }

@@ -52,7 +52,7 @@ impl Application for App {
         String::from("Podcasts")
     }
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        dbg!(&message);
+        // dbg!(&message);
         match message {
             Message::Back => {
                 self.current.back();
