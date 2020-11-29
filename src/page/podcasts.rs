@@ -2,6 +2,9 @@ use iced::Length;
 use iced::{button, Button, Column, Command, Element, Text, HorizontalAlignment};
 use iced::{scrollable, Scrollable};
 use iced::{TextInput, text_input};
+use tokio::sync::Mutex;
+use std::sync::Arc;
+
 use crate::feed;
 
 #[derive(Debug, Clone)]
@@ -22,6 +25,7 @@ impl Into<crate::Message> for Message {
 pub struct Search {
     input: text_input::State,
     input_value: String, 
+    search: Arc<Mutex<feed::Search>>,
 }
 
 impl Search {
@@ -30,23 +34,32 @@ impl Search {
             Message::SearchSubmit => {
                 // always do a web search if a search was submitted
                 let term = self.input_value.clone();
+                let search = self.search.clone();
                 Command::perform(
-                    feed::search(term),
+                    feed::search(term, search),
                     |r| crate::Message::Podcasts(Message::SearchResults(r))
             )}
+            // Message::SearchSubmit => {
+            //     // always do a web search if a search was submitted
+            //     let term = self.input_value.clone();
+            //     Command::perform(
+            //         feed::search(term),
+            //         |r| crate::Message::Podcasts(Message::SearchResults(r))
+            // )}
             Message::SearchInputChanged(s) => {
                 self.input_value = s;
-                if is_url() {
-                    todo!("add podcast")
-                } else if self.api_budget() > 0 && self.input_value.len() > 4 {
-                    let term = self.input_value.clone();
-                    Command::perform(
-                        feed::search(term),
-                        |r| crate::Message::Podcasts(Message::SearchResults(r))
-                    )
-                } else {
-                    Command::none() 
-                }
+                // if is_url() {
+                //     todo!("add podcast")
+                // } else if self.api_budget() > 0 && self.input_value.len() > 4 {
+                //     let term = self.input_value.clone();
+                //     Command::perform(
+                //         feed::search(term),
+                //         |r| crate::Message::Podcasts(Message::SearchResults(r))
+                //     )
+                // } else {
+                //     Command::none() 
+                // }
+                Command::none()
             }
             Message::SearchResults(_) => {
                 Command::none()
@@ -147,6 +160,7 @@ impl Podcasts {
         page
     }
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
+        dbg!(&message);
         match message {
             Message::SearchSubmit => self.search.update(message),
             Message::SearchInputChanged(_) => self.search.update(message),
