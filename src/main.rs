@@ -81,9 +81,6 @@ impl Application for App {
             Page::Podcasts => self.podcasts.view(), // TODO load from a cache
             Page::Episodes => self.episodes.view(),
         };
-        // let column: Element<_> = Column::new()
-        //     .push(content)
-        //     .into();
         let column = Column::new();
         let column = column.push(content);
         let column = if let Some(playback) = &mut self.playing {
