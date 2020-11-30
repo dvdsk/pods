@@ -1,27 +1,32 @@
-use std::collections::HashSet;
-use std::str::FromStr;
 use eyre::WrapErr;
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize, Deserialize)]
 pub struct PodcastInfo {
-    title: String,
+    pub title: String,
     url: String,
-    local_id: u64,
+    pub local_id: u64,
 }
 
 // TODO exclude listend from partialeq?
 // the contains check is invalid with derived
 // partialeq
-#[derive(Serialize, Deserialize, PartialEq, Clone)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct EpisodeInfo {
     pub title: String,
     pub listend: bool,
 }
 
+impl PartialEq for EpisodeInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.title == other.title
+    }
+}
+
 pub type EpisodeList = Vec<EpisodeInfo>;
 pub type PodcastList = Vec<PodcastInfo>;
 
+#[derive(Clone)]
 pub struct Podcasts {
     tree: sled::Tree,
     db: sled::Db,
@@ -77,5 +82,18 @@ impl Podcasts {
         }).wrap_err("could not update subscribed podcasts in database")?;
             
         Ok(local_id)
+    }
+    pub fn get_podcastlist(&mut self) -> sled::Result<PodcastList> {
+        if let Some(data) = self.tree.get("podcasts")? {
+            let list = bincode::deserialize(&data).unwrap();
+            Ok(list)
+        } else {
+            Ok(Vec::new())
+        }
+    }
+    pub fn get_episodelist(&mut self, id: LocalId) -> sled::Result<EpisodeList> {
+        let data = self.tree.get(id.to_be_bytes())?.expect("every podcast should have an episode list");
+        let list = bincode::deserialize(&data).unwrap();
+        Ok(list)
     }
 }

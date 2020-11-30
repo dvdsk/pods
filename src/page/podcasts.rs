@@ -1,3 +1,4 @@
+use feed::add_podcast;
 use iced::Length;
 use iced::{button, Button, Column, Command, Element, Text, HorizontalAlignment};
 use iced::{scrollable, Scrollable};
@@ -15,6 +16,7 @@ pub enum Message {
     SearchInputChanged(String),
     SearchResults(Vec<feed::SearchResult>),
     AddPodcast(String), //url
+    AddedPodcast(String, u64),
 }
 
 impl Into<crate::Message> for Message {
@@ -56,12 +58,9 @@ impl Search {
                     Command::none() 
                 }
             }
-            Message::SearchResults(_) => {
-                Command::none()
-            }
-            Message::AddPodcast(_) => {
-                panic!("should never handle addpodcast in Search::update")
-            }
+            Message::SearchResults(_) => Command::none(),
+            Message::AddPodcast(_) => panic!("should never handle addpodcast in Search::update"),
+            Message::AddedPodcast(_,_) => panic!("addpodcast should not be handled in search::update"),
         }
     }
     pub fn view(&mut self) -> TextInput<crate::Message> {
@@ -81,7 +80,7 @@ impl Search {
 
 #[derive(Default)]
 struct List {
-    podcast_buttons: Vec<button::State>,
+    podcast_buttons: Vec<(u64, button::State)>,
     podcast_names: Vec<String>,
     feedres_buttons: Vec<button::State>,
     feedres_info: Vec<feed::SearchResult>,
@@ -117,11 +116,10 @@ impl List {
 
             scrollable = scrollable.push(feedres_button(button, info.clone()));
         }
-        for (button, name) in self.podcast_buttons.iter_mut()
+        for ((id, button), name) in self.podcast_buttons.iter_mut()
             .zip(self.podcast_names.iter().filter(|n| n.contains(search_term))) {
 
-            let id = 0;
-            scrollable = scrollable.push(podcast_button(button, name.to_owned(), id));
+            scrollable = scrollable.push(podcast_button(button, name.to_owned(), *id));
         }
         scrollable
     }
@@ -134,6 +132,10 @@ impl List {
             self.feedres_buttons.push(button::State::new());
         }
     }
+    fn add(&mut self, title: String, id: u64) {
+        self.podcast_names.push(title);
+        self.podcast_buttons.push((id, button::State::new()));
+    }
 }
 
 pub struct Podcasts {
@@ -145,23 +147,19 @@ pub struct Podcasts {
 }
 
 impl Podcasts {
-    pub fn new(db: &sled::Db) -> Self {
-        let titles = ["99percentinvisible", "other_podcast"];
+    pub fn new(db: database::Podcasts) -> Self {
         let mut page = Podcasts {
             list: List::default(),
             search: Search::default(),
-            podcasts: database::Podcasts::open(&db)
-                .wrap_err("could not get list of subscribed podcasts")
-                .unwrap(),
+            podcasts: db,
         };
-        for title in titles.iter() {
-            page.list.podcast_names.push(title.to_owned().to_string());
-            page.list.podcast_buttons.push(button::State::new());
+        for database::podcasts::PodcastInfo{title, local_id, ..} in page.podcasts.get_podcastlist().unwrap() {
+            page.list.podcast_names.push(title);
+            page.list.podcast_buttons.push((local_id, button::State::new()));
         }
         page
     }
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
-        dbg!(&message);
         match message {
             Message::SearchSubmit => self.search.update(message),
             Message::SearchInputChanged(_) => self.search.update(message),
@@ -169,7 +167,14 @@ impl Podcasts {
                 self.list.update_feedres(r);
                 Command::none()
             }
-            Message::AddPodcast(_) => {
+            Message::AddPodcast(url) => {
+                let db = self.podcasts.clone();
+                Command::perform(
+                    add_podcast(db, url), 
+                    |x| crate::Message::Podcasts(Message::AddedPodcast(x.0,x.1)))
+            }
+            Message::AddedPodcast(title, id) => {
+                self.list.add(title, id);
                 Command::none()
             }
         }

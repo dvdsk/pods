@@ -40,8 +40,8 @@ impl Search {
         let (res_a, res_b) = tokio::join!(search_a, search_b);
         match (res_a, res_b) {
             (Err(e), Err(_)) => return Err(e),//TODO log the errs
-            (Err(_), Ok(b)) => return Ok(b), //TODO log the errs
-            (Ok(a), Err(_)) => return Ok(a),
+            (Err(e), Ok(b)) => {dbg!(e); return Ok(b)}, //TODO log the errs
+            (Ok(a), Err(e)) => {dbg!(e); return Ok(a)},
             (Ok(mut a), Ok(mut b)) => {
                 let mut result = HashSet::new();
                 for res in a.drain(..).chain(b.drain(..)){
@@ -63,7 +63,7 @@ fn find_99pi(){
     Runtime::new()
         .unwrap()
         .block_on(async {
-            let res = searcher.search("Soft Skills Engineering").await.unwrap();
+            let res = searcher.search("Soft Skills Engineering".to_owned(), false).await.unwrap();
             assert_eq!(res[0].title, "Soft Skills Engineering");
         });
 }

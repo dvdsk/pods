@@ -2,6 +2,8 @@ use iced::Length;
 use iced::{button, Button, Command, Element, Text, HorizontalAlignment};
 use iced::widget::scrollable::{self, Scrollable};
 
+use crate::database::podcasts::EpisodeList;
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Play(String),
@@ -20,17 +22,11 @@ impl Episodes {
     pub fn new() -> Self {
         Episodes::default()
     }
-    pub fn populate(&mut self, podcast: u64) {
-        //TODO fetch podcast rss from db
-        let example = include_bytes!("../99percentinvisible");
-        let channel = rss::Channel::read_from(&example[..]).unwrap();
-
+    pub fn populate(&mut self, episodes: EpisodeList) {
         self.episode_names.clear();
         self.episode_buttons.clear();
-        for title in channel.items()
-            .iter().filter_map(|x| x.title()) {
-
-            self.episode_names.push(title.to_owned()); 
+        for info in episodes {
+            self.episode_names.push(info.title); 
             self.episode_buttons.push(button::State::new());
         }
     }

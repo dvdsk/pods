@@ -30,9 +30,10 @@ impl Search {
                     .as_str().to_owned(),
                 url: cap.get(2)
                     .ok_or_else(|| eyre!("malformed search result"))?
-                    .as_str().to_owned(),
+                    .as_str().to_owned().replace(r#"\/"#, r#"/"#),
             });
         }
+        dbg!(&results);
         Ok(results)
     }
 
@@ -64,6 +65,8 @@ impl Search {
             .send()
             .await
             .wrap_err("could not connect to 'the podcast index'")?
+            .error_for_status()
+            .wrap_err("server replied with error")?
             .text()
             .await
             .wrap_err("could not understand response from 'the podcast index'")?;
@@ -83,5 +86,6 @@ fn test_podcast_index(){
         .block_on(async {
             let res = searcher.search("Soft Skills Engineering").await.unwrap();
             assert_eq!(res[0].title, "Soft Skills Engineering");
+            assert_eq!(res[0].url, "http://feeds.feedburner.com/SoftSkillsEngineering");
         });
 }

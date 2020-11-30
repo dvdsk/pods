@@ -30,6 +30,7 @@ pub struct App {
     episodes: page::Episodes,
     playing: Option<PlayBack>,
     back_button: button::State, //Should only be needed on desktop platforms
+    pod_db: database::Podcasts,
     db: sled::Db,
 }
 
@@ -40,12 +41,14 @@ impl Application for App {
 
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         let db = database::open().unwrap();
+        let pod_db = database::Podcasts::open(&db).unwrap();
         (App {
-            podcasts: page::Podcasts::new(&db), 
+            podcasts: page::Podcasts::new(pod_db.clone()), 
             episodes: page::Episodes::new(), 
             current: Page::Podcasts,
             playing: None, 
             back_button: button::State::new(),
+            pod_db,
             db, 
         }, Command::none())
     }
@@ -60,8 +63,9 @@ impl Application for App {
                 Command::none()
             }
             Message::ToEpisodes(podcast_id) => {
+                let list = self.pod_db.get_episodelist(podcast_id).unwrap();
+                self.episodes.populate(list);
                 self.current = Page::Episodes;
-                self.episodes.populate(podcast_id);
                 Command::none()
             }
             Message::PlayProgress(p) => {

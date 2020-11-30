@@ -58,9 +58,6 @@ impl Default for Search {
 }
 
 impl Search {
-    pub fn api_calls_left(&self) -> u8 {
-        self.budget.left()
-    }
     pub fn to_results(&self, text: &str) -> Result<Vec<SearchResult>> {
         let mut results = Vec::new();
         for (cap1, cap2) in self.title.captures_iter(text)
@@ -68,13 +65,13 @@ impl Search {
 
             results.push(SearchResult {
                 title: cap1.get(1)
-                    .ok_or_else(|| eyre!("malformed search result"))?
+                    .ok_or_else(|| eyre!("malformed title result"))?
                     .as_str().to_owned(),
-                url: cap2.get(2)
-                    .ok_or_else(|| eyre!("malformed search result"))?
+                url: cap2.get(1)
+                    .ok_or_else(|| eyre!("malformed url result"))?
                     .as_str().to_owned(),
-                });
-            }
+            });
+        }
         Ok(results) 
     }
 
@@ -95,6 +92,8 @@ impl Search {
             .send()
             .await
             .wrap_err("could not connect to apple podcasts")?
+            .error_for_status()
+            .wrap_err("server replied with error")?
             .text()
             .await
             .wrap_err("could not understand apple podcast reply")?;
@@ -113,7 +112,8 @@ fn test_apple_podcasts(){
     Runtime::new()
         .unwrap()
         .block_on(async {
-            let res = searcher.search("Soft Skills").await.unwrap();
+            let res = searcher.search("Soft Skills", true).await.unwrap();
             assert_eq!(res[0].title, "Soft Skills Engineering");
+            assert_eq!(res[0].url, "http://feeds.feedburner.com/SoftSkillsEngineering");
         });
 }
