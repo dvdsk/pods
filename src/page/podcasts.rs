@@ -3,9 +3,11 @@ use iced::{button, Button, Column, Command, Element, Text, HorizontalAlignment};
 use iced::{scrollable, Scrollable};
 use iced::{TextInput, text_input};
 use tokio::sync::Mutex;
+use eyre::WrapErr;
 use std::sync::Arc;
 
 use crate::feed;
+use crate::database;
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -58,7 +60,7 @@ impl Search {
                 Command::none()
             }
             Message::AddPodcast(_) => {
-                Command::none()
+                panic!("should never handle addpodcast in Search::update")
             }
         }
     }
@@ -134,18 +136,24 @@ impl List {
     }
 }
 
-#[derive(Default)]
 pub struct Podcasts {
     /// the podcasts title
     list: List,
     search: Search,
+    podcasts: database::Podcasts,
     // possible opt to do, cache the view
 }
 
 impl Podcasts {
-    pub fn new() -> Self {
+    pub fn new(db: &sled::Db) -> Self {
         let titles = ["99percentinvisible", "other_podcast"];
-        let mut page = Podcasts::default();
+        let mut page = Podcasts {
+            list: List::default(),
+            search: Search::default(),
+            podcasts: database::Podcasts::open(&db)
+                .wrap_err("could not get list of subscribed podcasts")
+                .unwrap(),
+        };
         for title in titles.iter() {
             page.list.podcast_names.push(title.to_owned().to_string());
             page.list.podcast_buttons.push(button::State::new());

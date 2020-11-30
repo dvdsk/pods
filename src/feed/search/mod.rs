@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::db;
+use crate::database;
 use eyre::{eyre, Result, WrapErr};
 use regex::Regex;
 use tokio::sync::Mutex;

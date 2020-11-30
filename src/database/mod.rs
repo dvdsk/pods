@@ -2,6 +2,9 @@ use eyre::{Result, WrapErr};
 use sled;
 use std::path::PathBuf;
 
+pub mod podcasts;
+pub use podcasts::Podcasts;
+
 pub fn open() -> Result<sled::Db> {
     let path = PathBuf::from("database");
     let config = sled::Config::default()

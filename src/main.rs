@@ -1,5 +1,5 @@
 mod page;
-mod db;
+mod database;
 mod feed;
 use page::Page;
 
@@ -39,13 +39,14 @@ impl Application for App {
     type Flags = ();
 
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
+        let db = database::open().unwrap();
         (App {
-            podcasts: page::Podcasts::new(), 
+            podcasts: page::Podcasts::new(&db), 
             episodes: page::Episodes::new(), 
             current: Page::Podcasts,
             playing: None, 
             back_button: button::State::new(),
-            db: db::open().unwrap(),
+            db, 
         }, Command::none())
     }
     fn title(&self) -> String {

@@ -11,4 +11,8 @@ pub fn valid_url(s: &str) -> bool {
     }
 }
 
+pub fn add_podcast(title: &str, url: &str) {
 
+
+
+}
