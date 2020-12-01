@@ -4,11 +4,6 @@ use iced::widget::scrollable::{self, Scrollable};
 
 use crate::database::podcasts::EpisodeList;
 
-#[derive(Debug, Clone)]
-pub enum Message {
-    Play(String),
-}
-
 #[derive(Debug, Default)]
 pub struct Episodes {
     /// the episodes title
@@ -30,13 +25,6 @@ impl Episodes {
             self.episode_buttons.push(button::State::new());
         }
     }
-    pub fn update(&mut self, message: Message) -> Command<crate::Message> {
-        match message {
-            Message::Play(episode_name) => {
-                Command::none()
-            }
-        }
-    }
     pub fn view(&mut self) -> Element<crate::Message> {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
@@ -47,7 +35,7 @@ impl Episodes {
                     Text::new(name.to_owned()).horizontal_alignment(HorizontalAlignment::Center)
                 )
                 //Todo replace content of ToEpisode with some key
-                .on_press(crate::Message::Episodes(Message::Play(name.to_owned())))
+                .on_press(crate::Message::Play(name.to_owned()))
                 .padding(12)
                 .width(Length::Fill)
             )

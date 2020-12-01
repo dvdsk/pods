@@ -1,6 +1,7 @@
 mod page;
 mod database;
 mod feed;
+mod play;
 use page::Page;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings};
@@ -9,11 +10,12 @@ use iced::{button, executor, Application, Command, Element, Column, Settings};
 pub enum Message {
     ToEpisodes(u64),
     PlayProgress(f32),
+    Play(String),
     Back,
     Pauze,
     Resume,
     Podcasts(page::podcasts::Message),
-    Episodes(page::episodes::Message),
+    // Episodes(page::episodes::Message),
 }
 
 pub struct PlayBack {
@@ -43,7 +45,7 @@ impl Application for App {
         let db = database::open().unwrap();
         let pod_db = database::Podcasts::open(&db).unwrap();
         (App {
-            podcasts: page::Podcasts::new(pod_db.clone()), 
+            podcasts: page::Podcasts::new(pod_db.clone()),
             episodes: page::Episodes::new(), 
             current: Page::Podcasts,
             playing: None, 
@@ -72,10 +74,11 @@ impl Application for App {
                 self.playing.as_mut().unwrap().pos = p;
                 Command::none()
             }
+            Message::Play(s) => Command::none(),
             Message::Pauze => Command::none(),
             Message::Resume => Command::none(),
             Message::Podcasts(m) => self.podcasts.update(m),
-            Message::Episodes(m) => self.episodes.update(m),
+            // Message::Episodes(m) => self.episodes.update(m),
         }
     }
     fn view(&mut self) -> Element<Self::Message> {
