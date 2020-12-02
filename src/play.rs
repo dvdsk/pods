@@ -46,8 +46,9 @@ struct Mp3Stream {
 
 struct ReadableReciever {
     rx: mpsc::Receiver<bytes::Bytes>,
+    /// buffer of all received data, used for seeking
     buffer: Vec<u8>,
-    offset: u64,
+    offset: usize,
 }
 
 impl ReadableReciever {
@@ -63,24 +64,29 @@ impl ReadableReciever {
 impl std::io::Read for ReadableReciever {
     fn read(&mut self, buf: &mut [u8]) -> Result<usize, io::Error> {
         let needed = buf.len();
-        if needed <= self.buffer.len() {
+        let mut unread_buffer = self.buffer.len() - self.offset;
+        if needed <= unread_buffer {
             // fill buf from buffer
-            buf.clone_from_slice(&self.buffer[..needed]);
+            buf.clone_from_slice(&self.buffer[self.offset..self.offset+needed]);
             return Ok(needed);
         }
 
-        // get extra bytes, TODO error handling
+        // get extra bytes, and put them in the buffer
         let bytes = self.rx.recv().unwrap();
-        let got = bytes.len();
-        if got <= needed {
-            //less bytes then needed, return what we got
-            buf[..got].clone_from_slice(&bytes[..needed]);
-            return Ok(got);
+        self.buffer.extend_from_slice(&bytes);
+        unread_buffer += bytes.len();
+        
+        let read = if needed <= unread_buffer {
+            // got what we needed
+            buf.clone_from_slice(&self.buffer[self.offset..self.offset+needed]);
+            needed
         } else {
-            buf.clone_from_slice(&bytes[..needed]);
-            self.buffer.extend_from_slice(&bytes[needed..]);
-            return Ok(needed);
-        }
+            // less bytes then needed, return what we got do not block
+            buf[..unread_buffer].clone_from_slice(&self.buffer[self.offset..self.offset+needed]);
+            unread_buffer
+        };
+        self.offset += read;
+        Ok(read)
     }
 }
 
