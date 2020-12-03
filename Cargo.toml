@@ -11,7 +11,6 @@ desktop = []
 
 [dependencies]
 rodio = "0.13"
-# iced = { version = "0.1", features = ["tokio"] }
 # using glow causes the app to use opengl instead of vulkan
 # seems to solve "Error: GraphicsAdapterNotFound"
 iced = { version = "0.2", features = ["tokio_old", "glow"] }
@@ -27,5 +26,3 @@ arraydeque = "0.4"
 url = "2.2"
 bincode = "1.3"
 serde = { version = "1", features = ["derive"] }
-# futures = "0.3"
-# minimp3 = { version = "0.5", features = ["async_tokio"] }

@@ -78,7 +78,7 @@ impl Search {
     pub async fn search(&mut self, search_term: &str, ignore_budget: bool)
         -> Result<Vec<SearchResult>> {
         
-        if self.budget.left() <= 2 {
+        if self.budget.left() <= 2 && !ignore_budget {
             return Err(eyre!("over api budget"));
         }
 

@@ -4,6 +4,8 @@ use std::path::PathBuf;
 
 pub mod podcasts;
 pub use podcasts::Podcasts;
+pub mod episodes;
+pub use episodes::Episodes;
 
 pub fn open() -> Result<sled::Db> {
     let path = PathBuf::from("database");

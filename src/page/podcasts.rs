@@ -1,10 +1,8 @@
-use feed::add_podcast;
 use iced::Length;
 use iced::{button, Button, Column, Command, Element, Text, HorizontalAlignment};
 use iced::{scrollable, Scrollable};
 use iced::{TextInput, text_input};
 use tokio::sync::Mutex;
-use eyre::WrapErr;
 use std::sync::Arc;
 
 use crate::feed;
@@ -15,7 +13,6 @@ pub enum Message {
     SearchSubmit,
     SearchInputChanged(String),
     SearchResults(Vec<feed::SearchResult>),
-    AddPodcast(String), //url
     AddedPodcast(String, u64),
 }
 
@@ -59,7 +56,6 @@ impl Search {
                 }
             }
             Message::SearchResults(_) => Command::none(),
-            Message::AddPodcast(_) => panic!("should never handle addpodcast in Search::update"),
             Message::AddedPodcast(_,_) => panic!("addpodcast should not be handled in search::update"),
         }
     }
@@ -92,7 +88,7 @@ fn feedres_button(button: &mut button::State, res: feed::SearchResult) -> Button
         Text::new(res.title).horizontal_alignment(HorizontalAlignment::Center)
     )
     //Todo replace content of ToEpisode with some key
-    .on_press(crate::Message::Podcasts(Message::AddPodcast(res.url)))
+    .on_press(crate::Message::AddPodcast(res.url))
     .padding(12)
     .width(Length::Fill)
 }
@@ -132,6 +128,9 @@ impl List {
             self.feedres_buttons.push(button::State::new());
         }
     }
+    fn remove_feedres(&mut self) {
+        self.feedres_info.clear();
+    }
     fn add(&mut self, title: String, id: u64) {
         self.podcast_names.push(title);
         self.podcast_buttons.push((id, button::State::new()));
@@ -147,7 +146,7 @@ pub struct Podcasts {
 }
 
 impl Podcasts {
-    pub fn new(db: database::Podcasts) -> Self {
+    pub fn from_db(db: database::Podcasts) -> Self {
         let mut page = Podcasts {
             list: List::default(),
             search: Search::default(),
@@ -167,13 +166,9 @@ impl Podcasts {
                 self.list.update_feedres(r);
                 Command::none()
             }
-            Message::AddPodcast(url) => {
-                let db = self.podcasts.clone();
-                Command::perform(
-                    add_podcast(db, url), 
-                    |x| crate::Message::Podcasts(Message::AddedPodcast(x.0,x.1)))
-            }
             Message::AddedPodcast(title, id) => {
+                self.list.remove_feedres();
+                self.search.reset();
                 self.list.add(title, id);
                 Command::none()
             }

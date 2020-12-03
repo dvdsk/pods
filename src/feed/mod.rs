@@ -30,7 +30,7 @@ async fn get_podcast_info(url: &str) -> eyre::Result<rss::Channel> {
     Ok(channel)
 }
 
-async fn get_episode_info(items: &[rss::Item]) -> eyre::Result<EpisodeList> {
+fn get_episode_info(items: &[rss::Item]) -> eyre::Result<EpisodeList> {
     Ok(items.iter()
         .filter_map(|x| x.title())
         .map(|t| EpisodeInfo {
@@ -39,11 +39,12 @@ async fn get_episode_info(items: &[rss::Item]) -> eyre::Result<EpisodeList> {
     }).collect())
 }
 
-//TODO let this return episodes? could then directly draw the episodes screen
-pub async fn add_podcast(mut db: database::Podcasts, url: String) -> (String, u64) {
+pub async fn add_podcast(mut pod_db: database::Podcasts, mut episode_db: database::Episodes,
+    url: String) -> (String, u64) {
     let info = get_podcast_info(&url).await.unwrap();
-    let episodes = get_episode_info(info.items());
-    let id = db.add_to_podcastlist(info.title(), &url).unwrap();
-    db.add_to_episodelist(id, episodes.await.unwrap()).unwrap();
-    (info.title().to_owned(), id)
+    let title = info.title().to_owned();
+    let episodes = get_episode_info(info.items()).unwrap();
+    let id = pod_db.add_feed(&title, &url, episodes).unwrap();
+    episode_db.add_feed(info);
+    (title, id)
 }

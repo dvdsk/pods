@@ -3,6 +3,7 @@ mod database;
 mod feed;
 mod play;
 use page::Page;
+use play::PlayBack;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings};
 
@@ -10,30 +11,26 @@ use iced::{button, executor, Application, Command, Element, Column, Settings};
 pub enum Message {
     ToEpisodes(u64),
     PlayProgress(f32),
-    Play(String),
+    Play(database::episodes::Key),
+    // PlayCallback(play::WebToDecoderStream),
+    Download((String,String)),
     Back,
     Pauze,
     Resume,
     Podcasts(page::podcasts::Message),
+    AddPodcast(String), //url
     // Episodes(page::episodes::Message),
 }
 
-pub struct PlayBack {
-    title: String,
-    paused: bool,
-    pos: f32,
-    length: f32,
-    playpauze: button::State,
-}
 
 pub struct App {
     current: Page,
     podcasts: page::Podcasts,
     episodes: page::Episodes,
-    playing: Option<PlayBack>,
+    player: PlayBack,
     back_button: button::State, //Should only be needed on desktop platforms
     pod_db: database::Podcasts,
-    db: sled::Db,
+    episode_db: database::Episodes,
 }
 
 impl Application for App {
@@ -44,21 +41,21 @@ impl Application for App {
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         let db = database::open().unwrap();
         let pod_db = database::Podcasts::open(&db).unwrap();
+        let episode_db = database::Episodes::open(&db).unwrap();
         (App {
-            podcasts: page::Podcasts::new(pod_db.clone()),
-            episodes: page::Episodes::new(), 
+            podcasts: page::Podcasts::from_db(pod_db.clone()),
+            episodes: page::Episodes::from_db(&episode_db), 
             current: Page::Podcasts,
-            playing: None, 
+            player: PlayBack::from_db(&episode_db), 
             back_button: button::State::new(),
             pod_db,
-            db, 
+            episode_db,
         }, Command::none())
     }
     fn title(&self) -> String {
         String::from("Podcasts")
     }
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
-        // dbg!(&message);
         match message {
             Message::Back => {
                 self.current.back();
@@ -71,10 +68,26 @@ impl Application for App {
                 Command::none()
             }
             Message::PlayProgress(p) => {
-                self.playing.as_mut().unwrap().pos = p;
+                // self.player.as_mut().unwrap().pos = p;
                 Command::none()
             }
-            Message::Play(s) => Command::none(),
+            Message::AddPodcast(url) => {
+                let pod_db = self.pod_db.clone();
+                let ep_db = self.episode_db.clone();
+                Command::perform(
+                    feed::add_podcast(pod_db, ep_db, url), 
+                    |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
+            }
+            Message::Play(key) => {
+                self.player.play(key);
+                Command::none()
+            }
+            // Message::PlayCallback(stream) => {
+            //     Command::perform(
+            //         play::continue_streaming(stream),
+            //         Message::
+            // }
+            Message::Download(key) => Command::none(),
             Message::Pauze => Command::none(),
             Message::Resume => Command::none(),
             Message::Podcasts(m) => self.podcasts.update(m),
@@ -90,9 +103,7 @@ impl Application for App {
         };
         let column = Column::new();
         let column = column.push(content);
-        let column = if let Some(playback) = &mut self.playing {
-            column.push(page::draw_play_status(playback))
-        } else {column};
+        let column = column.push(self.player.view());
         #[cfg(feature = "desktop")]
         let column = if self.current != Page::Podcasts {
             column.push(page::draw_back_button(&mut self.back_button))

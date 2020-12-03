@@ -1,10 +1,6 @@
 use std::collections::HashSet;
 
-use crate::database;
-use eyre::{eyre, Result, WrapErr};
-use regex::Regex;
-use tokio::sync::Mutex;
-use std::sync::Arc;
+use eyre::Result;
 
 mod apikey;
 pub use apikey::{APIKEY, APISECRET};

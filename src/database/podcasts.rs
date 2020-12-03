@@ -41,7 +41,14 @@ impl Podcasts {
             db: db.clone(),
         })
     }
-    pub fn add_to_episodelist(&mut self, id: LocalId, list: EpisodeList) 
+    pub fn add_feed(&mut self, title: &str, url: &str, episodes: EpisodeList)
+    -> eyre::Result<LocalId> {
+        let id = self.add_to_podcastlist(title, url)?;
+        self.add_to_episodelist(id, episodes)?;
+        Ok(id)
+    }
+
+    fn add_to_episodelist(&mut self, id: LocalId, list: EpisodeList) 
     -> eyre::Result<()> {
 
         self.tree.update_and_fetch(id.to_be_bytes(), move |old| {
@@ -57,7 +64,7 @@ impl Podcasts {
         }).wrap_err("could not update subscribed podcasts in database")?;
         Ok(())
     }
-    pub fn add_to_podcastlist(&mut self, title: &str, url: &str)
+    fn add_to_podcastlist(&mut self, title: &str, url: &str)
         -> eyre::Result<LocalId> {
         
         let local_id = self.db.generate_id()?;
