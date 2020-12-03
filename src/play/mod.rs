@@ -8,7 +8,8 @@ use crate::Message;
 use crate::database;
 
 mod stream;
-use stream::ReadableReciever;
+pub use stream::ReadableReciever;
+pub mod subscribe;
 
 /* design:
  * implement a readable storage that grows via appending trough an 
@@ -49,6 +50,7 @@ pub async fn continue_streaming(stream: WebToDecoderStream) -> eyre::Result<()> 
     Ok(())
 }
 
+#[derive(Default)]
 pub struct Status {
     pub title: String,
     pub paused: bool,
@@ -56,11 +58,14 @@ pub struct Status {
     pub length: f32,
 }
 
+use std::sync::{Arc, Mutex};
 pub struct PlayBack {
     pub status: Option<Status>,
     pub playpauze: button::State,
-    sink: rodio::Sink,
+    pub sink: rodio::Sink,
+    output_stream: rodio::OutputStream,
     db: database::Episodes,
+    pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
 }
 
 impl PlayBack {
@@ -71,7 +76,9 @@ impl PlayBack {
             status: None,
             playpauze: button::State::new(),
             sink,
+            output_stream: stream,
             db: db.clone(),
+            rx: None,
         }
     }
 }
@@ -96,7 +103,7 @@ impl PlayBack {
             (Text::new("Resume"), Message::Resume)
         };
 
-        let progress_bar = iced::ProgressBar::new(0.0..=status.length, status.pos);
+        let progress_bar = iced::ProgressBar::new(0.0..=100.0, status.pos);
         let controls = Row::new()
             .push(Space::with_width(Length::FillPortion(2)))
             .push(Button::new(&mut self.playpauze, button_text)
@@ -107,70 +114,76 @@ impl PlayBack {
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom};
+
 #[test] // should cause sound output unless the dutch radio stream is down
 #[ignore] // run with cargo test mp3 -- --ignored
-fn stream_mp3() {
-    use tokio::runtime::Runtime;
-    const URL: &str = "http://icecast.omroep.nl/radio2-bb-mp3";
+    fn stream_mp3() {
+        use tokio::runtime::Runtime;
+        const URL: &str = "http://icecast.omroep.nl/radio2-bb-mp3";
 
-    // Create the runtime
-    Runtime::new()
-        .unwrap()
-        .block_on(async {
-            let (source, passer) = start_streaming(URL).await.unwrap();
-            let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-            let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-            sink.append(source);
-            continue_streaming(passer).await.unwrap();
-            drop(stream);
+        // Create the runtime
+        Runtime::new()
+            .unwrap()
+            .block_on(async {
+                let (source, passer) = start_streaming(URL).await.unwrap();
+                let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+                sink.append(source);
+                continue_streaming(passer).await.unwrap();
+                drop(stream);
+            });
+
+    }
+
+    #[test]
+    fn test_readable_reciever_seek_read_exact() {
+        let (tx, rx) = mpsc::channel();
+        let mut readable_rx = ReadableReciever::new(rx);
+        const T1: &str = "Hello world!";
+        const T2: &str = " are you getting this";
+
+        let t1 = Bytes::from(T1);
+        let t2 = Bytes::from(T2);
+        tx.send(t1).unwrap();
+
+        let mut buffer = vec![0;T1.len()];
+        readable_rx.read_exact(&mut buffer).unwrap();
+        assert_eq!(T1.as_bytes(), buffer);
+
+        tx.send(t2).unwrap();
+        readable_rx.seek(SeekFrom::Start(0)).unwrap();
+        let mut buffer = vec![0;T1.len()+T2.len()];
+        readable_rx.read_exact(&mut buffer).unwrap();
+        assert_eq!([T1,T2].concat().as_bytes(), buffer);
+    }
+
+    #[test]
+    fn test_readable_reciever_seek_read_string_eof() {
+        use std::thread;
+
+        let (tx, rx) = mpsc::channel();
+        let mut readable_rx = ReadableReciever::new(rx);
+        const T1: &str = "Hello world!";
+        const T2: &str = " are you getting this";
+
+        let t1 = Bytes::from(T1);
+        tx.send(t1).unwrap();
+
+        let child = thread::spawn(move || {
+            let mut buffer = String::new();
+            readable_rx.read_to_string(&mut buffer).unwrap();
+            assert_eq!([T1,T2].concat(), buffer);
         });
 
-}
+        let t2 = Bytes::from(T2);
+        tx.send(t2).unwrap();
 
-#[test]
-fn test_readable_reciever_seek_read_exact() {
-    let (tx, rx) = mpsc::channel();
-    let mut readable_rx = ReadableReciever::new(rx);
-    const T1: &str = "Hello world!";
-    const T2: &str = " are you getting this";
-
-    let t1 = Bytes::from(T1);
-    let t2 = Bytes::from(T2);
-    tx.send(t1).unwrap();
-
-    let mut buffer = vec![0;T1.len()];
-    readable_rx.read_exact(&mut buffer).unwrap();
-    assert_eq!(T1.as_bytes(), buffer);
-
-    tx.send(t2).unwrap();
-    readable_rx.seek(SeekFrom::Start(0)).unwrap();
-    let mut buffer = vec![0;T1.len()+T2.len()];
-    readable_rx.read_exact(&mut buffer).unwrap();
-    assert_eq!([T1,T2].concat().as_bytes(), buffer);
-}
-
-#[test]
-fn test_readable_reciever_seek_read_string_eof() {
-    use std::thread;
-
-    let (tx, rx) = mpsc::channel();
-    let mut readable_rx = ReadableReciever::new(rx);
-    const T1: &str = "Hello world!";
-    const T2: &str = " are you getting this";
-
-    let t1 = Bytes::from(T1);
-    tx.send(t1).unwrap();
-
-    let child = thread::spawn(move || {
-        let mut buffer = String::new();
-        readable_rx.read_to_string(&mut buffer).unwrap();
-        assert_eq!([T1,T2].concat(), buffer);
-    });
-
-    let t2 = Bytes::from(T2);
-    tx.send(t2).unwrap();
-
-    drop(tx); // indicates the end (EOF)
-    // only now the child thread can read to end of file
-    child.join().unwrap();
+        drop(tx); // indicates the end (EOF)
+        // only now the child thread can read to end of file
+        child.join().unwrap();
+    }
 }

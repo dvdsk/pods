@@ -5,7 +5,7 @@ mod play;
 use page::Page;
 use play::PlayBack;
 
-use iced::{button, executor, Application, Command, Element, Column, Settings};
+use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -19,10 +19,11 @@ pub enum Message {
     Resume,
     Podcasts(page::podcasts::Message),
     AddPodcast(String), //url
+    StreamProgress(play::subscribe::Progress),
     // Episodes(page::episodes::Message),
 }
 
-
+use std::sync::{mpsc, Arc, Mutex};
 pub struct App {
     current: Page,
     podcasts: page::Podcasts,
@@ -67,6 +68,27 @@ impl Application for App {
                 self.current = Page::Episodes;
                 Command::none()
             }
+            Message::StreamProgress(p) => {
+                use play::subscribe::Progress;
+                match p {
+                    Progress::Errored => {dbg!("errored stream"); ()}
+                    Progress::Started(rx) => self.player.rx = Some(rx),
+                    Progress::Finished => self.player.status = None,
+                    Progress::Advanced(p) => {
+                        self.player.status.as_mut().unwrap().pos = p;
+                        if self.player.sink.empty() && p > 10f32 {
+                            let rx = self.player.rx.take().unwrap();
+                            let rx = Arc::try_unwrap(rx).unwrap();
+                            let rx = rx.into_inner().unwrap();
+                            let rrx = play::ReadableReciever::new(rx);
+                            let source = rodio::Decoder::new_mp3(rrx).unwrap();
+                            self.player.sink.append(source);
+                            dbg!("**starting playback**");
+                        }
+                    }
+                }
+                Command::none()
+            }
             Message::PlayProgress(p) => {
                 // self.player.as_mut().unwrap().pos = p;
                 Command::none()
@@ -79,7 +101,8 @@ impl Application for App {
                     |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
             }
             Message::Play(key) => {
-                self.player.play(key);
+                dbg!();
+                self.player.status = Some(play::Status::default());
                 Command::none()
             }
             // Message::PlayCallback(stream) => {
@@ -94,6 +117,15 @@ impl Application for App {
             // Message::Episodes(m) => self.episodes.update(m),
         }
     }
+    fn subscription(&self) -> Subscription<Self::Message> {
+        let url = String::from("https://file-examples-com.github.io/uploads/2017/11/file_example_MP3_5MG.mp3");
+        if let Some(s) = &self.player.status {
+            play::subscribe::play(url).map(Message::StreamProgress)
+        } else {
+            Subscription::none()
+        }
+    }
+
     fn view(&mut self) -> Element<Self::Message> {
         dbg!("view");
         dbg!(&self.current);
