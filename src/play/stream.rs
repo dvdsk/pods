@@ -25,13 +25,21 @@ impl Read for ReadableReciever {
         if needed <= unread_buffer {
             // fill buf from buffer
             buf.clone_from_slice(&self.buffer[self.offset..self.offset+needed]);
+            self.offset += needed;
             return Ok(needed);
         }
 
         // get extra bytes, and put them in the buffer
         // if no bytes are gotten this or the next call to read
         // will return 0 indicating end of file
-        let bytes = self.rx.recv().unwrap_or(bytes::Bytes::new());
+        let res = self.rx.recv();
+        if res.is_err() {
+            buf[..unread_buffer].clone_from_slice(&self.buffer[self.offset..self.offset+unread_buffer]);
+            self.offset += unread_buffer;
+            return Ok(unread_buffer);
+        }
+
+        let bytes = res.unwrap();
         self.buffer.extend_from_slice(&bytes);
         unread_buffer += bytes.len();
         
