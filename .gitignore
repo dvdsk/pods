@@ -1,2 +1,4 @@
 /target
 src/feed/apikey.rs
+deploay.sh
+deploy.sh
