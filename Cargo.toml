@@ -18,7 +18,7 @@ iced = { git= "https://github.com/dskleingeld/iced", features = ["tokio_old", "g
 iced_futures = { git="https://github.com/dskleingeld/iced", features = ["tokio_old"] }
 sled = "0.34"
 rss = "1"
-reqwest = { version = "0.10", features = ["rustls-tls"] }
+reqwest = { version = "0.10", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "0.2", features = ["full"] }
 bytes = "0.5" # keep at same minor version as reqwest
 eyre = "0.6"
