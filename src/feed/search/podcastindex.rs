@@ -33,7 +33,6 @@ impl Search {
                     .as_str().to_owned().replace(r#"\/"#, r#"/"#),
             });
         }
-        dbg!(&results);
         Ok(results)
     }
 

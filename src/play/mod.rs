@@ -51,16 +51,17 @@ pub async fn continue_streaming(stream: WebToDecoderStream) -> eyre::Result<()> 
 }
 
 #[derive(Default)]
-pub struct Status {
+pub struct Track {
     pub title: String,
     pub paused: bool,
     pub pos: f32,
     pub length: f32,
+    pub url: String,
 }
 
 use std::sync::{Arc, Mutex};
-pub struct PlayBack {
-    pub status: Option<Status>,
+pub struct Player {
+    pub current: Option<Track>,
     pub playpauze: button::State,
     pub sink: rodio::Sink,
     output_stream: rodio::OutputStream,
@@ -68,12 +69,12 @@ pub struct PlayBack {
     pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
 }
 
-impl PlayBack {
+impl Player {
     pub fn from_db(db: &database::Episodes) -> Self {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
         Self {
-            status: None,
+            current: None,
             playpauze: button::State::new(),
             sink,
             output_stream: stream,
@@ -83,19 +84,23 @@ impl PlayBack {
     }
 }
 
-impl PlayBack {
-    pub async fn play(&self, key: database::episodes::Key) {//-> Command<PlayProgress> WebToDecoderStream  {
+impl Player {
+    pub fn play(&mut self, key: database::episodes::Key) {
         let meta = self.db.get(key).unwrap();
         let url = meta.stream_url;
-        let (source, passer) = start_streaming(&url).await.unwrap();
-        self.sink.append(source);
-        // Message::P passer
+        self.current = Some(Track {
+            title: String::default(),
+            paused: false,
+            pos: 0.0,
+            length: 0.0,
+            url,
+        })
     }
 
     pub fn view(&mut self) -> Column<Message> {
         let column = Column::new();
-        if self.status.is_none() {return column;}
-        let status = self.status.as_ref().unwrap();
+        if self.current.is_none() {return column;}
+        let status = self.current.as_ref().unwrap();
 
         let (button_text, button_action) = if status.paused {
             (Text::new("Pause"), Message::Pauze)
@@ -118,26 +123,6 @@ impl PlayBack {
 mod test {
     use super::*;
     use std::io::{Read, Seek, SeekFrom};
-
-#[test] // should cause sound output unless the dutch radio stream is down
-#[ignore] // run with cargo test mp3 -- --ignored
-    fn stream_mp3() {
-        use tokio::runtime::Runtime;
-        const URL: &str = "http://icecast.omroep.nl/radio2-bb-mp3";
-
-        // Create the runtime
-        Runtime::new()
-            .unwrap()
-            .block_on(async {
-                let (source, passer) = start_streaming(URL).await.unwrap();
-                let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-                let sink = rodio::Sink::try_new(&stream_handle).unwrap();
-                sink.append(source);
-                continue_streaming(passer).await.unwrap();
-                drop(stream);
-            });
-
-    }
 
     #[test]
     fn test_readable_reciever_seek_read_exact() {

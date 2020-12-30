@@ -3,7 +3,7 @@ mod database;
 mod feed;
 mod play;
 use page::Page;
-use play::PlayBack;
+use play::Player;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
 
@@ -28,7 +28,7 @@ pub struct App {
     current: Page,
     podcasts: page::Podcasts,
     episodes: page::Episodes,
-    player: PlayBack,
+    player: Player,
     back_button: button::State, //Should only be needed on desktop platforms
     pod_db: database::Podcasts,
     episode_db: database::Episodes,
@@ -47,7 +47,7 @@ impl Application for App {
             podcasts: page::Podcasts::from_db(pod_db.clone()),
             episodes: page::Episodes::from_db(&episode_db), 
             current: Page::Podcasts,
-            player: PlayBack::from_db(&episode_db), 
+            player: Player::from_db(&episode_db), 
             back_button: button::State::new(),
             pod_db,
             episode_db,
@@ -73,9 +73,9 @@ impl Application for App {
                 match p {
                     Progress::Errored => {dbg!("errored stream"); ()}
                     Progress::Started(rx) => self.player.rx = Some(rx),
-                    Progress::Finished => self.player.status = None,
+                    Progress::Finished => self.player.current = None,
                     Progress::Advanced(p) => {
-                        self.player.status.as_mut().unwrap().pos = p;
+                        self.player.current.as_mut().unwrap().pos = p;
                         if self.player.sink.empty() && p > 10f32 {
                             let rx = self.player.rx.take().unwrap();
                             let rx = Arc::try_unwrap(rx).unwrap();
@@ -83,7 +83,6 @@ impl Application for App {
                             let rrx = play::ReadableReciever::new(rx);
                             let source = rodio::Decoder::new_mp3(rrx).unwrap();
                             self.player.sink.append(source);
-                            dbg!("**starting playback**");
                         }
                     }
                 }
@@ -101,8 +100,7 @@ impl Application for App {
                     |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
             }
             Message::Play(key) => {
-                dbg!();
-                self.player.status = Some(play::Status::default());
+                self.player.play(key);
                 Command::none()
             }
             // Message::PlayCallback(stream) => {
@@ -118,17 +116,13 @@ impl Application for App {
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
-        let url = String::from("https://file-examples-com.github.io/uploads/2017/11/file_example_MP3_5MG.mp3");
-        if let Some(s) = &self.player.status {
-            play::subscribe::play(url).map(Message::StreamProgress)
+        if let Some(s) = &self.player.current {
+            play::subscribe::play(s.url.to_owned()).map(Message::StreamProgress)
         } else {
             Subscription::none()
         }
     }
-
     fn view(&mut self) -> Element<Self::Message> {
-        dbg!("view");
-        dbg!(&self.current);
         let content = match self.current {
             Page::Podcasts => self.podcasts.view(), // TODO load from a cache
             Page::Episodes => self.episodes.view(),
@@ -146,6 +140,7 @@ impl Application for App {
 }
 
 pub fn main() -> iced::Result {
+    log4rs::init_file("log4rs.yml", Default::default()).unwrap();
     let settings = build_settings();
     App::run(settings)
 }

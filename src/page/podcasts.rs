@@ -123,7 +123,6 @@ impl List {
         //TODO add feedres_buttons
         self.feedres_info = results;
         let needed_buttons = self.feedres_info.len().saturating_sub(self.feedres_buttons.len());
-        dbg!(&needed_buttons);
         for _ in 0..needed_buttons {
             self.feedres_buttons.push(button::State::new());
         }

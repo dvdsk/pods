@@ -1,0 +1,24 @@
+# Scan this file for changes every 30 seconds
+refresh_rate: 30 seconds
+
+appenders:
+  # An appender named "stdout" that writes to stdout
+  stdout:
+    kind: console
+    encoder:
+      pattern: "{date(%H:%M:%S)}{line}{level}: {message}{n}"
+
+# Set the default logging level to "warn" and attach the "stdout" appender to the root
+root:
+  level: debug
+  appenders:
+    - stdout
+
+loggers:
+  # Raise the maximum log level for events sent to the "app::backend::db" logger to "info"
+  sled:
+    level: info
+  hyper:
+    level: info
+  reqwest:
+    level: info

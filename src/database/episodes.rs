@@ -56,6 +56,7 @@ impl Episodes {
         })
     }
     pub fn add_feed(&mut self, info: rss::Channel) {
+        log::info!("adding feed: {}", info.title());
         let podcast_title = &info.title();
         for item in info.items() {
             match Episode::try_from(item) {
@@ -70,6 +71,7 @@ impl Episodes {
     }
 
     pub fn get(&self, key: Key) -> sled::Result<Episode> {
+        log::debug!("key: {:?}", key);
         let bytes = self.tree.get(key)?
             .expect("item should be in database already");
         Ok(bincode::deserialize(&bytes).unwrap())

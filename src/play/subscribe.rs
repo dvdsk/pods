@@ -2,8 +2,7 @@ use iced_futures::futures;
 use std::sync::{Arc, Mutex, mpsc};
 
 pub fn play(url: String) -> iced::Subscription<Progress> {
-    let sub = iced::Subscription::from_recipe(Stream {url});
-    sub
+    iced::Subscription::from_recipe(Stream {url})
 }
 
 #[derive(Debug, Clone)]
@@ -54,7 +53,6 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
             }
             let res = response.unwrap();
             let total = res.content_length();
-            dbg!(&total);
             let rx = Arc::new(Mutex::new(rx));
             let state = DownloadData {
                 res, tx, total, downloaded: 0,
