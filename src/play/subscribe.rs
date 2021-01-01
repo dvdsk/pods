@@ -10,7 +10,8 @@ pub enum Progress {
     Started(Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>),
     Advanced(f32),
     Finished,
-    Errored,
+    StreamError(String),
+    ToShortError,
 }
 
 pub struct Stream {
@@ -46,10 +47,11 @@ where
 async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
     match current {
         State::Start(url) => {
+            log::debug!("streaming url: {}", &url);
             let (tx, rx) = mpsc::channel();
             let response = reqwest::get(&url).await;
-            if response.is_err() {
-                return Some((Progress::Errored, State::Finished));
+            if let Err(e) = response {
+                return Some((Progress::StreamError(e.to_string()), State::Finished));
             }
             let res = response.unwrap();
             let total = res.content_length();
@@ -60,8 +62,8 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
             Some((Progress::Started(rx), State::Buffering(state)))}
         State::Buffering(mut state) => {
             match state.res.chunk().await {
-                Err(_) => Some((Progress::Errored, State::Finished)),
-                Ok(None) => Some((Progress::Finished, State::Finished)),
+                Err(e) => Some((Progress::StreamError(e.to_string()), State::Finished)),
+                Ok(None) => Some((Progress::ToShortError, State::Finished)),
                 Ok(Some(chunk)) => {
                     state.downloaded += chunk.len() as u64;
                     state.tx.send(chunk).unwrap();
@@ -79,7 +81,7 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
         }
         State::Streaming(mut state) => {
             match state.res.chunk().await {
-                Err(_) => Some((Progress::Errored, State::Finished)),
+                Err(e) => Some((Progress::StreamError(e.to_string()), State::Finished)),
                 Ok(None) => Some((Progress::Finished, State::Finished)),
                 Ok(Some(chunk)) => {
                     dbg!(&state.downloaded);
@@ -99,6 +101,7 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
     }
 }
 
+#[derive(Debug)]
 struct DownloadData {
     res: reqwest::Response,
     tx: mpsc::Sender<bytes::Bytes>,
@@ -106,6 +109,7 @@ struct DownloadData {
     downloaded: u64,
 }
 
+#[derive(Debug)]
 pub enum State {
     Start(String),
     Buffering(DownloadData),

@@ -45,6 +45,6 @@ pub async fn add_podcast(mut pod_db: database::Podcasts, mut episode_db: databas
     let title = info.title().to_owned();
     let episodes = get_episode_info(info.items()).unwrap();
     let id = pod_db.add_feed(&title, &url, episodes).unwrap();
-    episode_db.add_feed(info);
+    episode_db.add_feed(id, info);
     (title, id)
 }

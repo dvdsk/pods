@@ -6,7 +6,7 @@ appenders:
   stdout:
     kind: console
     encoder:
-      pattern: "{date(%H:%M:%S)}{line}{level}: {message}{n}"
+      pattern: "{date(%H:%M:%S)} {module} {line} {level}: {message}{n}"
 
 # Set the default logging level to "warn" and attach the "stdout" appender to the root
 root:
@@ -22,3 +22,7 @@ loggers:
     level: info
   reqwest:
     level: info
+  h2:
+    level: warn
+  rustls:
+    level: warn

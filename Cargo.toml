@@ -11,7 +11,8 @@ desktop = []
 pinephone = ["iced/glow_OpenGL2ES"]
 
 [dependencies]
-rodio = "0.13"
+# rodio = "0.13"
+rodio = { git = "https://github.com/RustAudio/rodio" }
 # using glow causes the app to use opengl instead of vulkan
 # seems to solve "Error: GraphicsAdapterNotFound"
 iced = { git= "https://github.com/dskleingeld/iced", features = ["tokio_old", "glow"] }

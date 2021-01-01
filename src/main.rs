@@ -13,7 +13,7 @@ pub enum Message {
     PlayProgress(f32),
     Play(database::episodes::Key),
     // PlayCallback(play::WebToDecoderStream),
-    Download((String,String)),
+    Download(database::episodes::Key),
     Back,
     Pauze,
     Resume,
@@ -64,14 +64,15 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let list = self.pod_db.get_episodelist(podcast_id).unwrap();
-                self.episodes.populate(list);
+                self.episodes.populate(podcast_id, list);
                 self.current = Page::Episodes;
                 Command::none()
             }
             Message::StreamProgress(p) => {
                 use play::subscribe::Progress;
                 match p {
-                    Progress::Errored => {dbg!("errored stream"); ()}
+                    Progress::ToShortError => log::warn!("stream was to short to play audio"),
+                    Progress::StreamError(e) => log::error!("errored stream {}",e),
                     Progress::Started(rx) => self.player.rx = Some(rx),
                     Progress::Finished => self.player.current = None,
                     Progress::Advanced(p) => {
@@ -117,6 +118,7 @@ impl Application for App {
     }
     fn subscription(&self) -> Subscription<Self::Message> {
         if let Some(s) = &self.player.current {
+            log::info!("playing");
             play::subscribe::play(s.url.to_owned()).map(Message::StreamProgress)
         } else {
             Subscription::none()
