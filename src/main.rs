@@ -75,16 +75,11 @@ impl Application for App {
                     Progress::ToShortError => log::warn!("stream was to short to play audio"),
                     Progress::StreamError(e) => log::error!("errored stream {}",e),
                     Progress::Started(rx) => self.player.rx = Some(rx),
-                    Progress::Finished => self.player.current = play::Track::None,
+                    Progress::Finished => (),
                     Progress::Advanced(p) => {
                         self.player.current.set_streampos(p);
-                        if self.player.sink.empty() && p > 10f32 {
-                            let rx = self.player.rx.take().unwrap();
-                            let rx = Arc::try_unwrap(rx).unwrap();
-                            let rx = rx.into_inner().unwrap();
-                            let rrx = play::ReadableReciever::new(rx);
-                            let source = rodio::Decoder::new_mp3(rrx).unwrap();
-                            self.player.sink.append_seekable(source);
+                        if self.player.stream_ready(p) {
+                            self.player.start_play();
                         }
                     }
                 }
@@ -102,7 +97,7 @@ impl Application for App {
                     |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
             }
             Message::Play(key) => {
-                self.player.play_stream(key);
+                self.player.add_stream(key);
                 Command::none()
             }
             Message::Skip(f) => {
@@ -123,7 +118,6 @@ impl Application for App {
     }
     fn subscription(&self) -> Subscription<Self::Message> {
         if let play::Track::Stream(_,_,url) = &self.player.current {
-            log::info!("playing");
             play::subscribe::play(url.to_owned()).map(Message::StreamProgress)
         } else {
             Subscription::none()

@@ -71,8 +71,7 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
                         .map(|t| 100.0 * state.downloaded as f32/ t as f32)
                         .unwrap_or(0.0);  
                     let progress = Progress::Advanced(percentage);
-                    dbg!(&state.downloaded);
-                    Some(if state.downloaded > 8_192 {
+                    Some(if state.downloaded > 4096 {
                         (progress, State::Streaming(state))
                     } else {
                         (progress, State::Buffering(state))

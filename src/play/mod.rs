@@ -1,4 +1,5 @@
 // use futures::Stream;
+use std::time::Instant;
 use std::sync::mpsc;
 use bytes::Bytes;
 use rodio::Decoder;
@@ -72,8 +73,7 @@ impl Track {
 pub struct TrackInfo {
     pub title: String,
     pub paused: bool,
-    pub pos: f32,
-    pub length: f32,
+    pub duration: f32,
 }
 
 #[derive(Default)]
@@ -92,6 +92,9 @@ pub struct Player {
     output_stream: rodio::OutputStream,
     db: database::Episodes,
     pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
+
+    last_started: Option<Instant>,
+    offset: f32,
 }
 
 impl Player {
@@ -99,43 +102,76 @@ impl Player {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
         Self {
-            controls: Controls::default(),
+            controls: Controls { skip_dur: 5f32, .. Controls::default()},
             current: Track::None,
             sink,
             output_stream: stream,
             db: db.clone(),
             rx: None,
+            last_started: None,
+            offset: 0f32,
         }
     }
 
-    pub fn play_stream(&mut self, key: database::episodes::Key) {
+    pub fn start_play(&mut self) {
+        let rx = self.rx.take().unwrap();
+        let rx = Arc::try_unwrap(rx).unwrap();
+        let rx = rx.into_inner().unwrap();
+        let rrx = ReadableReciever::new(rx);
+        let source = rodio::Decoder::new_mp3(rrx).unwrap();
+        self.sink.append_seekable(source);
+        self.last_started = Some(std::time::Instant::now());
+        self.offset = 0f32;
+    }
+
+    fn pos(&self) -> f32 {
+        let elapsed = self.last_started.map(|t| t.elapsed().as_secs_f32() ).unwrap_or(0f32);
+        self.offset+elapsed
+    }
+
+    pub fn add_stream(&mut self, key: database::episodes::Key) {
         let meta = self.db.get(key).unwrap();
-        let url = meta.stream_url;
         self.current = Track::Stream(
             TrackInfo {
                 title: String::default(),
                 paused: false,
-                pos: 0.0,
-                length: 0.0,
-            }, 0f32, url);
+                duration: meta.duration,
+            }, 
+            0f32, 
+            meta.stream_url);
+    }
+
+    pub fn stream_ready(&self, p: f32) -> bool {
+        self.sink.empty() && p > 10f32 
     }
 
     pub fn skip(&mut self, dur: f32) {
-        self.sink.set_pos(dur);
+        dbg!(dur, self.pos());
+        let pos = self.pos();
+        let target = dbg!(f32::max(self.pos()+dur, 0f32));
+        let target = match &self.current {
+            Track::None => return,
+            Track::Stream(_, dl_pos, _) => dbg!(f32::min(target, dbg!(*dl_pos))),
+            Track::File(info, _) => f32::min(target, info.duration),
+        };
+        self.offset += (target-pos);
+        self.sink.set_pos(target);
     }
 
     pub fn view(&mut self) -> Column<Message> {
         let mut column = Column::new();
         match &self.current {
             Track::None => column,
-            Track::Stream(info, pos, url) => {
-                let stream_progress_bar = iced::ProgressBar::new(0.0..=100.0, *pos);
+            Track::Stream(info, download, _) => {
+                let download_progress_bar = iced::ProgressBar::new(0.0..=100.0, *download);
+                let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
                 let controls = Self::view_controls(&mut self.controls, info);
-                column.push(stream_progress_bar).push(controls)
+                column.push(download_progress_bar).push(playback_bar).push(controls)
             }
-            Track::File(info, path) => {
+            Track::File(info, _) => {
+                let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
                 let controls = Self::view_controls(&mut self.controls, info);
-                column.push(controls)
+                column.push(playback_bar).push(controls)
             }
         }
     }

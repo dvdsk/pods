@@ -6,6 +6,8 @@ use eyre::eyre;
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Episode {
     pub stream_url: String,
+    /// the duration of the episode in seconds
+    pub duration: f32,
     // description:
     // author:
     // pub_date:
@@ -21,24 +23,43 @@ fn url_from_extensions(item: &rss::Item) -> Option<String> {
     let content = media.get("content")?;
     let extention = content.first()?;
     if extention.name() != "media:content" { return None }
-    
     extention.attrs().get("url").map(|u| u.clone())
+}
+
+fn length_from_extensions(item: &rss::Item) -> Option<f32> {
+    let media = item.extensions().get("media")?;
+    let content = media.get("content")?;
+    let extention = content.first()?;
+    dbg!(extention.attrs()); 
+    if extention.name() != "media:content" { return None }
+    // TODO FIXME find out what the key could be here
+    extention.attrs().get("url").map(|u| u.parse().ok()).flatten()
 }
 
 impl TryFrom<&rss::Item> for Episode {
     type Error = eyre::Report;
 
     fn try_from(item: &rss::Item) -> Result<Self, Self::Error> {
-        dbg!(&item);
-        let stream_url = if let Some(encl) = item.enclosure() {
-            encl.url().to_owned()
-        } else {
-            url_from_extensions(item)
-                .ok_or(eyre!("no link for feed item: {:?}", item))?
-        };
+        //try to get the url and duration from the description of the media object
+        let stream_url = item.enclosure().map(|encl| encl.url().to_owned());
+        let duration = item.enclosure().map(|encl| encl.length().parse().ok()).flatten();
+
+        //try to get the url and duration possible extensions
+        let stream_url = stream_url.or(url_from_extensions(item));
+        let duration = duration.or(length_from_extensions(item));
+
+        //try to get duration from any included itunes extensions
+        let duration = duration.or(item.itunes_ext()
+            .map(|ext| ext.duration()
+                .map(|d| d.parse().ok()).flatten()
+            ).flatten());
+
+        let stream_url = stream_url.ok_or(eyre!("no link for feed item: {:?}", item))?;
+        let duration = duration.ok_or(eyre!("no duration known for item: {:?}", item))?;
 
         Ok(Self {
             stream_url,
+            duration,
         })
     }
 }
