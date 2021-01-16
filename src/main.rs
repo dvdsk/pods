@@ -20,10 +20,11 @@ pub enum Message {
     Podcasts(page::podcasts::Message),
     AddPodcast(String), //url
     StreamProgress(play::subscribe::Progress),
+    Skip(f32),
     // Episodes(page::episodes::Message),
 }
 
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::Arc;
 pub struct App {
     current: Page,
     podcasts: page::Podcasts,
@@ -74,16 +75,16 @@ impl Application for App {
                     Progress::ToShortError => log::warn!("stream was to short to play audio"),
                     Progress::StreamError(e) => log::error!("errored stream {}",e),
                     Progress::Started(rx) => self.player.rx = Some(rx),
-                    Progress::Finished => self.player.current = None,
+                    Progress::Finished => self.player.current = play::Track::None,
                     Progress::Advanced(p) => {
-                        self.player.current.as_mut().unwrap().pos = p;
+                        self.player.current.set_streampos(p);
                         if self.player.sink.empty() && p > 10f32 {
                             let rx = self.player.rx.take().unwrap();
                             let rx = Arc::try_unwrap(rx).unwrap();
                             let rx = rx.into_inner().unwrap();
                             let rrx = play::ReadableReciever::new(rx);
                             let source = rodio::Decoder::new_mp3(rrx).unwrap();
-                            self.player.sink.append(source);
+                            self.player.sink.append_seekable(source);
                         }
                     }
                 }
@@ -101,7 +102,11 @@ impl Application for App {
                     |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
             }
             Message::Play(key) => {
-                self.player.play(key);
+                self.player.play_stream(key);
+                Command::none()
+            }
+            Message::Skip(f) => {
+                self.player.skip(f);
                 Command::none()
             }
             // Message::PlayCallback(stream) => {
@@ -117,9 +122,9 @@ impl Application for App {
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
-        if let Some(s) = &self.player.current {
+        if let play::Track::Stream(_,_,url) = &self.player.current {
             log::info!("playing");
-            play::subscribe::play(s.url.to_owned()).map(Message::StreamProgress)
+            play::subscribe::play(url.to_owned()).map(Message::StreamProgress)
         } else {
             Subscription::none()
         }

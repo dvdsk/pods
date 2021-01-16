@@ -71,7 +71,8 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
                         .map(|t| 100.0 * state.downloaded as f32/ t as f32)
                         .unwrap_or(0.0);  
                     let progress = Progress::Advanced(percentage);
-                    Some(if state.downloaded > 32_000 {
+                    dbg!(&state.downloaded);
+                    Some(if state.downloaded > 8_192 {
                         (progress, State::Streaming(state))
                     } else {
                         (progress, State::Buffering(state))
@@ -84,7 +85,6 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
                 Err(e) => Some((Progress::StreamError(e.to_string()), State::Finished)),
                 Ok(None) => Some((Progress::Finished, State::Finished)),
                 Ok(Some(chunk)) => {
-                    dbg!(&state.downloaded);
                     state.downloaded += chunk.len() as u64;
                     state.tx.send(chunk).unwrap();
                     let percentage = state.total

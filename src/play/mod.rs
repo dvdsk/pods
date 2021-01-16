@@ -50,19 +50,44 @@ pub async fn continue_streaming(stream: WebToDecoderStream) -> eyre::Result<()> 
     Ok(())
 }
 
+type Url = String;
+type StreamPos = f32;
+pub enum Track {
+    Stream(TrackInfo, StreamPos, Url),
+    File(TrackInfo, std::path::PathBuf),
+    None,
+}
+
+impl Track {
+    pub fn set_streampos(&mut self, new_pos: StreamPos) {
+        if let Track::Stream(_, pos, _) = self {
+            *pos = new_pos;
+        } else {
+            panic!("Track variant is not Stream")
+        }
+    }
+}
+
 #[derive(Default)]
-pub struct Track {
+pub struct TrackInfo {
     pub title: String,
     pub paused: bool,
     pub pos: f32,
     pub length: f32,
-    pub url: String,
+}
+
+#[derive(Default)]
+struct Controls {
+    play_pauze: button::State,
+    skip_forward: button::State,
+    skip_backward: button::State,
+    skip_dur: f32,
 }
 
 use std::sync::{Arc, Mutex};
 pub struct Player {
-    pub current: Option<Track>,
-    pub playpauze: button::State,
+    controls: Controls,
+    pub current: Track,
     pub sink: rodio::Sink,
     output_stream: rodio::OutputStream,
     db: database::Episodes,
@@ -74,48 +99,66 @@ impl Player {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
         Self {
-            current: None,
-            playpauze: button::State::new(),
+            controls: Controls::default(),
+            current: Track::None,
             sink,
             output_stream: stream,
             db: db.clone(),
             rx: None,
         }
     }
-}
 
-impl Player {
-    pub fn play(&mut self, key: database::episodes::Key) {
+    pub fn play_stream(&mut self, key: database::episodes::Key) {
         let meta = self.db.get(key).unwrap();
         let url = meta.stream_url;
-        self.current = Some(Track {
-            title: String::default(),
-            paused: false,
-            pos: 0.0,
-            length: 0.0,
-            url,
-        })
+        self.current = Track::Stream(
+            TrackInfo {
+                title: String::default(),
+                paused: false,
+                pos: 0.0,
+                length: 0.0,
+            }, 0f32, url);
+    }
+
+    pub fn skip(&mut self, dur: f32) {
+        self.sink.set_pos(dur);
     }
 
     pub fn view(&mut self) -> Column<Message> {
-        let column = Column::new();
-        if self.current.is_none() {return column;}
-        let status = self.current.as_ref().unwrap();
+        let mut column = Column::new();
+        match &self.current {
+            Track::None => column,
+            Track::Stream(info, pos, url) => {
+                let stream_progress_bar = iced::ProgressBar::new(0.0..=100.0, *pos);
+                let controls = Self::view_controls(&mut self.controls, info);
+                column.push(stream_progress_bar).push(controls)
+            }
+            Track::File(info, path) => {
+                let controls = Self::view_controls(&mut self.controls, info);
+                column.push(controls)
+            }
+        }
+    }
 
+    fn view_controls<'a>(controls: &'a mut Controls, status: &'a TrackInfo) -> Row<'a, Message> {
         let (button_text, button_action) = if status.paused {
             (Text::new("Pause"), Message::Pauze)
         } else {
             (Text::new("Resume"), Message::Resume)
         };
 
-        let progress_bar = iced::ProgressBar::new(0.0..=100.0, status.pos);
-        let controls = Row::new()
+        let Controls {play_pauze, skip_forward, skip_backward, skip_dur} = controls;
+        Row::new()
             .push(Space::with_width(Length::FillPortion(2)))
-            .push(Button::new(&mut self.playpauze, button_text)
+            .push(Button::new(play_pauze, button_text)
                 .on_press(button_action)
-                .width(Length::FillPortion(1)));
-        
-        column.push(progress_bar).push(controls)
+                .width(Length::FillPortion(1)))
+            .push(Button::new(skip_forward, Text::new("fwd"))
+                .on_press(Message::Skip(*skip_dur))
+                .width(Length::FillPortion(1)))
+            .push(Button::new(skip_backward, Text::new("bck"))
+                .on_press(Message::Skip(-1f32*(*skip_dur)))
+                .width(Length::FillPortion(1)))
     }
 }
 
