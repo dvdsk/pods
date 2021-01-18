@@ -15,8 +15,7 @@ pub enum Message {
     // PlayCallback(play::WebToDecoderStream),
     Download(database::episodes::Key),
     Back,
-    Pauze,
-    Resume,
+    PlayPause,
     Podcasts(page::podcasts::Message),
     AddPodcast(String), //url
     StreamProgress(play::subscribe::Progress),
@@ -110,8 +109,7 @@ impl Application for App {
             //         Message::
             // }
             Message::Download(key) => Command::none(),
-            Message::Pauze => Command::none(),
-            Message::Resume => Command::none(),
+            Message::PlayPause => self.player.play_pause(),
             Message::Podcasts(m) => self.podcasts.update(m),
             // Message::Episodes(m) => self.episodes.update(m),
         }

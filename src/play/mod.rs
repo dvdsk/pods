@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use bytes::Bytes;
 use rodio::Decoder;
 use eyre::WrapErr;
-use iced::{button, Column, Text, Row, Space, Button, Length};
+use iced::{Command, button, Column, Text, Row, Space, Button, Length};
 use crate::Message;
 use crate::database;
 
@@ -125,7 +125,9 @@ impl Player {
     }
 
     fn pos(&self) -> f32 {
-        let elapsed = self.last_started.map(|t| t.elapsed().as_secs_f32() ).unwrap_or(0f32);
+        let elapsed = self.last_started
+            .map(|t| t.elapsed().as_secs_f32() )
+            .unwrap_or(0f32);
         self.offset+elapsed
     }
 
@@ -148,14 +150,40 @@ impl Player {
     pub fn skip(&mut self, dur: f32) {
         dbg!(dur, self.pos());
         let pos = self.pos();
-        let target = dbg!(f32::max(self.pos()+dur, 0f32));
+        let target = f32::max(pos+dur, 0f32);
         let target = match &self.current {
             Track::None => return,
-            Track::Stream(_, dl_pos, _) => dbg!(f32::min(target, dbg!(*dl_pos))),
+            // can not seek further then what was downloaded
+            // because of varying compression throughout the stream we
+            // keep a safety bound of 10 percent. TODO FIXME make sure 
+            // the visualisation does not show beyond the safety bound
+            Track::Stream(info, dl_pos_percent, _) => {
+                if *dl_pos_percent <= 100. {
+                    let dl_pos_secs = dl_pos_percent*(info.duration)/100.;
+                    let dl_pos_secs = dl_pos_secs * 0.9;
+                    f32::min(target, dl_pos_secs)
+                } else {
+                    target
+                }
+            }
+            // can not seek beyond the length of the audio file
             Track::File(info, _) => f32::min(target, info.duration),
         };
-        self.offset += (target-pos);
+        self.offset += target-pos;
         self.sink.set_pos(target);
+    }
+
+    pub fn play_pause(&mut self) -> Command<crate::Message> {
+        if let Some(elapsed) = self.last_started
+            .take()
+            .map(|t| t.elapsed()) {
+            self.offset += elapsed.as_secs_f32();
+            self.sink.pause();
+        } else {
+            self.last_started = Some(Instant::now());
+            self.sink.play();
+        }
+        Command::none()
     }
 
     pub fn view(&mut self) -> Column<Message> {
@@ -178,9 +206,9 @@ impl Player {
 
     fn view_controls<'a>(controls: &'a mut Controls, status: &'a TrackInfo) -> Row<'a, Message> {
         let (button_text, button_action) = if status.paused {
-            (Text::new("Pause"), Message::Pauze)
+            (Text::new("Pause"), Message::PlayPause)
         } else {
-            (Text::new("Resume"), Message::Resume)
+            (Text::new("Resume"), Message::PlayPause)
         };
 
         let Controls {play_pauze, skip_forward, skip_backward, skip_dur} = controls;
