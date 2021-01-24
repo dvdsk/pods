@@ -7,10 +7,9 @@ use std::path::PathBuf;
 mod subscribe;
 pub use subscribe::Progress;
 
-type Url = String;
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Download {
-    url: Url,
+    url: reqwest::Url,
     path: PathBuf,
 }
 
@@ -23,11 +22,14 @@ impl Downloader {
     pub fn add(&mut self, key: EpisodeKey, db: &mut database::Episodes) -> iced::Command<Message> {
         let episode = db.get(key)
             .expect("item should be in database when we start downloading");
-        let dl = Download {path: episode.temp_file_path(), url: episode.stream_url};
+        let url = reqwest::Url::parse(&episode.stream_url).expect("url should be valid here");
+        let extension = url.path().rsplitn(2, ".").next().expect("there has to be a file extension");
+        let mut path = episode.base_file_path();
+        path.set_extension(&format!("{}.part", extension));
+        let dl = Download {path, url};
         self.downloading.push(dl);
         iced::Command::none()
     }
-    // pub fn subs(&mut self) -> impl Iterator<Item=Subscription<subscribe::Progress>> {
     pub fn subs(&self) -> Vec<Subscription<Message>> {
         const N: usize = 2; //number of downloads to handle simultaneously
 

@@ -7,6 +7,7 @@ mod download;
 use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
+use error_level::ErrorLevel;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
 
@@ -106,6 +107,12 @@ impl Application for App {
                 Command::none()
             }
             Message::DownloadProgress(p) => {
+                use download::Progress::*;
+                match p {
+                    Error(e) => e.log_error(),
+                    Finished => log::info!("finished download"),
+                    _ => (),
+                }
                 Command::none()
             }
             Message::PlayProgress(p) => {

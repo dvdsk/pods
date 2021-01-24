@@ -24,6 +24,7 @@ tokio = { version = "0.2", features = ["full"] }
 bytes = "0.5" # keep at same minor version as reqwest
 eyre = "0.6"
 thiserror = "1"
+error_level = { git = "https://github.com/dskleingeld/error_level" }
 sha-1 = "0.9"
 regex = "1"
 arraydeque = "0.4"

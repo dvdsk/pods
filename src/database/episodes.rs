@@ -17,7 +17,7 @@ pub struct Episode {
 }
 
 impl Episode {
-    fn file_path(&self) -> PathBuf {
+    pub fn base_file_path(&self) -> PathBuf {
         use directories::UserDirs;
         let user_dirs = UserDirs::new()
             .expect("can not download if the user has no home directory");
@@ -27,12 +27,6 @@ impl Episode {
         dl_dir.push(env!("CARGO_BIN_NAME"));
         dl_dir.push(&self.podcast);
         dl_dir.push(&self.title);
-        dl_dir.push("mp3.tmp");
-        dl_dir
-    }
-    pub fn temp_file_path(&self) -> PathBuf {
-        let mut dl_dir = self.file_path();
-        dl_dir.push(".part");
         dl_dir
     }
 }
