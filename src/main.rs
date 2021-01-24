@@ -25,7 +25,6 @@ pub enum Message {
     // Episodes(page::episodes::Message),
 }
 
-use std::sync::Arc;
 pub struct App {
     current: Page,
     podcasts: page::Podcasts,
@@ -80,7 +79,7 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let list = self.pod_db.get_episodelist(podcast_id).unwrap();
-                self.episodes.populate(podcast_id, list);
+                self.episodes.populate(list);
                 self.current = Page::Episodes;
                 Command::none()
             }
@@ -101,6 +100,7 @@ impl Application for App {
                 Command::none()
             }
             Message::PlayProgress(p) => {
+                //TODO FIXME
                 // self.player.as_mut().unwrap().pos = p;
                 Command::none()
             }

@@ -1,9 +1,6 @@
 // use futures::Stream;
 use std::time::Instant;
 use std::sync::mpsc;
-use bytes::Bytes;
-use rodio::Decoder;
-use eyre::WrapErr;
 use iced::{Command, button, Column, Text, Row, Space, Button, Length};
 use crate::Message;
 use crate::database;
@@ -11,45 +8,6 @@ use crate::database;
 mod stream;
 pub use stream::ReadableReciever;
 pub mod subscribe;
-
-/* design:
- * implement a readable storage that grows via appending trough an 
- * mpsc. Then use a separately running function to 'feed' that mpsc
- * from a http stream. This storage then is the basis for a 
- * rodio::decoder::Decoder from which we build a rodio::Source. That
- * is the played using rodio.
- */
-pub struct WebToDecoderStream {
-    res: reqwest::Response,
-    tx: mpsc::Sender<Bytes>,
-}
-
-// TODO support more then mp3 if needed [are podcasts always mp3?]
-async fn start_streaming(url: &str) -> eyre::Result<(Decoder<ReadableReciever>, WebToDecoderStream)> {
-    let (tx, rx) = mpsc::channel();
-    let readable_rx = ReadableReciever::new(rx);
-
-    let mut recieved = 0;
-    let mut res = reqwest::get(url).await?;
-    while recieved < 32_000 {
-        // get some data into readable_rx. Otherwise  creating the 
-        // decoder will fail as it has no header data 
-        if let Some(chunk) = res.chunk().await.unwrap() {
-            recieved += chunk.len();
-            tx.send(chunk).unwrap();
-        }
-    }
-    let decoder = Decoder::new_mp3(readable_rx).unwrap();
-    Ok((decoder, WebToDecoderStream{res, tx}))
-}
-
-pub async fn continue_streaming(stream: WebToDecoderStream) -> eyre::Result<()> {
-    let WebToDecoderStream {mut res, tx} = stream;
-    while let Some(chunk) = res.chunk().await.wrap_err("stream failed")? {
-        tx.send(chunk).unwrap();
-    }
-    Ok(())
-}
 
 type Url = String;
 type StreamPos = f32;
@@ -99,11 +57,8 @@ pub struct Player {
     offset: f32,
 }
 
-use std::io::BufReader;
 impl Player {
     pub fn from_db(db: &database::Episodes) -> Self {
-        let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-
         Self {
             controls: Controls { skip_dur: 5f32, .. Controls::default()},
             current: Track::None,
@@ -198,7 +153,7 @@ impl Player {
     }
 
     pub fn view(&mut self) -> Column<Message> {
-        let mut column = Column::new();
+        let column = Column::new();
         match &self.current {
             Track::None => column,
             Track::Stream(info, download, _) => {

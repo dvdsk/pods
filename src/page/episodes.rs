@@ -1,5 +1,5 @@
 use iced::Length;
-use iced::{button, Button, Element, Text, HorizontalAlignment, Row, Column};
+use iced::{button, Button, Element, Text, HorizontalAlignment, Row};
 use iced::widget::scrollable::{self, Scrollable};
 
 use crate::database::{self, podcasts::EpisodeList};
@@ -36,7 +36,7 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.max(0);
     }
     /// fill the view from a list of episodes
-    pub fn populate(&mut self, podcast_id: u64, episodes: EpisodeList) {
+    pub fn populate(&mut self, episodes: EpisodeList) {
         self.episode_names.clear();
         self.episode_buttons.clear();
         for info in episodes {

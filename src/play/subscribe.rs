@@ -101,7 +101,7 @@ async fn stream_state_machine(current: State) -> Option<(Progress, State)>{
 }
 
 #[derive(Debug)]
-struct DownloadData {
+pub struct DownloadData {
     res: reqwest::Response,
     tx: mpsc::Sender<bytes::Bytes>,
     total: Option<u64>,
