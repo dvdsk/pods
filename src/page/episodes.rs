@@ -32,8 +32,7 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.min(self.episode_buttons.len());
     }
     pub fn up(&mut self) {
-        self.scrolled_down -= 10;
-        self.scrolled_down = self.scrolled_down.max(0);
+        self.scrolled_down = self.scrolled_down.saturating_sub(10);
     }
     /// fill the view from a list of episodes
     pub fn populate(&mut self, episodes: EpisodeList) {

@@ -2,6 +2,9 @@ mod page;
 mod database;
 mod feed;
 mod play;
+mod download;
+
+use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
 
@@ -21,6 +24,7 @@ pub enum Message {
     Podcasts(page::podcasts::Message),
     AddPodcast(String), //url
     StreamProgress(play::subscribe::Progress),
+    DownloadProgress(download::Progress),
     Skip(f32),
     // Episodes(page::episodes::Message),
 }
@@ -29,6 +33,7 @@ pub struct App {
     current: Page,
     podcasts: page::Podcasts,
     episodes: page::Episodes,
+    downloader: Downloader,
     player: Player,
     controls: Controls, //Should only be needed on desktop platforms
     pod_db: database::Podcasts,
@@ -49,6 +54,7 @@ impl Application for App {
             episodes: page::Episodes::from_db(&episode_db), 
             current: Page::Podcasts,
             player: Player::from_db(&episode_db), 
+            downloader: Downloader::default(),
             controls: Controls::default(),
             pod_db,
             episode_db,
@@ -99,6 +105,9 @@ impl Application for App {
                 }
                 Command::none()
             }
+            Message::DownloadProgress(p) => {
+                Command::none()
+            }
             Message::PlayProgress(p) => {
                 //TODO FIXME
                 // self.player.as_mut().unwrap().pos = p;
@@ -124,18 +133,20 @@ impl Application for App {
             //         play::continue_streaming(stream),
             //         Message::
             // }
-            Message::Download(key) => Command::none(),
+            Message::Download(key) => self.downloader.add(key, &mut self.episode_db),
             Message::PlayPause => self.player.play_pause(),
             Message::Podcasts(m) => self.podcasts.update(m),
             // Message::Episodes(m) => self.episodes.update(m),
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
+        let mut subs = Vec::new();
         if let play::Track::Stream(_,_,url) = &self.player.current {
-            play::subscribe::play(url.to_owned()).map(Message::StreamProgress)
-        } else {
-            Subscription::none()
+            let stream = play::subscribe::play(url.to_owned()).map(Message::StreamProgress);
+            subs.push(stream);
         }
+        subs.extend(self.downloader.subs());
+        Subscription::batch(subs)
     }
     fn view(&mut self) -> Element<Self::Message> {
         let content = match self.current {

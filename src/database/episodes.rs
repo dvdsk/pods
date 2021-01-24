@@ -1,4 +1,5 @@
 use std::convert::TryFrom;
+use std::path::PathBuf;
 
 use serde::{Serialize, Deserialize};
 use eyre::eyre;
@@ -8,9 +9,32 @@ pub struct Episode {
     pub stream_url: String,
     /// the duration of the episode in seconds
     pub duration: f32,
+    pub title: String,
+    pub podcast: String,
     // description:
     // author:
     // pub_date:
+}
+
+impl Episode {
+    fn file_path(&self) -> PathBuf {
+        use directories::UserDirs;
+        let user_dirs = UserDirs::new()
+            .expect("can not download if the user has no home directory");
+        let mut dl_dir = user_dirs.download_dir()
+            .expect("need a download folder to be able to download")
+            .to_owned();
+        dl_dir.push(env!("CARGO_BIN_NAME"));
+        dl_dir.push(&self.podcast);
+        dl_dir.push(&self.title);
+        dl_dir.push("mp3.tmp");
+        dl_dir
+    }
+    pub fn temp_file_path(&self) -> PathBuf {
+        let mut dl_dir = self.file_path();
+        dl_dir.push(".part");
+        dl_dir
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -37,10 +61,10 @@ fn length_from_extensions(item: &rss::Item) -> Option<f32> {
     None
 }
 
-impl TryFrom<&rss::Item> for Episode {
+impl TryFrom<(&rss::Item, &str)> for Episode {
     type Error = eyre::Report;
 
-    fn try_from(item: &rss::Item) -> Result<Self, Self::Error> {
+    fn try_from((item, podcast_title): (&rss::Item, &str)) -> Result<Self, Self::Error> {
         //try to get the url and duration from the description of the media object
         let stream_url = item.enclosure().map(|encl| encl.url().to_owned());
         let duration = item.enclosure().map(|encl| encl.length().parse().ok()).flatten();
@@ -57,10 +81,14 @@ impl TryFrom<&rss::Item> for Episode {
 
         let stream_url = stream_url.ok_or(eyre!("no link for feed item: {:?}", item))?;
         let duration = duration.ok_or(eyre!("no duration known for item: {:?}", item))?;
+        let title = item.title().ok_or(eyre!("episode should have a title: {:?}", item))?.to_owned();
+        let podcast = podcast_title.to_owned();
 
         Ok(Self {
             stream_url,
             duration,
+            title,
+            podcast,
         })
     }
 }
@@ -93,9 +121,9 @@ impl Episodes {
     }
     pub fn add_feed(&mut self, id: u64, info: rss::Channel) {
         log::info!("adding feed: {}", info.title());
-        let podcast_title = &info.title();
+        let podcast_title = info.title();
         for item in info.items() {
-            match Episode::try_from(item) {
+            match Episode::try_from((item, podcast_title)) {
                 Err(e) => {dbg!(e);()},
                 Ok(ep) => {
                     let title = item.title().expect("episode has not title");

@@ -25,6 +25,14 @@ impl Track {
             panic!("Track variant is not Stream")
         }
     }
+    /// Duration in seconds
+    pub fn duration(&self) -> f32 {
+        match self {
+            Track::Stream(info, ..) => info.duration,
+            Track::File(info, ..) => info.duration,
+            Track::None => 0f32,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -110,7 +118,11 @@ impl Player {
     }
 
     pub fn stream_ready(&self, p: f32) -> bool {
-        self.sink.as_ref().map(|s| s.empty()).unwrap_or(true) && p > 10f32 
+        const MINIMUM_BUF_LEN: f32 = 10f32; // percent of dl bufferd to start playback
+        let downloaded_duration = p*self.current.duration()/100f32;
+        let sink_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true); 
+        let downloaded_enough = downloaded_duration > MINIMUM_BUF_LEN;
+        sink_empty && downloaded_enough
     }
 
     pub fn skip(&mut self, dur: f32) {
