@@ -88,8 +88,10 @@ use std::sync::{Arc, Mutex};
 pub struct Player {
     controls: Controls,
     pub current: Track,
-    pub sink: rodio::Sink,
-    output_stream: rodio::OutputStream,
+
+    pub sink: Option<rodio::Sink>,
+    pub output_stream: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
+
     db: database::Episodes,
     pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
 
@@ -97,15 +99,16 @@ pub struct Player {
     offset: f32,
 }
 
+use std::io::BufReader;
 impl Player {
     pub fn from_db(db: &database::Episodes) -> Self {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
-        let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+
         Self {
             controls: Controls { skip_dur: 5f32, .. Controls::default()},
             current: Track::None,
-            sink,
-            output_stream: stream,
+            sink: None,
+            output_stream: None,
             db: db.clone(),
             rx: None,
             last_started: None,
@@ -119,7 +122,15 @@ impl Player {
         let rx = rx.into_inner().unwrap();
         let rrx = ReadableReciever::new(rx);
         let source = rodio::Decoder::new_mp3(rrx).unwrap();
-        self.sink.append_seekable(source);
+        // let file = std::fs::File::open("examples/music.mp3").unwrap(); //FIXME //TODO
+        // self.sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+
+        let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
+        let sink = rodio::Sink::try_new(&stream_handle).unwrap();
+        sink.append_seekable(source);
+
+        self.sink = Some(sink);
+        self.output_stream = Some((stream, stream_handle));
         self.last_started = Some(std::time::Instant::now());
         self.offset = 0f32;
     }
@@ -144,7 +155,7 @@ impl Player {
     }
 
     pub fn stream_ready(&self, p: f32) -> bool {
-        self.sink.empty() && p > 10f32 
+        self.sink.as_ref().map(|s| s.empty()).unwrap_or(true) && p > 10f32 
     }
 
     pub fn skip(&mut self, dur: f32) {
@@ -170,7 +181,7 @@ impl Player {
             Track::File(info, _) => f32::min(target, info.duration),
         };
         self.offset += target-pos;
-        self.sink.set_pos(target);
+        self.sink.as_mut().unwrap().set_pos(target);
     }
 
     pub fn play_pause(&mut self) -> Command<crate::Message> {
@@ -178,10 +189,10 @@ impl Player {
             .take()
             .map(|t| t.elapsed()) {
             self.offset += elapsed.as_secs_f32();
-            self.sink.pause();
+            self.sink.as_mut().unwrap().pause();
         } else {
             self.last_started = Some(Instant::now());
-            self.sink.play();
+            self.sink.as_mut().unwrap().play();
         }
         Command::none()
     }

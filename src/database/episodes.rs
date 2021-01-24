@@ -28,12 +28,13 @@ fn url_from_extensions(item: &rss::Item) -> Option<String> {
 
 fn length_from_extensions(item: &rss::Item) -> Option<f32> {
     let media = item.extensions().get("media")?;
+    // dbg!(&media); 
     let content = media.get("content")?;
     let extention = content.first()?;
-    dbg!(extention.attrs()); 
     if extention.name() != "media:content" { return None }
     // TODO FIXME find out what the key could be here
-    extention.attrs().get("url").map(|u| u.parse().ok()).flatten()
+    // extention.attrs().get("url").map(|u| u.parse().ok()).flatten()
+    None
 }
 
 impl TryFrom<&rss::Item> for Episode {

@@ -149,7 +149,10 @@ fn build_settings() -> Settings<()> {
         window: iced::window::Settings::default(),
         flags: (),
         default_font: None,
+        #[cfg(not(features="pinephone"))]
         default_text_size: 20,
+        #[cfg(features="pinephone")]
+        default_text_size: 1,
         antialiasing: false,
     }
 }

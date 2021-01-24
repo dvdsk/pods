@@ -12,6 +12,8 @@ pub struct Episodes {
     episode_names: Vec<String>,
     scroll_state: scrollable::State,
     podcast_id: u64,
+    // number of rows we scrolled down
+    scrolled_down: usize,
 }
 
 impl Episodes {
@@ -22,6 +24,7 @@ impl Episodes {
             episode_names: Vec::new(),
             scroll_state: scrollable::State::new(),
             podcast_id: 0,
+            scrolled_down: 0,
         }
     }
     /// fill the view from a list of episodes
@@ -37,12 +40,18 @@ impl Episodes {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
-        for ((b1,b2), name) in self.episode_buttons.iter_mut().zip(self.episode_names.iter()) {
+        for ((b1,b2), name) in self.episode_buttons
+            .iter_mut()
+            .zip(self.episode_names.iter())
+            .skip(self.scrolled_down)
+            .take(15) {
+
             scrollable = scrollable.push(Row::new()
                 .push(play_button(b1, self.podcast_id, &name))
                 .push(download_button(b2, self.podcast_id, &name))
             );
         }
+
         scrollable.into()
     }
 }
