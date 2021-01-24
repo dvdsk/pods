@@ -81,6 +81,7 @@ struct List {
     feedres_buttons: Vec<button::State>,
     feedres_info: Vec<feed::SearchResult>,
     scroll_state: scrollable::State,
+    scrolled_down: usize,
 }
 
 fn feedres_button(button: &mut button::State, res: feed::SearchResult) -> Button<crate::Message> {
@@ -119,6 +120,14 @@ impl List {
         }
         scrollable
     }
+    pub fn down(&mut self) {
+        self.scrolled_down += 10;
+        self.scrolled_down = self.scrolled_down.min(self.podcast_buttons.len());
+    }
+    pub fn up(&mut self) {
+        self.scrolled_down -= 10;
+        self.scrolled_down = self.scrolled_down.max(0);
+    }
     fn update_feedres(&mut self, results: Vec<feed::SearchResult>) {
         //TODO add feedres_buttons
         self.feedres_info = results;
@@ -156,6 +165,12 @@ impl Podcasts {
             page.list.podcast_buttons.push((local_id, button::State::new()));
         }
         page
+    }
+    pub fn down(&mut self) {
+        self.list.down()
+    }
+    pub fn up(&mut self) {
+        self.list.up()
     }
     pub fn update(&mut self, message: Message) -> Command<crate::Message> {
         match message {

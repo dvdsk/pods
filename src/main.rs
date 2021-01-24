@@ -2,7 +2,7 @@ mod page;
 mod database;
 mod feed;
 mod play;
-use page::Page;
+use page::{Page, Controls};
 use play::Player;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
@@ -15,6 +15,8 @@ pub enum Message {
     // PlayCallback(play::WebToDecoderStream),
     Download(database::episodes::Key),
     Back,
+    Up,
+    Down,
     PlayPause,
     Podcasts(page::podcasts::Message),
     AddPodcast(String), //url
@@ -29,7 +31,7 @@ pub struct App {
     podcasts: page::Podcasts,
     episodes: page::Episodes,
     player: Player,
-    back_button: button::State, //Should only be needed on desktop platforms
+    controls: Controls, //Should only be needed on desktop platforms
     pod_db: database::Podcasts,
     episode_db: database::Episodes,
 }
@@ -48,7 +50,7 @@ impl Application for App {
             episodes: page::Episodes::from_db(&episode_db), 
             current: Page::Podcasts,
             player: Player::from_db(&episode_db), 
-            back_button: button::State::new(),
+            controls: Controls::default(),
             pod_db,
             episode_db,
         }, Command::none())
@@ -60,6 +62,20 @@ impl Application for App {
         match message {
             Message::Back => {
                 self.current.back();
+                Command::none()
+            }
+            Message::Up => {
+                match &self.current {
+                    Page::Podcasts => self.podcasts.up(),
+                    Page::Episodes => self.episodes.up(),
+                }
+                Command::none()
+            }
+            Message::Down => {
+                match &self.current {
+                    Page::Podcasts => self.podcasts.down(),
+                    Page::Episodes => self.episodes.down(),
+                }
                 Command::none()
             }
             Message::ToEpisodes(podcast_id) => {
@@ -129,10 +145,7 @@ impl Application for App {
         let column = Column::new();
         let column = column.push(content);
         let column = column.push(self.player.view());
-        #[cfg(feature = "desktop")]
-        let column = if self.current != Page::Podcasts {
-            column.push(page::draw_back_button(&mut self.back_button))
-        } else {column};
+        let column = column.push(self.controls.view());
         
         iced::Container::new(column).into()
     }

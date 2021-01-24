@@ -1,5 +1,5 @@
 use iced::Length;
-use iced::{button, Button, Element, Text, HorizontalAlignment, Row};
+use iced::{button, Button, Element, Text, HorizontalAlignment, Row, Column};
 use iced::widget::scrollable::{self, Scrollable};
 
 use crate::database::{self, podcasts::EpisodeList};
@@ -27,6 +27,14 @@ impl Episodes {
             scrolled_down: 0,
         }
     }
+    pub fn down(&mut self) {
+        self.scrolled_down += 10;
+        self.scrolled_down = self.scrolled_down.min(self.episode_buttons.len());
+    }
+    pub fn up(&mut self) {
+        self.scrolled_down -= 10;
+        self.scrolled_down = self.scrolled_down.max(0);
+    }
     /// fill the view from a list of episodes
     pub fn populate(&mut self, podcast_id: u64, episodes: EpisodeList) {
         self.episode_names.clear();
@@ -51,7 +59,6 @@ impl Episodes {
                 .push(download_button(b2, self.podcast_id, &name))
             );
         }
-
         scrollable.into()
     }
 }
