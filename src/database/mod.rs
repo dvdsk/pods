@@ -3,7 +3,7 @@ use sled;
 use std::path::PathBuf;
 
 pub mod podcasts;
-pub use podcasts::Podcasts;
+pub use podcasts::{Podcasts, EpisodeInfo};
 pub mod episodes;
 pub use episodes::Episodes;
 

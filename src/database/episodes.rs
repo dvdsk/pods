@@ -17,6 +17,7 @@ pub struct Episode {
 }
 
 impl Episode {
+    /// path to file without any extension
     pub fn base_file_path(&self) -> PathBuf {
         use directories::UserDirs;
         let user_dirs = UserDirs::new()

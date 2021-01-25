@@ -77,7 +77,7 @@ async fn start(url: reqwest::Url, path: PathBuf) -> Result<StateResult> {
     log::info!("downloading to file: {}", &path.to_string_lossy());
     let res = reqwest::get(url).await.map_err(Arc::from)?;
     let total = res.content_length();
-    let dir = path.parent().unwrap().parent().unwrap();
+    let dir = path.parent().unwrap();
     fs::create_dir_all(dir).map_err(Arc::from)?;
     let file = File::create(&path).map_err(Arc::from)?;
     let state = DownloadData {

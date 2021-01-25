@@ -1,9 +1,11 @@
 // use futures::Stream;
+use std::io::BufReader;
 use std::time::Instant;
 use std::sync::mpsc;
 use iced::{Command, button, Column, Text, Row, Space, Button, Length};
 use crate::Message;
 use crate::database;
+use crate::page::episodes::FileType;
 
 mod stream;
 pub use stream::ReadableReciever;
@@ -79,15 +81,22 @@ impl Player {
         }
     }
 
-    pub fn start_play(&mut self) {
+    pub fn start_stream(&mut self) {
         let rx = self.rx.take().unwrap();
         let rx = Arc::try_unwrap(rx).unwrap();
         let rx = rx.into_inner().unwrap();
         let rrx = ReadableReciever::new(rx);
         let source = rodio::Decoder::new_mp3(rrx).unwrap();
-        // let file = std::fs::File::open("examples/music.mp3").unwrap(); //FIXME //TODO
-        // self.sink.append(rodio::Decoder::new(BufReader::new(file)).unwrap());
+        self.start_play(source);
+    }
 
+    fn start_play<S>(&mut self, source: S)
+        where
+            S: rodio::source::Source + Send + 'static,
+            S: rodio::source::SourceExt + Send + 'static,
+            S::Item: rodio::Sample,
+            S::Item: Send,
+    {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
         sink.append_seekable(source);
@@ -115,6 +124,25 @@ impl Player {
             }, 
             0f32, 
             meta.stream_url);
+    }
+
+    // TODO figure out better way to get extension into here
+    pub fn add_file(&mut self, key: database::episodes::Key, file_type: FileType) {
+        let meta = self.db.get(key).unwrap();
+        let mut path = meta.base_file_path();
+        path.set_extension(file_type.as_str());
+
+        let file = std::fs::File::open(&path).unwrap();
+        let source = rodio::Decoder::new(BufReader::new(file)).unwrap();
+        self.start_play(source);
+
+        self.current = Track::File(
+            TrackInfo {
+                title: String::default(),
+                paused: false,
+                duration: meta.duration,
+            }, 
+            path);
     }
 
     pub fn stream_ready(&self, p: f32) -> bool {
@@ -203,6 +231,30 @@ impl Player {
                 .width(Length::FillPortion(1)))
     }
 }
+
+// fn get_full_path(path: std::path::PathBuf) -> eyre::Result<()> {
+    // use std::fs::DirEntry;
+    // let file_name = path.file_name().unwrap();
+    // let dir = path.parent().unwrap();
+
+    // let full_path = std::fs::read_dir(dir)?
+    //     .into_iter()
+    //     .filter_map(Result::ok)
+    //     // .filter_map(|e| e.is_ok())
+    //     .filter_map(DirEntry::file_name)
+    //     .map(|e| e.to_str())
+    //     .map(|e| split
+    //     .filter(|e| e == file_name)
+
+        
+    // let mut full_path = None;
+    // for entry in std::fs::read_dir(dir)? {
+    //     let entry_name = entry.as_ref().unwrap().file_name();
+    //     if &entry_name == file_name {
+    //         full_path = Some(entry.unwrap().path());
+    //     }
+    // }
+// }
 
 #[cfg(test)]
 mod test {

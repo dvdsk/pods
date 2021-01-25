@@ -1,4 +1,3 @@
-use reqwest::Client;
 use crate::database::episodes::Key as EpisodeKey;
 use crate::{database, Message};
 use iced::Subscription;

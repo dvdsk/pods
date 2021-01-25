@@ -8,6 +8,8 @@ use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
 use error_level::ErrorLevel;
+use database::episodes::Key as EpisodeKey;
+use page::episodes::FileType;
 
 use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
 
@@ -15,9 +17,11 @@ use iced::{button, executor, Application, Command, Element, Column, Settings, Su
 pub enum Message {
     ToEpisodes(u64),
     PlayProgress(f32),
-    Play(database::episodes::Key),
+    Stream(EpisodeKey),
+    Play(EpisodeKey, FileType),
     // PlayCallback(play::WebToDecoderStream),
-    Download(database::episodes::Key),
+    Download(EpisodeKey),
+    Remove(EpisodeKey),
     Back,
     Up,
     Down,
@@ -86,7 +90,7 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let list = self.pod_db.get_episodelist(podcast_id).unwrap();
-                self.episodes.populate(list);
+                self.episodes.populate(list, podcast_id);
                 self.current = Page::Episodes;
                 Command::none()
             }
@@ -100,7 +104,7 @@ impl Application for App {
                     Progress::Advanced(p) => {
                         self.player.current.set_streampos(p);
                         if self.player.stream_ready(p) {
-                            self.player.start_play();
+                            self.player.start_stream();
                         }
                     }
                 }
@@ -110,7 +114,10 @@ impl Application for App {
                 use download::Progress::*;
                 match p {
                     Error(e) => e.log_error(),
-                    Finished => log::info!("finished download"),
+                    Finished => {
+                        self.episodes.rescan_downloaded();
+                        log::info!("finished download");
+                    }
                     _ => (),
                 }
                 Command::none()
@@ -127,8 +134,12 @@ impl Application for App {
                     feed::add_podcast(pod_db, ep_db, url), 
                     |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
             }
-            Message::Play(key) => {
+            Message::Stream(key) => {
                 self.player.add_stream(key);
+                Command::none()
+            }
+            Message::Play(key, file_type) => {
+                self.player.add_file(key, file_type);
                 Command::none()
             }
             Message::Skip(f) => {
@@ -141,6 +152,7 @@ impl Application for App {
             //         Message::
             // }
             Message::Download(key) => self.downloader.add(key, &mut self.episode_db),
+            Message::Remove(key) => todo!(),
             Message::PlayPause => self.player.play_pause(),
             Message::Podcasts(m) => self.podcasts.update(m),
             // Message::Episodes(m) => self.episodes.update(m),

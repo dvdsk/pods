@@ -23,7 +23,11 @@ impl PartialEq for EpisodeInfo {
     }
 }
 
-pub type EpisodeList = Vec<EpisodeInfo>;
+#[derive(Serialize, Deserialize)]
+pub struct EpisodeList {
+    pub podcast: String,
+    pub items: Vec<EpisodeInfo>,
+}
 pub type PodcastList = Vec<PodcastInfo>;
 
 #[derive(Clone)]
@@ -53,10 +57,10 @@ impl Podcasts {
 
         self.tree.update_and_fetch(id.to_be_bytes(), move |old| {
             if let Some(old) = old {
-                let mut episodes: EpisodeList = bincode::deserialize(&old).unwrap();
-                let new_episodes: EpisodeList = list.iter().filter(|e| episodes.contains(e)).cloned().collect();
-                episodes.extend(new_episodes);
-                Some(bincode::serialize(&episodes).unwrap())
+                let EpisodeList {items: mut list, podcast} = bincode::deserialize(&old).unwrap();
+                let new_episodes: Vec<_> = list.iter().filter(|e| !list.contains(e)).cloned().collect();
+                list.extend(new_episodes);
+                Some(bincode::serialize(&EpisodeList{items: list, podcast}).unwrap())
             } else {
                 let bytes = bincode::serialize(&list).unwrap();
                 Some(bytes)

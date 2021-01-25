@@ -30,7 +30,7 @@ async fn get_podcast_info(url: &str) -> eyre::Result<rss::Channel> {
     Ok(channel)
 }
 
-fn get_episode_info(items: &[rss::Item]) -> eyre::Result<EpisodeList> {
+fn get_episode_info(items: &[rss::Item]) -> eyre::Result<Vec<EpisodeInfo>> {
     Ok(items.iter()
         .filter_map(|x| x.title())
         .map(|t| EpisodeInfo {
@@ -44,7 +44,8 @@ pub async fn add_podcast(mut pod_db: database::Podcasts, mut episode_db: databas
     let info = get_podcast_info(&url).await.unwrap();
     let title = info.title().to_owned();
     let episodes = get_episode_info(info.items()).unwrap();
-    let id = pod_db.add_feed(&title, &url, episodes).unwrap();
+    let episode_list = EpisodeList {podcast: title.clone(), items: episodes};
+    let id = pod_db.add_feed(&title, &url, episode_list).unwrap();
     episode_db.add_feed(id, info);
     (title, id)
 }

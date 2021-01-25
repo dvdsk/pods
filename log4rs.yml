@@ -10,12 +10,14 @@ appenders:
 
 # Set the default logging level to "warn" and attach the "stdout" appender to the root
 root:
-  level: debug
+  level: warn
   appenders:
     - stdout
 
 loggers:
   # Raise the maximum log level for events sent to the "app::backend::db" logger to "info"
+  pods:
+    level: trace
   sled:
     level: info
   hyper:
