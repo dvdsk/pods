@@ -45,33 +45,36 @@ fn url_from_extensions(item: &rss::Item) -> Option<String> {
     extention.attrs().get("url").map(|u| u.clone())
 }
 
-fn length_from_extensions(item: &rss::Item) -> Option<f32> {
+fn duration_from_extensions(item: &rss::Item) -> Option<f32> {
     let media = item.extensions().get("media")?;
-    // dbg!(&media); 
     let content = media.get("content")?;
     let extention = content.first()?;
     if extention.name() != "media:content" { return None }
-    // TODO FIXME find out what the key could be here
-    // extention.attrs().get("url").map(|u| u.parse().ok()).flatten()
-    None
+    extention.attrs().get("duration").map(|u| u.parse().ok()).flatten()
+}
+
+fn parse_itunes_duration(duration: &str) -> Option<f32> {
+    let mut parts = duration.splitn(2, ":");
+    let minutes: f32 = parts.next()?.parse().ok()?;
+    let seconds: f32 = parts.next()?.parse().ok()?;
+    Some(minutes * 60f32 + seconds)
 }
 
 impl TryFrom<(&rss::Item, &str)> for Episode {
     type Error = eyre::Report;
 
     fn try_from((item, podcast_title): (&rss::Item, &str)) -> Result<Self, Self::Error> {
-        //try to get the url and duration from the description of the media object
+        //try to get the url from the description of the media object
         let stream_url = item.enclosure().map(|encl| encl.url().to_owned());
-        let duration = item.enclosure().map(|encl| encl.length().parse().ok()).flatten();
 
         //try to get the url and duration possible extensions
         let stream_url = stream_url.or(url_from_extensions(item));
-        let duration = duration.or(length_from_extensions(item));
+        let duration = duration_from_extensions(item);
 
         //try to get duration from any included itunes extensions
         let duration = duration.or(item.itunes_ext()
             .map(|ext| ext.duration()
-                .map(|d| d.parse().ok()).flatten()
+                .map(parse_itunes_duration).flatten()
             ).flatten());
 
         let stream_url = stream_url.ok_or(eyre!("no link for feed item: {:?}", item))?;

@@ -120,7 +120,7 @@ impl Player {
             TrackInfo {
                 title: String::default(),
                 paused: false,
-                duration: meta.duration,
+                duration: dbg!(meta.duration),
             }, 
             0f32, 
             meta.stream_url);
@@ -146,10 +146,11 @@ impl Player {
     }
 
     pub fn stream_ready(&self, p: f32) -> bool {
-        const MINIMUM_BUF_LEN: f32 = 10f32; // percent of dl bufferd to start playback
-        let downloaded_duration = p*self.current.duration()/100f32;
+        const MINIMUM_BUF_DUR: f32 = 60f32; // duration (seconds) that needs to be downloaded before we start playing
+        let downloaded_duration = p/100f32*self.current.duration();
         let sink_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true); 
-        let downloaded_enough = downloaded_duration > MINIMUM_BUF_LEN;
+        let downloaded_enough = downloaded_duration > MINIMUM_BUF_DUR;
+
         sink_empty && downloaded_enough
     }
 

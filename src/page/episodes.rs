@@ -150,13 +150,14 @@ impl Episodes {
             let podcast_id = *self.podcast_id.as_ref().unwrap();
             let key = EpisodeKey::from((podcast_id, item.title.as_str()));
             let mut row = Row::new();
-            if let Some(file_type) = item.file {
-                row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone()));
-                row = row.push(delete_button(&mut item.file_button, key.clone(), file_type));
-            } else {
-                row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
-                row = row.push(download_button(&mut item.file_button, key.clone()));
-            }
+            row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
+            // if let Some(file_type) = item.file {
+            //     row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone()));
+            //     row = row.push(delete_button(&mut item.file_button, key.clone(), file_type));
+            // } else {
+            //     row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
+            //     row = row.push(download_button(&mut item.file_button, key.clone()));
+            // }
             scrollable = scrollable.push(row);
         }
         scrollable.into()
