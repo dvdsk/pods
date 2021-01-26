@@ -9,19 +9,22 @@ use page::{Page, Controls};
 use play::Player;
 use error_level::ErrorLevel;
 use database::episodes::Key as EpisodeKey;
+use database::podcasts::EpisodeList;
 use page::episodes::FileType;
 
+use std::collections::HashMap;
 use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
 
 #[derive(Clone, Debug)]
 pub enum Message {
     ToEpisodes(u64),
+    ToEpisodesFinish(HashMap<u64, FileType>, EpisodeList, u64),
     PlayProgress(f32),
     Stream(EpisodeKey),
     Play(EpisodeKey, FileType),
     // PlayCallback(play::WebToDecoderStream),
     Download(EpisodeKey),
-    Remove(EpisodeKey),
+    Remove(EpisodeKey, FileType),
     Back,
     Up,
     Down,
@@ -30,6 +33,7 @@ pub enum Message {
     AddPodcast(String), //url
     StreamProgress(play::subscribe::Progress),
     DownloadProgress(download::Progress),
+    DownloadFinished(HashMap<u64, FileType>),
     Skip(f32),
     // Episodes(page::episodes::Message),
 }
@@ -90,7 +94,13 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let list = self.pod_db.get_episodelist(podcast_id).unwrap();
-                self.episodes.populate(list, podcast_id);
+                Command::perform(
+                    page::episodes::scan_podcast_wrapper(list),
+                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast_id),
+                )
+            }
+            Message::ToEpisodesFinish(downloaded, list, podcast_id) => {
+                self.episodes.populate(list, podcast_id, downloaded);
                 self.current = Page::Episodes;
                 Command::none()
             }
@@ -113,13 +123,23 @@ impl Application for App {
             Message::DownloadProgress(p) => {
                 use download::Progress::*;
                 match p {
-                    Error(e) => e.log_error(),
-                    Finished => {
-                        self.episodes.rescan_downloaded();
-                        log::info!("finished download");
+                    Error(e) => {
+                        e.log_error();
+                        Command::none()
                     }
-                    _ => (),
+                    Finished => {
+                        log::info!("finished download");
+                        let podcast = self.episodes.podcast.as_ref().unwrap().clone();
+                        Command::perform(
+                            page::episodes::scan_podcast_dir(podcast),
+                            Message::DownloadFinished
+                        )
+                    }
+                    _ => Command::none(),
                 }
+            }
+            Message::DownloadFinished(set) => {
+                self.episodes.update_downloaded(set);
                 Command::none()
             }
             Message::PlayProgress(p) => {
@@ -146,16 +166,10 @@ impl Application for App {
                 self.player.skip(f);
                 Command::none()
             }
-            // Message::PlayCallback(stream) => {
-            //     Command::perform(
-            //         play::continue_streaming(stream),
-            //         Message::
-            // }
             Message::Download(key) => self.downloader.add(key, &mut self.episode_db),
-            Message::Remove(key) => todo!(),
+            Message::Remove(key, file_type) => todo!(),
             Message::PlayPause => self.player.play_pause(),
             Message::Podcasts(m) => self.podcasts.update(m),
-            // Message::Episodes(m) => self.episodes.update(m),
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {

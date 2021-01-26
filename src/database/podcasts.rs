@@ -11,7 +11,7 @@ pub struct PodcastInfo {
 // TODO exclude listend from partialeq?
 // the contains check is invalid with derived
 // partialeq
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EpisodeInfo {
     pub title: String,
     pub listend: bool,
@@ -23,7 +23,7 @@ impl PartialEq for EpisodeInfo {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct EpisodeList {
     pub podcast: String,
     pub items: Vec<EpisodeInfo>,

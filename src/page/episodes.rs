@@ -54,10 +54,15 @@ fn hash(string: &str) -> u64 {
     hasher.finish()
 }
 
+pub async fn scan_podcast_wrapper(list: EpisodeList) -> (HashMap<u64, FileType>, EpisodeList) {
+    let podcast = &list.podcast;
+    (scan_podcast_dir(podcast).await, list)
+}
+
 // TODO error handeling
-fn scan_podcast_dir(podcast: &str) -> HashMap<u64, FileType> {
+pub async fn scan_podcast_dir(podcast: impl AsRef<str>) -> HashMap<u64, FileType> {
     use directories::UserDirs;
-    use std::fs;
+    use tokio::fs;
 
     let user_dirs = UserDirs::new()
         .expect("can not download if the user has no home directory");
@@ -65,16 +70,17 @@ fn scan_podcast_dir(podcast: &str) -> HashMap<u64, FileType> {
         .expect("need a download folder to be able to download")
         .to_owned();
     dir.push(env!("CARGO_BIN_NAME"));
-    dir.push(podcast);
+    dir.push(podcast.as_ref());
 
     let mut set = HashMap::new();
-    let entries = fs::read_dir(dir);
+    let entries = fs::read_dir(dir).await;
     if entries.is_err() {
         return set;
     }
+    let mut entries = entries.unwrap();
 
-    for entry in entries.unwrap() {
-        let relative_path = entry.unwrap().file_name();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        let relative_path = entry.file_name();
         let relative_path = relative_path.to_str().unwrap();
         if let Some(name) = relative_path.strip_suffix(".mp3") 
             // .or_else(relative_path.strip_suffix(".other")
@@ -92,7 +98,7 @@ pub struct Episodes {
     db: database::Episodes,
     list: Vec<ListItem>,
     scroll_state: scrollable::State,
-    podcast: Option<String>,
+    pub podcast: Option<String>,
     podcast_id: Option<u64>,
     // number of rows we scrolled down
     scrolled_down: usize,
@@ -117,18 +123,16 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.saturating_sub(10);
     }
     /// fill the view from a list of episodes
-    pub fn populate(&mut self, episodes: EpisodeList, podcast_id: u64) {
+    pub fn populate(&mut self, episodes: EpisodeList, podcast_id: u64, downloaded_episodes: HashMap<u64, FileType>) {
         self.list.clear();
         self.podcast = Some(episodes.podcast.to_owned());
         self.podcast_id = Some(podcast_id);
-        let downloaded_episodes = scan_podcast_dir(&episodes.podcast);
         for info in episodes.items {
             self.list.push(ListItem::from(info, &downloaded_episodes));
         }
     }
-    pub fn rescan_downloaded(&mut self) {
+    pub fn update_downloaded(&mut self, downloaded_episodes: HashMap<u64, FileType>) {
         let podcast = self.podcast.as_ref().unwrap();
-        let downloaded_episodes = scan_podcast_dir(podcast);
         for item in &mut self.list {
             let file = downloaded_episodes.get(&hash(&item.title)).copied();
             item.file = file;
@@ -191,7 +195,7 @@ fn download_button<'a>(state: &'a mut button::State, key: EpisodeKey)
 
 fn delete_button<'a>(state: &'a mut button::State, key: EpisodeKey, file_type: FileType)
     -> Button<'a, crate::Message> {
-    let msg = crate::Message::Remove(key);
+    let msg = crate::Message::Remove(key, file_type);
     Button::new(state, 
         Text::new("rm").horizontal_alignment(HorizontalAlignment::Center))
         .on_press(msg)

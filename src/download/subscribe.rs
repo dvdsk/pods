@@ -1,10 +1,10 @@
 use iced_futures::futures;
 use std::path::PathBuf;
 use super::Download;
-use std::fs::{self, File};
-use std::io::Write;
 use std::sync::Arc;
 use error_level::ErrorLevel;
+use tokio::fs;
+use tokio::io::{self, AsyncWriteExt};
 
 #[derive(Debug, Clone)]
 pub enum Progress {
@@ -22,7 +22,7 @@ pub enum Error {
     Download(#[from] Arc<reqwest::Error>),
     #[report(error)]
     #[error("Could not store download")]
-    Io(#[from] Arc<std::io::Error>),
+    Io(#[from] Arc<io::Error>),
     #[report(warn)]
     #[error("Do not know what file type this is (no extension given)")]
     NoExtension,
@@ -66,7 +66,7 @@ async fn stream_state_machine(current: State) -> StateResult {
         State::Finished(temp_path) => {
             let mut path = temp_path.clone(); // name.extension.part
             path.set_extension(""); // this removes the .part 
-            fs::rename(temp_path, path).unwrap();
+            fs::rename(temp_path, path).await.unwrap();
             None
         }
         State::Errored => None,
@@ -78,8 +78,9 @@ async fn start(url: reqwest::Url, path: PathBuf) -> Result<StateResult> {
     let res = reqwest::get(url).await.map_err(Arc::from)?;
     let total = res.content_length();
     let dir = path.parent().unwrap();
-    fs::create_dir_all(dir).map_err(Arc::from)?;
-    let file = File::create(&path).map_err(Arc::from)?;
+    fs::create_dir_all(dir).await.map_err(Arc::from)?;
+    let file = fs::File::create(&path).await.map_err(Arc::from)?;
+    let file = io::BufWriter::new(file);
     let state = DownloadData {
         res, file, total, downloaded: 0, path,
     };
@@ -92,7 +93,7 @@ async fn downloading(data: DownloadData) -> Result<StateResult> {
         None => Ok(Some((Progress::Finished, State::Finished(path)))),
         Some(chunk) => {
             downloaded += chunk.len() as u64;
-            file.write_all(&chunk).map_err(Arc::from)?;
+            file.write_all(&chunk).await.map_err(Arc::from)?;
 
             let percentage = total
                 .map(|t| 100.0 * downloaded as f32/ t as f32)
@@ -107,7 +108,8 @@ async fn downloading(data: DownloadData) -> Result<StateResult> {
 #[derive(Debug)]
 pub struct DownloadData {
     res: reqwest::Response,
-    file: File,
+    // file: fs::File,
+    file: io::BufWriter<fs::File>,
     total: Option<u64>,
     downloaded: u64,
     path: PathBuf,
