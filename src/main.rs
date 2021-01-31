@@ -19,7 +19,7 @@ use iced::{button, executor, Application, Command, Element, Column, Settings, Su
 pub enum Message {
     ToEpisodes(u64),
     ToEpisodesFinish(HashMap<u64, FileType>, EpisodeList, u64),
-    PlayProgress(f32),
+    PlayBackTick(std::time::Instant),
     Stream(EpisodeKey),
     Play(EpisodeKey, FileType),
     // PlayCallback(play::WebToDecoderStream),
@@ -142,10 +142,8 @@ impl Application for App {
                 self.episodes.update_downloaded(set);
                 Command::none()
             }
-            Message::PlayProgress(p) => {
-                //TODO FIXME
-                dbg!(p);
-                // self.player.as_mut().unwrap().pos = p;
+            Message::PlayBackTick(_) => {
+                // only used to trigger a redraw
                 Command::none()
             }
             Message::AddPodcast(url) => {
@@ -174,11 +172,24 @@ impl Application for App {
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
+        use play::Track;
+        use std::time::Duration;
+
         let mut subs = Vec::new();
-        if let play::Track::Stream(_,_,url) = &self.player.current {
-            let stream = play::subscribe::play(url.to_owned()).map(Message::StreamProgress);
-            subs.push(stream);
+        match &self.player.current {
+            Track::Stream(_,_,url) => {
+                let stream = play::subscribe::play(url.to_owned()).map(Message::StreamProgress);
+                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+                subs.push(stream);
+                subs.push(time);
+            }
+            Track::File(_,_) => {
+                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+                subs.push(time);
+            }
+            _ => (),
         }
+
         subs.extend(self.downloader.subs());
         Subscription::batch(subs)
     }
@@ -193,6 +204,14 @@ impl Application for App {
         let column = column.push(self.controls.view());
         
         iced::Container::new(column).into()
+    }
+    fn mode(&self) -> iced::window::Mode {
+        #[cfg(features="pinephone")]
+        dbg!("fullliyyyyy");
+        #[cfg(features="pinephone")]
+        return iced::window::Mode::Fullscreen;
+        #[cfg(not(features="pinephone"))]
+        return iced::window::Mode::Windowed;
     }
 }
 
