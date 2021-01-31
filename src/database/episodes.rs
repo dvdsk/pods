@@ -54,10 +54,12 @@ fn duration_from_extensions(item: &rss::Item) -> Option<f32> {
 }
 
 fn parse_itunes_duration(duration: &str) -> Option<f32> {
-    let mut parts = duration.splitn(2, ":");
-    let minutes: f32 = parts.next()?.parse().ok()?;
+    let mut parts = duration.rsplitn(3, ":");
     let seconds: f32 = parts.next()?.parse().ok()?;
-    Some(minutes * 60f32 + seconds)
+    let minutes: f32 = parts.next()?.parse().ok()?;
+    let hours: f32 = parts.next().unwrap_or("0").parse().ok()?;
+    let seconds = seconds + 60.*(minutes + 60.*hours);
+    Some(seconds)
 }
 
 impl TryFrom<(&rss::Item, &str)> for Episode {
