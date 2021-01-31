@@ -144,6 +144,7 @@ impl Application for App {
             }
             Message::PlayProgress(p) => {
                 //TODO FIXME
+                dbg!(p);
                 // self.player.as_mut().unwrap().pos = p;
                 Command::none()
             }

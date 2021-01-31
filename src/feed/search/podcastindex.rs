@@ -59,7 +59,7 @@ impl Search {
 
         let text = self.client.get("https://api.podcastindex.org/api/1.0/search/byterm")
             .headers(headers)
-            .timeout(std::time::Duration::from_millis(2000))
+            .timeout(std::time::Duration::from_millis(300))
             .query(&[("q",search_term)])
             .send()
             .await

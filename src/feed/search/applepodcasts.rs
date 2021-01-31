@@ -84,7 +84,7 @@ impl Search {
 
         self.budget.register_call();
         let text = self.client.get("https://itunes.apple.com/search")
-            .timeout(std::time::Duration::from_millis(2000))
+            .timeout(std::time::Duration::from_millis(300))
             .query(&[("entity","podcast")])
             .query(&[("term",search_term)])
             .query(&[("limit",25)])

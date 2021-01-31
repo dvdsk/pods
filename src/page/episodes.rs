@@ -105,6 +105,7 @@ pub struct Episodes {
 }
 
 impl Episodes {
+    const MAXSCROLLABLE: usize = 10;
     pub fn from_db(db: &database::Episodes) -> Self {
         Self {
             db: db.clone(),
@@ -116,11 +117,11 @@ impl Episodes {
         }
     }
     pub fn down(&mut self) {
-        self.scrolled_down += 10;
+        self.scrolled_down += Self::MAXSCROLLABLE;
         self.scrolled_down = self.scrolled_down.min(self.list.len());
     }
     pub fn up(&mut self) {
-        self.scrolled_down = self.scrolled_down.saturating_sub(10);
+        self.scrolled_down = self.scrolled_down.saturating_sub(Self::MAXSCROLLABLE);
     }
     /// fill the view from a list of episodes
     pub fn populate(&mut self, episodes: EpisodeList, podcast_id: u64, downloaded_episodes: HashMap<u64, FileType>) {
@@ -145,19 +146,18 @@ impl Episodes {
         for item in self.list
             .iter_mut()
             .skip(self.scrolled_down)
-            .take(15) {
+            .take(Self::MAXSCROLLABLE) {
 
             let podcast_id = *self.podcast_id.as_ref().unwrap();
             let key = EpisodeKey::from((podcast_id, item.title.as_str()));
             let mut row = Row::new();
-            row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
-            // if let Some(file_type) = item.file {
-            //     row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone()));
-            //     row = row.push(delete_button(&mut item.file_button, key.clone(), file_type));
-            // } else {
-            //     row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
-            //     row = row.push(download_button(&mut item.file_button, key.clone()));
-            // }
+            if let Some(file_type) = item.file {
+                row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone()));
+                row = row.push(delete_button(&mut item.file_button, key.clone(), file_type));
+            } else {
+                row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
+                row = row.push(download_button(&mut item.file_button, key.clone()));
+            }
             scrollable = scrollable.push(row);
         }
         scrollable.into()
