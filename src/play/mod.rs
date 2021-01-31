@@ -114,7 +114,13 @@ impl Player {
         self.offset+elapsed
     }
 
+    fn stop(&mut self) {
+        self.sink.take();
+    }
+
     pub fn add_stream(&mut self, key: database::episodes::Key) {
+        self.stop();
+
         let meta = self.db.get(key).unwrap();
         self.current = Track::Stream(
             TrackInfo {
@@ -128,6 +134,8 @@ impl Player {
 
     // TODO figure out better way to get extension into here
     pub fn add_file(&mut self, key: database::episodes::Key, file_type: FileType) {
+        self.stop();
+
         let meta = self.db.get(key).unwrap();
         let mut path = meta.base_file_path();
         path.set_extension(file_type.as_str());
@@ -155,7 +163,6 @@ impl Player {
     }
 
     pub fn skip(&mut self, dur: f32) {
-        dbg!(dur, self.pos());
         let pos = self.pos();
         let target = f32::max(pos+dur, 0f32);
         let target = match &self.current {
