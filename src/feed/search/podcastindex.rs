@@ -1,11 +1,12 @@
 use eyre::{eyre, Result, WrapErr};
 use regex::Regex;
-use super::{SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
+use super::{ApiBudget, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
 
 #[derive(Clone)]
 pub struct Search {
     client: reqwest::Client,
     title_url: Regex,
+    budget: ApiBudget,
 }
 
 impl Default for Search {
@@ -16,6 +17,7 @@ impl Default for Search {
                 .build()
                 .wrap_err("could not construct http client for podcast searching").unwrap(),
             title_url: Regex::new(r#""title":"(.+?)","url":"(.+?)","originalUrl":"#).unwrap(),
+            budget: ApiBudget::from(5),
         }
     }
 }
@@ -36,10 +38,14 @@ impl Search {
         Ok(results)
     }
 
-    pub async fn search(&mut self, search_term: &str) -> Result<Vec<SearchResult>> {
+    pub async fn search(&mut self, search_term: &str, ignore_budget: bool) -> Result<Vec<SearchResult>> {
         use reqwest::header::{HeaderMap, HeaderName};
         use std::time::{SystemTime, UNIX_EPOCH};
         use sha1::{Sha1, Digest};
+
+        if self.budget.left() <= 2 && !ignore_budget {
+            return Err(eyre!("over api budget"));
+        }
 
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH).unwrap()
@@ -59,7 +65,7 @@ impl Search {
 
         let text = self.client.get("https://api.podcastindex.org/api/1.0/search/byterm")
             .headers(headers)
-            .timeout(std::time::Duration::from_millis(300))
+            .timeout(std::time::Duration::from_millis(1000))
             .query(&[("q",search_term)])
             .send()
             .await

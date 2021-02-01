@@ -1,39 +1,6 @@
-use std::time::Duration;
-use std::time::Instant;
-use arraydeque::{ArrayDeque, Wrapping};
-
 use eyre::{eyre, Result, WrapErr};
 use regex::Regex;
-use super::{SearchResult, APP_USER_AGENT};
-
-#[derive(Clone)]
-struct ApiBudget {
-    last_called: Instant,
-    called: ArrayDeque<[Instant;20], Wrapping>,
-}
-impl Default for ApiBudget {
-    fn default() -> Self {
-        Self {
-            last_called: Instant::now(),
-            called: ArrayDeque::new(), 
-        }
-    }
-}
-
-impl ApiBudget {
-    const CALL_PER_MINUTE: u8 = 20;
-    fn calls_in_last_minute(&self) -> usize {
-        self.called.iter()
-            .take_while(|t| t.elapsed() < Duration::from_secs(61))
-            .count()
-    }
-    pub fn left(&self) -> u8 {
-        Self::CALL_PER_MINUTE.saturating_sub(self.calls_in_last_minute() as u8)
-    }
-    pub fn register_call(&mut self) {
-        self.called.push_front(Instant::now());
-    }
-}
+use super::{ApiBudget, SearchResult, APP_USER_AGENT};
 
 #[derive(Clone)]
 pub struct Search {
@@ -52,7 +19,7 @@ impl Default for Search {
                 .wrap_err("could not construct http client for podcast searching").unwrap(),
             title: Regex::new(r#"collectionName":"(.+?)""#).unwrap(),
             url: Regex::new(r#"feedUrl":"(.+?)""#).unwrap(),
-            budget: ApiBudget::default(),
+            budget: ApiBudget::from(5),
         }
     }
 }
@@ -84,7 +51,7 @@ impl Search {
 
         self.budget.register_call();
         let text = self.client.get("https://itunes.apple.com/search")
-            .timeout(std::time::Duration::from_millis(300))
+            .timeout(std::time::Duration::from_millis(1000))
             .query(&[("entity","podcast")])
             .query(&[("term",search_term)])
             .query(&[("limit",25)])
