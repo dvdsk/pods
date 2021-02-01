@@ -1,6 +1,5 @@
-use eyre::{eyre, Result, WrapErr};
 use regex::Regex;
-use super::{ApiBudget, SearchResult, APP_USER_AGENT};
+use super::{Error, ApiBudget, SearchResult, APP_USER_AGENT};
 
 #[derive(Clone)]
 pub struct Search {
@@ -16,7 +15,7 @@ impl Default for Search {
             client: reqwest::Client::builder()
                 .user_agent(APP_USER_AGENT)
                 .build()
-                .wrap_err("could not construct http client for podcast searching").unwrap(),
+                .expect("could not construct http client for podcast searching"),
             title: Regex::new(r#"collectionName":"(.+?)""#).unwrap(),
             url: Regex::new(r#"feedUrl":"(.+?)""#).unwrap(),
             budget: ApiBudget::from(5),
@@ -25,31 +24,24 @@ impl Default for Search {
 }
 
 impl Search {
-    pub fn to_results(&self, text: &str) -> Result<Vec<SearchResult>> {
+    pub fn to_results(&self, text: &str) -> Vec<SearchResult> {
         let mut results = Vec::new();
         for (cap1, cap2) in self.title.captures_iter(text)
             .zip(self.url.captures_iter(text)){
 
             results.push(SearchResult {
                 title: cap1.get(1)
-                    .ok_or_else(|| eyre!("malformed title result"))?
+                    .expect("malformed search result")
                     .as_str().to_owned(),
                 url: cap2.get(1)
-                    .ok_or_else(|| eyre!("malformed url result"))?
+                    .expect("malformed search result")
                     .as_str().to_owned(),
             });
         }
-        Ok(results) 
+        results 
     }
 
-    pub async fn search(&mut self, search_term: &str, ignore_budget: bool)
-        -> Result<Vec<SearchResult>> {
-        
-        if self.budget.left() <= 2 && !ignore_budget {
-            return Err(eyre!("over api budget"));
-        }
-
-        self.budget.register_call();
+    async fn request(&mut self, search_term: &str) -> Result<String, Error> {
         let text = self.client.get("https://itunes.apple.com/search")
             .timeout(std::time::Duration::from_millis(1000))
             .query(&[("entity","podcast")])
@@ -58,14 +50,29 @@ impl Search {
             .query(&[("explicit","Yes")])
             .send()
             .await
-            .wrap_err("could not connect to apple podcasts")?
+            .map_err(Error::CouldNotConnect)?
             .error_for_status()
-            .wrap_err("server replied with error")?
+            .map_err(Error::HttpError)?
             .text()
             .await
-            .wrap_err("could not understand apple podcast reply")?;
+            .map_err(Error::NoText)?;
+        Ok(text)
+    }
 
-        let results = self.to_results(&text)?;
+    pub async fn search(&mut self, search_term: &str, ignore_budget: bool)
+        -> Result<Vec<SearchResult>, Error> {
+        
+        if self.budget.left() <= 2 && !ignore_budget {
+            return Err(Error::OutOfCalls);
+        }
+
+        self.budget.register_call();
+        let text = self.request(search_term).await;
+
+        if let Err(Error::CouldNotConnect(_)) = &text {
+            self.budget.update(-1);
+        }
+        let results = self.to_results(&text?);
         Ok(results)
     }
 }

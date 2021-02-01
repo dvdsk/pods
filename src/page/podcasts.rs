@@ -37,7 +37,7 @@ impl Search {
                 let term = self.input_value.clone();
                 let search = self.search.clone();
                 Command::perform(
-                    async move {search.lock().await.search(term, true).await.unwrap()},
+                    async move {search.lock().await.search(term, true).await},
                     |r| crate::Message::Podcasts(Message::SearchResults(r))
             )}
             Message::SearchInputChanged(s) => {
@@ -49,7 +49,7 @@ impl Search {
                     let term = self.input_value.clone();
                     let search = self.search.clone();
                     Command::perform(
-                        async move {search.lock().await.search(term, true).await.unwrap()},
+                        async move {search.lock().await.search(term, true).await},
                         |r| crate::Message::Podcasts(Message::SearchResults(r)) )
                 } else {
                     Command::none() 

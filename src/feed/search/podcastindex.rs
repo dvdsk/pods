@@ -1,6 +1,5 @@
-use eyre::{eyre, Result, WrapErr};
 use regex::Regex;
-use super::{ApiBudget, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
+use super::{Error, ApiBudget, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
 
 #[derive(Clone)]
 pub struct Search {
@@ -15,7 +14,7 @@ impl Default for Search {
             client: reqwest::Client::builder()
                 .user_agent(APP_USER_AGENT)
                 .build()
-                .wrap_err("could not construct http client for podcast searching").unwrap(),
+                .expect("could not construct http client for podcast searching"),
             title_url: Regex::new(r#""title":"(.+?)","url":"(.+?)","originalUrl":"#).unwrap(),
             budget: ApiBudget::from(5),
         }
@@ -23,28 +22,45 @@ impl Default for Search {
 }
 
 impl Search {
-    fn to_results(&self, text: &str) -> Result<Vec<SearchResult>> {
+    fn to_results(&self, text: &str) -> Vec<SearchResult> {
         let mut results = Vec::new();
         for cap in self.title_url.captures_iter(text) {
             results.push(SearchResult{ 
                 title: cap.get(1)
-                    .ok_or_else(|| eyre!("malformed search result"))?
+                    .expect("malformed search result")
                     .as_str().to_owned(),
                 url: cap.get(2)
-                    .ok_or_else(|| eyre!("malformed search result"))?
+                    .expect("malformed search result")
                     .as_str().to_owned().replace(r#"\/"#, r#"/"#),
             });
         }
-        Ok(results)
+        results
     }
 
-    pub async fn search(&mut self, search_term: &str, ignore_budget: bool) -> Result<Vec<SearchResult>> {
+    async fn request(&mut self, headers: reqwest::header::HeaderMap, search_term: &str) -> Result<String, Error> {
+        let text = self.client.get("https://api.podcastindex.org/api/1.0/search/byterm")
+            .headers(headers)
+            .timeout(std::time::Duration::from_millis(1000))
+            .query(&[("q",search_term)])
+            .send()
+            .await
+            .map_err(Error::CouldNotConnect)?
+            .error_for_status()
+            .map_err(Error::HttpError)?
+            .text()
+            .await
+            .map_err(Error::NoText)?;
+        Ok(text)
+    }
+
+
+    pub async fn search(&mut self, search_term: &str, ignore_budget: bool) -> Result<Vec<SearchResult>, Error> {
         use reqwest::header::{HeaderMap, HeaderName};
         use std::time::{SystemTime, UNIX_EPOCH};
         use sha1::{Sha1, Digest};
 
         if self.budget.left() <= 2 && !ignore_budget {
-            return Err(eyre!("over api budget"));
+            return Err(Error::OutOfCalls);
         }
 
         let now = SystemTime::now()
@@ -63,19 +79,12 @@ impl Search {
         headers.insert(HeaderName::from_static("x-auth-key"), APIKEY.parse().unwrap());
         headers.insert(HeaderName::from_static("authorization"), hash.parse().unwrap());
 
-        let text = self.client.get("https://api.podcastindex.org/api/1.0/search/byterm")
-            .headers(headers)
-            .timeout(std::time::Duration::from_millis(1000))
-            .query(&[("q",search_term)])
-            .send()
-            .await
-            .wrap_err("could not connect to 'the podcast index'")?
-            .error_for_status()
-            .wrap_err("server replied with error")?
-            .text()
-            .await
-            .wrap_err("could not understand response from 'the podcast index'")?;
-        let results = self.to_results(&text)?;
+        self.budget.register_call();
+        let text = self.request(headers, search_term).await;
+        if let Err(Error::CouldNotConnect(_)) = &text {
+            self.budget.update(-1);
+        }
+        let results = self.to_results(&text?);
         Ok(results)
     }
 }
