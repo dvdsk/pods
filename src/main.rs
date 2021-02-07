@@ -8,8 +8,7 @@ use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
 use error_level::ErrorLevel;
-use database::episodes::Key as EpisodeKey;
-use database::podcasts::EpisodeList;
+use database::{EpisodeKey, PodcastKey, Episode, PodcastDb};
 use page::episodes::FileType;
 
 use std::collections::HashMap;
@@ -17,11 +16,11 @@ use iced::{button, executor, Application, Command, Element, Column, Settings, Su
 
 #[derive(Clone, Debug)]
 pub enum Message {
-    ToEpisodes(u64),
-    ToEpisodesFinish(HashMap<u64, FileType>, EpisodeList, u64),
+    ToEpisodes(PodcastKey),
+    ToEpisodesFinish(HashMap<u64, FileType>, Vec<Episode>, u64),
     PlayBackTick(std::time::Instant),
     Stream(EpisodeKey),
-    Play(EpisodeKey, FileType),
+    Play(EpisodeKey, FileType, f32),
     // PlayCallback(play::WebToDecoderStream),
     Download(EpisodeKey),
     Remove(EpisodeKey, FileType),
@@ -45,8 +44,7 @@ pub struct App {
     downloader: Downloader,
     player: Player,
     controls: Controls, //Should only be needed on desktop platforms
-    pod_db: database::Podcasts,
-    episode_db: database::Episodes,
+    pod_db: PodcastDb,
 }
 
 impl Application for App {
@@ -56,8 +54,7 @@ impl Application for App {
 
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         let db = database::open().unwrap();
-        let pod_db = database::Podcasts::open(&db).unwrap();
-        let episode_db = database::Episodes::open(&db).unwrap();
+        let pod_db = PodcastDb::open(&db).unwrap();
         (App {
             podcasts: page::Podcasts::from_db(pod_db.clone()),
             episodes: page::Episodes::from_db(&episode_db), 
@@ -66,7 +63,6 @@ impl Application for App {
             downloader: Downloader::default(),
             controls: Controls::default(),
             pod_db,
-            episode_db,
         }, Command::none())
     }
     fn title(&self) -> String {
@@ -93,10 +89,10 @@ impl Application for App {
                 Command::none()
             }
             Message::ToEpisodes(podcast_id) => {
-                let list = self.pod_db.get_episodelist(podcast_id).unwrap();
+                let list = self.pod_db.get_episodes(podcast_id).unwrap();
                 Command::perform(
-                    page::episodes::scan_podcast_wrapper(list),
-                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast_id),
+                    page::episodes::scan_podcast_wrapper(list, podcast),
+                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast),
                 )
             }
             Message::ToEpisodesFinish(downloaded, list, podcast_id) => {
@@ -143,7 +139,12 @@ impl Application for App {
                 Command::none()
             }
             Message::PlayBackTick(_) => {
-                // only used to trigger a redraw
+                if let Some(pos) = self.player.should_store_pos() {
+                    if let Some(key) = self.player.current.info().map(|i| i.key) {
+                        self.pod_db.update_pos(key, pos);
+                    }
+                }
+                // also used to trigger a redraw
                 Command::none()
             }
             Message::AddPodcast(url) => {
@@ -157,8 +158,8 @@ impl Application for App {
                 self.player.add_stream(key);
                 Command::none()
             }
-            Message::Play(key, file_type) => {
-                self.player.add_file(key, file_type);
+            Message::Play(key, file_type, pos) => {
+                self.player.add_file(key, file_type, pos);
                 Command::none()
             }
             Message::Skip(f) => {

@@ -1,110 +1,154 @@
-use eyre::WrapErr;
-use serde::{Serialize, Deserialize};
+use super::types::{Episode, Podcast};
+use super::error::Error;
 
-#[derive(Serialize, Deserialize)]
-pub struct PodcastInfo {
-    pub title: String,
-    url: String,
-    pub local_id: u64,
+// TODO FIXME rewrite using From trait, EpisodeKey should use From PodcastKey
+
+fn hash_str(s: impl AsRef<str>) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    s.as_ref().hash(&mut hasher);
+    let key = hasher.finish();
+    key
 }
 
-// TODO exclude listend from partialeq?
-// the contains check is invalid with derived
-// partialeq
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct EpisodeInfo {
-    pub title: String,
-    pub listend: bool,
-}
+#[derive(Debug, Clone, Copy)]
+pub struct PodcastKey(u64);
 
-impl PartialEq for EpisodeInfo {
-    fn eq(&self, other: &Self) -> bool {
-        self.title == other.title
+impl From<&str> for PodcastKey {
+    fn from(podcast: &str) -> Self {
+        let hash = hash_str(podcast);
+        Self(hash)
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct EpisodeList {
-    pub podcast: String,
-    pub items: Vec<EpisodeInfo>,
-}
-pub type PodcastList = Vec<PodcastInfo>;
-
-#[derive(Clone)]
-pub struct Podcasts {
-    tree: sled::Tree,
-    db: sled::Db,
+impl From<&[u8]> for PodcastKey {
+    fn from(bytes: &[u8]) -> Self {
+        let slice = bytes;
+        let mut key = [0u8;8];
+        key[0..8].copy_from_slice(slice);
+        let hash = u64::from_be_bytes(key);
+        Self(hash)
+    }
 }
 
-type LocalId = u64;
-impl Podcasts {
+impl From<sled::IVec> for PodcastKey {
+    fn from(vec: sled::IVec) -> Self {
+        PodcastKey::from(vec.as_ref())
+    }
+}
+
+impl PodcastKey {
+    fn podcast_end(&self) -> Self {
+        self.increment()
+    }
+    fn increment(&self) -> Self {
+        let hash = self.0;
+        hash += 1;
+        Self(hash)
+    }
+}
+
+impl Into<sled::IVec> for PodcastKey {
+    fn into(self) -> sled::IVec {
+        sled::IVec::from(&self.0.to_be_bytes())
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EpisodeKey([u8; 16]);
+impl EpisodeKey {
+
+    pub fn from_title(podcast_id: impl Into<PodcastKey>, episode: impl AsRef<str>) -> Self {
+        let mut key = [0u8;16];
+        let id = podcast_id.into().0.to_be_bytes();
+        key[0..8].copy_from_slice(&id);
+        let id = hash_str(episode).to_be_bytes();
+        key[8..16].copy_from_slice(&id);
+        EpisodeKey(key)
+    }
+    fn podcast_start(podcast_id: impl Into<PodcastKey>) -> Self {
+        let mut key = [0u8;16];
+        let id = podcast_id.into().0;
+        key[0..8].copy_from_slice(&id.to_be_bytes());
+        EpisodeKey(key)
+    }
+    fn podcast_end(podcast_id: impl Into<PodcastKey>) -> Self {
+        let mut key = [0u8;16];
+        let id = podcast_id.into().0 +1;
+        key[0..8].copy_from_slice(&id.to_be_bytes());
+        EpisodeKey(key)
+    }
+}
+
+impl AsRef<[u8]> for EpisodeKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PodcastDb {
+    basic: sled::Tree,
+    extended: sled::Tree,
+}
+
+impl PodcastDb {
     pub fn open(db: &sled::Db) -> sled::Result<Self> {
-        let tree = db.open_tree("podcasts")?;
+        let basic = db.open_tree("podcasts_b_0.1")?;
+        let extended = db.open_tree("podcasts_e_0.1")?;
         Ok(Self{
-            tree,
-            db: db.clone(),
+            basic,
+            extended,
         })
     }
-    pub fn add_feed(&mut self, title: &str, url: &str, episodes: EpisodeList)
-    -> eyre::Result<LocalId> {
-        let id = self.add_to_podcastlist(title, url)?;
-        self.add_to_episodelist(id, episodes)?;
-        Ok(id)
-    }
+    pub fn get_podcasts(&self) -> Result<Vec<Podcast>, Error> {
+        let mut list = Vec::new();
+        let mut key = PodcastKey(0);
+        while let Some(kv) = self.basic.get_gt(key.0.to_be_bytes())? {
+            let (key_bytes, value) = kv;
+            let podcast = bincode::deserialize(&value).unwrap();
+            list.push(podcast);
 
-    fn add_to_episodelist(&mut self, id: LocalId, list: EpisodeList) 
-    -> eyre::Result<()> {
-
-        self.tree.update_and_fetch(id.to_be_bytes(), move |old| {
-            if let Some(old) = old {
-                let EpisodeList {items: mut list, podcast} = bincode::deserialize(&old).unwrap();
-                let new_episodes: Vec<_> = list.iter().filter(|e| !list.contains(e)).cloned().collect();
-                list.extend(new_episodes);
-                Some(bincode::serialize(&EpisodeList{items: list, podcast}).unwrap())
-            } else {
-                let bytes = bincode::serialize(&list).unwrap();
-                Some(bytes)
-            }
-        }).wrap_err("could not update subscribed podcasts in database")?;
-        Ok(())
-    }
-    fn add_to_podcastlist(&mut self, title: &str, url: &str)
-        -> eyre::Result<LocalId> {
-        
-        let local_id = self.db.generate_id()?;
-        self.tree.update_and_fetch("podcasts", move |old| {
-            if let Some(list) = old {
-                let mut list: PodcastList = bincode::deserialize(&list).unwrap();
-                list.push(PodcastInfo {
-                    title: title.to_owned(),
-                    url: url.to_owned(),
-                    local_id: local_id.to_owned(),
-                });
-                Some(bincode::serialize(&list).unwrap())
-            } else {
-                let list: PodcastList = vec!( PodcastInfo {
-                    title: title.to_owned(),
-                    url: url.to_owned(),
-                    local_id: local_id.to_owned(),
-                });
-                let bytes = bincode::serialize(&list).unwrap();
-                Some(bytes)
-            }
-        }).wrap_err("could not update subscribed podcasts in database")?;
-            
-        Ok(local_id)
-    }
-    pub fn get_podcastlist(&mut self) -> sled::Result<PodcastList> {
-        if let Some(data) = self.tree.get("podcasts")? {
-            let list = bincode::deserialize(&data).unwrap();
-            Ok(list)
-        } else {
-            Ok(Vec::new())
+            key = PodcastKey::from(key_bytes);
+            key.increment(); // make sure we get another podcast next call
         }
-    }
-    pub fn get_episodelist(&mut self, id: LocalId) -> sled::Result<EpisodeList> {
-        let data = self.tree.get(id.to_be_bytes())?.expect("every podcast should have an episode list");
-        let list = bincode::deserialize(&data).unwrap();
         Ok(list)
+    }
+
+    pub fn get_podcast(&self, podcast_id: u64) -> Result<Podcast, Error> {
+        let bytes = self.basic.get(podcast_id.to_be_bytes())?.expect("podcast not in database"); 
+        let podcast = bincode::deserialize(&bytes).unwrap();
+        Ok(podcast)
+    }
+
+    pub fn get_episodes(&self, key: impl Into<PodcastKey>) -> Result<Vec<Episode>, Error> {
+        let podcast_key = key.into();
+        let start = EpisodeKey::podcast_start(podcast_key);
+        let end = EpisodeKey::podcast_end(podcast_key);
+        let mut list = Vec::new();
+        for value in self.basic.range(start..end).values() {
+            let episode = bincode::deserialize(&value?).unwrap();
+            list.push(episode);
+        }
+        Ok(list)
+    }
+
+    fn update_basic(mut new: Episode, old: Option<&[u8]>) -> Option<impl Into<sled::IVec>>{
+        if let Some(existing) = old {
+            let existing: Episode = bincode::deserialize(&existing).unwrap();
+            new.progress = existing.progress;
+        }
+        let bytes = bincode::serialize(&new).unwrap();
+        Some(bytes)
+    }
+
+    pub fn update_episodes(&self, podcast: impl Into<PodcastKey>, new_list: Vec<Episode>) {
+        for new in new_list {
+            let key = EpisodeKey::from_title(podcast, new.title);
+            self.basic.fetch_and_update(key, move |old| Self::update_basic(new, old));
+            // self.extended.fetch_and_update(key)
+        }
     }
 }

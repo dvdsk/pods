@@ -2,10 +2,13 @@ use eyre::{Result, WrapErr};
 use sled;
 use std::path::PathBuf;
 
-pub mod podcasts2;
-pub mod error;
-pub mod types;
-// pub use podcasts2;
+mod podcasts;
+mod error;
+mod types;
+
+pub use podcasts::{PodcastDb, PodcastKey, EpisodeKey};
+pub use types::{Podcast, Episode, EpisodeExt, Progress};
+pub use error::Error;
 
 pub fn open() -> Result<sled::Db> {
     let path = PathBuf::from("database");

@@ -3,8 +3,9 @@ use iced::{button, Button, Element, Text, HorizontalAlignment, Row};
 use iced::widget::scrollable::{self, Scrollable};
 
 use std::collections::HashMap;
-use crate::database::{self, podcasts::EpisodeList, EpisodeInfo};
-use crate::database::episodes::Key as EpisodeKey;
+use crate::database::{Episode, EpisodeExt, PodcastDb};
+use crate::database::Progress;
+use crate::database::EpisodeKey;
 
 #[derive(Debug, Clone, Copy)]
 pub enum FileType {
@@ -24,13 +25,15 @@ struct ListItem {
     // either download or delete
     file_button: button::State,
     play_button: button::State,
+    progress: Progress,
     file: Option<FileType>,
     title: String,
 }
 
 impl ListItem {
-    fn from(info: EpisodeInfo, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
-        let title = info.title.to_owned();
+    fn from(episode: Episode, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
+        let title = episode.title.to_owned();
+        let progress = episode.progress;
         let file = episodes_on_disk
             .get(&hash(&title))
             .copied();
@@ -38,6 +41,7 @@ impl ListItem {
         ListItem {
             file_button: button::State::new(),
             play_button: button::State::new(),
+            progress,
             file, // is none if no file was found 
             title,
         }
@@ -54,8 +58,7 @@ fn hash(string: &str) -> u64 {
     hasher.finish()
 }
 
-pub async fn scan_podcast_wrapper(list: EpisodeList) -> (HashMap<u64, FileType>, EpisodeList) {
-    let podcast = &list.podcast;
+pub async fn scan_podcast_wrapper(list: Vec<Episode>, podcast: String) -> (HashMap<u64, FileType>, Vec<Episode>) {
     (scan_podcast_dir(podcast).await, list)
 }
 
@@ -95,7 +98,7 @@ pub async fn scan_podcast_dir(podcast: impl AsRef<str>) -> HashMap<u64, FileType
 /// Episodes view
 #[derive(Debug)]
 pub struct Episodes {
-    db: database::Episodes,
+    db: PodcastDb,
     list: Vec<ListItem>,
     scroll_state: scrollable::State,
     pub podcast: Option<String>,
@@ -106,9 +109,9 @@ pub struct Episodes {
 
 impl Episodes {
     const MAXSCROLLABLE: usize = 10;
-    pub fn from_db(db: &database::Episodes) -> Self {
+    pub fn from_db(db: PodcastDb) -> Self {
         Self {
-            db: db.clone(),
+            db,
             list: Vec::new(),
             scroll_state: scrollable::State::new(),
             podcast: None,
@@ -124,11 +127,11 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.saturating_sub(Self::MAXSCROLLABLE);
     }
     /// fill the view from a list of episodes
-    pub fn populate(&mut self, episodes: EpisodeList, podcast_id: u64, downloaded_episodes: HashMap<u64, FileType>) {
+    pub fn populate(&mut self, episodes: Vec<Episode>, podcast_id: u64, downloaded_episodes: HashMap<u64, FileType>) {
         self.list.clear();
-        self.podcast = Some(episodes.podcast.to_owned());
+        self.podcast = Some(self.db.get_podcast(podcast_id).unwrap().title);
         self.podcast_id = Some(podcast_id);
-        for info in episodes.items {
+        for info in episodes {
             self.list.push(ListItem::from(info, &downloaded_episodes));
         }
     }
@@ -148,11 +151,11 @@ impl Episodes {
             .skip(self.scrolled_down)
             .take(Self::MAXSCROLLABLE) {
 
-            let podcast_id = *self.podcast_id.as_ref().unwrap();
-            let key = EpisodeKey::from((podcast_id, item.title.as_str()));
+            let podcast_hash = *self.podcast_id.as_ref().unwrap();
+            let key = EpisodeKey::from_hash(podcast_hash, item.title);
             let mut row = Row::new();
             if let Some(file_type) = item.file {
-                row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone()));
+                row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone(), item.progress.clone()));
                 row = row.push(delete_button(&mut item.file_button, key.clone(), file_type));
             } else {
                 row = row.push(stream_button(&mut item.play_button, key.clone(), item.title.clone()));
@@ -164,9 +167,9 @@ impl Episodes {
     }
 }
 
-fn play_button<'a>(state: &'a mut button::State, key: EpisodeKey, file_type: FileType, episode_name: String)
+fn play_button<'a>(state: &'a mut button::State, key: EpisodeKey, file_type: FileType, episode_name: String, progress: Progress)
     -> Button<'a, crate::Message> {
-    let msg = crate::Message::Play(key, file_type);
+    let msg = crate::Message::Play(key, file_type, progress.into());
     Button::new(state, 
         Text::new(episode_name).horizontal_alignment(HorizontalAlignment::Left))
         .on_press(msg)

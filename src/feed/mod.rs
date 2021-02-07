@@ -3,7 +3,7 @@ use std::str::FromStr;
 use eyre::WrapErr;
 
 mod search;
-use crate::database::podcasts::{EpisodeList, EpisodeInfo};
+use crate::database::podcasts::{EpisodeList, EpisodeInfo, Progress};
 use crate::database;
 pub use search::{Search, SearchResult};
 
@@ -35,7 +35,7 @@ fn get_episode_info(items: &[rss::Item]) -> eyre::Result<Vec<EpisodeInfo>> {
         .filter_map(|x| x.title())
         .map(|t| EpisodeInfo {
         title: t.to_owned(),
-        listend: false,
+        progress: Progress::None,
     }).collect())
 }
 

@@ -93,7 +93,7 @@ impl TryFrom<(&rss::Item, &str)> for Episode {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Key([u8; 8]);
 impl From<(u64,&str)> for Key {
     fn from((podcast_id, episode): (u64, &str)) -> Self {
@@ -135,14 +135,14 @@ impl Episodes {
     }
 
     pub fn get(&self, key: Key) -> sled::Result<Episode> {
-        log::debug!("getting episode, key: {:?}", key);
+        log::trace!("getting episode, key: {:?}", key);
         let bytes = self.tree.get(key)?
             .expect("item should be in database already");
         Ok(bincode::deserialize(&bytes).unwrap())
     }
 
     pub fn add(&mut self, key: Key, item: Episode) -> sled::Result<()> {
-        log::debug!("adding episode, key: {:?}", key);
+        log::trace!("adding episode, key: {:?}", key);
         let bytes = bincode::serialize(&item).unwrap();
         self.tree.insert(key, bytes)?;
             // .expect_none("There should not be an episode with this name already in the db");

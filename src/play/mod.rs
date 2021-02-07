@@ -27,18 +27,23 @@ impl Track {
             panic!("Track variant is not Stream")
         }
     }
+    pub fn info(&self) -> Option<&TrackInfo> {
+        match self {
+            Track::Stream(info, ..) => Some(info),
+            Track::File(info, ..) => Some(info),
+            Track::None => None,
+        }
+    }
     /// Duration in seconds
     pub fn duration(&self) -> f32 {
-        match self {
-            Track::Stream(info, ..) => info.duration,
-            Track::File(info, ..) => info.duration,
-            Track::None => 0f32,
-        }
+        self.info()
+            .map(|i| i.duration)
+            .unwrap_or(0f32)
     }
 }
 
-#[derive(Default)]
 pub struct TrackInfo {
+    pub key: database::episodes::Key,
     pub title: String,
     pub paused: bool,
     pub duration: f32,
@@ -64,6 +69,7 @@ pub struct Player {
     pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
 
     last_started: Option<Instant>,
+    last_stored: Option<f32>,
     offset: f32,
 }
 
@@ -77,6 +83,7 @@ impl Player {
             db: db.clone(),
             rx: None,
             last_started: None,
+            last_stored: None,
             offset: 0f32,
         }
     }
@@ -114,6 +121,16 @@ impl Player {
         self.offset+elapsed
     }
 
+    pub fn should_store_pos(&mut self) -> Option<f32> {
+        let pos = self.pos();
+        if pos > self.last_stored.unwrap_or(0f32) + 5f32 {
+            self.last_stored = Some(pos);
+            Some(pos)
+        } else {
+            None
+        }
+    }
+
     fn stop(&mut self) {
         self.sink.take();
     }
@@ -124,6 +141,7 @@ impl Player {
         let meta = self.db.get(key).unwrap();
         self.current = Track::Stream(
             TrackInfo {
+                key,
                 title: String::default(),
                 paused: false,
                 duration: dbg!(meta.duration),
@@ -133,7 +151,7 @@ impl Player {
     }
 
     // TODO figure out better way to get extension into here
-    pub fn add_file(&mut self, key: database::episodes::Key, file_type: FileType) {
+    pub fn add_file(&mut self, key: database::episodes::Key, file_type: FileType, starting_pos: f32) {
         self.stop();
 
         let meta = self.db.get(key).unwrap();
@@ -143,9 +161,11 @@ impl Player {
         let file = std::fs::File::open(&path).unwrap();
         let source = rodio::Decoder::new(BufReader::new(file)).unwrap();
         self.start_play(source);
+        self.sink.as_mut().unwrap().set_pos(starting_pos);
 
         self.current = Track::File(
             TrackInfo {
+                key,
                 title: String::default(),
                 paused: false,
                 duration: meta.duration,
@@ -239,30 +259,6 @@ impl Player {
                 .width(Length::FillPortion(1)))
     }
 }
-
-// fn get_full_path(path: std::path::PathBuf) -> eyre::Result<()> {
-    // use std::fs::DirEntry;
-    // let file_name = path.file_name().unwrap();
-    // let dir = path.parent().unwrap();
-
-    // let full_path = std::fs::read_dir(dir)?
-    //     .into_iter()
-    //     .filter_map(Result::ok)
-    //     // .filter_map(|e| e.is_ok())
-    //     .filter_map(DirEntry::file_name)
-    //     .map(|e| e.to_str())
-    //     .map(|e| split
-    //     .filter(|e| e == file_name)
-
-        
-    // let mut full_path = None;
-    // for entry in std::fs::read_dir(dir)? {
-    //     let entry_name = entry.as_ref().unwrap().file_name();
-    //     if &entry_name == file_name {
-    //         full_path = Some(entry.unwrap().path());
-    //     }
-    // }
-// }
 
 #[cfg(test)]
 mod test {

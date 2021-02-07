@@ -43,7 +43,7 @@ impl Search {
 
     async fn request(&mut self, search_term: &str) -> Result<String, Error> {
         let text = self.client.get("https://itunes.apple.com/search")
-            .timeout(std::time::Duration::from_millis(1000))
+            .timeout(std::time::Duration::from_millis(5000))
             .query(&[("entity","podcast")])
             .query(&[("term",search_term)])
             .query(&[("limit",25)])
