@@ -8,13 +8,23 @@ pub struct Episode {
     pub progress: Progress,
 }
 
+impl From<&EpisodeExt> for Episode {
+    fn from(episode: &EpisodeExt) -> Self {
+        Self {
+            title: episode.title.to_owned(),
+            duration: episode.duration,
+            progress: Progress::None,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct EpisodeExt {
     pub stream_url: String,
     /// the duration of the episode in seconds
     pub duration: f32,
     pub title: String,
-    // pub podcast: String
+    pub podcast: String,
     // some extra fields
 }
 
@@ -31,7 +41,7 @@ impl From<&rss::Channel> for Podcast {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
 pub enum Progress {
     None,
     Completed,

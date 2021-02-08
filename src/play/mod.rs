@@ -74,13 +74,13 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn from_db(db: &database::PodcastDb) -> Self {
+    pub fn from_db(db: database::PodcastDb) -> Self {
         Self {
             controls: Controls { skip_dur: 5f32, .. Controls::default()},
             current: Track::None,
             sink: None,
             output_stream: None,
-            db: db.clone(),
+            db,
             rx: None,
             last_started: None,
             last_stored: None,
@@ -138,7 +138,7 @@ impl Player {
     pub fn add_stream(&mut self, id: database::EpisodeKey) {
         self.stop();
 
-        let meta = self.db.get(id).unwrap();
+        let meta = self.db.get_episode_ext(id).unwrap();
         self.current = Track::Stream(
             TrackInfo {
                 id,
@@ -152,10 +152,11 @@ impl Player {
 
     // TODO figure out better way to get extension into here
     pub fn add_file(&mut self, id: database::EpisodeKey, file_type: FileType, starting_pos: f32) {
+        use crate::download::base_file_path;
         self.stop();
 
-        let meta = self.db.get(id).unwrap();
-        let mut path = meta.base_file_path();
+        let episode = self.db.get_episode_ext(id).unwrap();
+        let mut path = base_file_path(&episode);
         path.set_extension(file_type.as_str());
 
         let file = std::fs::File::open(&path).unwrap();
@@ -168,7 +169,7 @@ impl Player {
                 id,
                 title: String::default(),
                 paused: false,
-                duration: meta.duration,
+                duration: episode.duration,
             }, 
             path);
     }

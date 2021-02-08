@@ -152,7 +152,7 @@ impl Episodes {
             .take(Self::MAXSCROLLABLE) {
 
             let podcast_id = *self.podcast_id.as_ref().unwrap();
-            let key = EpisodeKey::from_title(podcast_id, item.title);
+            let key = EpisodeKey::from_title(podcast_id, &item.title);
             let mut row = Row::new();
             if let Some(file_type) = item.file {
                 row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone(), item.progress.clone()));
