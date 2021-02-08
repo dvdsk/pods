@@ -37,3 +37,4 @@ serde = { version = "1", features = ["derive"] }
 log = "0.4"
 log4rs = "0.13"
 directories = "3"
+itertools = "0.10"

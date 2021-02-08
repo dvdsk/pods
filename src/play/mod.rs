@@ -43,7 +43,7 @@ impl Track {
 }
 
 pub struct TrackInfo {
-    pub key: database::episodes::Key,
+    pub id: database::EpisodeKey,
     pub title: String,
     pub paused: bool,
     pub duration: f32,
@@ -65,7 +65,7 @@ pub struct Player {
     pub sink: Option<rodio::Sink>,
     pub output_stream: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
 
-    db: database::Episodes,
+    db: database::PodcastDb,
     pub rx: Option<Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>>,
 
     last_started: Option<Instant>,
@@ -74,7 +74,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn from_db(db: &database::Episodes) -> Self {
+    pub fn from_db(db: &database::PodcastDb) -> Self {
         Self {
             controls: Controls { skip_dur: 5f32, .. Controls::default()},
             current: Track::None,
@@ -135,13 +135,13 @@ impl Player {
         self.sink.take();
     }
 
-    pub fn add_stream(&mut self, key: database::episodes::Key) {
+    pub fn add_stream(&mut self, id: database::EpisodeKey) {
         self.stop();
 
-        let meta = self.db.get(key).unwrap();
+        let meta = self.db.get(id).unwrap();
         self.current = Track::Stream(
             TrackInfo {
-                key,
+                id,
                 title: String::default(),
                 paused: false,
                 duration: dbg!(meta.duration),
@@ -151,10 +151,10 @@ impl Player {
     }
 
     // TODO figure out better way to get extension into here
-    pub fn add_file(&mut self, key: database::episodes::Key, file_type: FileType, starting_pos: f32) {
+    pub fn add_file(&mut self, id: database::EpisodeKey, file_type: FileType, starting_pos: f32) {
         self.stop();
 
-        let meta = self.db.get(key).unwrap();
+        let meta = self.db.get(id).unwrap();
         let mut path = meta.base_file_path();
         path.set_extension(file_type.as_str());
 
@@ -165,7 +165,7 @@ impl Player {
 
         self.current = Track::File(
             TrackInfo {
-                key,
+                id,
                 title: String::default(),
                 paused: false,
                 duration: meta.duration,

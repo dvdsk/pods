@@ -3,7 +3,7 @@ use std::str::FromStr;
 use eyre::WrapErr;
 
 mod search;
-use crate::database::podcasts::{EpisodeList, EpisodeInfo, Progress};
+use crate::database::{Episode, Progress, PodcastKey, Podcast};
 use crate::database;
 pub use search::{Search, SearchResult};
 
@@ -30,22 +30,23 @@ async fn get_podcast_info(url: &str) -> eyre::Result<rss::Channel> {
     Ok(channel)
 }
 
-fn get_episode_info(items: &[rss::Item]) -> eyre::Result<Vec<EpisodeInfo>> {
+fn get_episode_info(items: &[rss::Item]) -> eyre::Result<Vec<Episode>> {
     Ok(items.iter()
         .filter_map(|x| x.title())
-        .map(|t| EpisodeInfo {
+        .map(|t| Episode {
         title: t.to_owned(),
         progress: Progress::None,
     }).collect())
 }
 
-pub async fn add_podcast(mut pod_db: database::Podcasts, mut episode_db: database::Episodes,
-    url: String) -> (String, u64) {
+pub async fn add_podcast(mut pod_db: database::PodcastDb, url: String) -> (String, PodcastKey) {
     let info = get_podcast_info(&url).await.unwrap();
-    let title = info.title().to_owned();
+
+    let podcast = Podcast::from(&info);
+    pod_db.add_podcast(&podcast).unwrap();
+
     let episodes = get_episode_info(info.items()).unwrap();
-    let episode_list = EpisodeList {podcast: title.clone(), items: episodes};
-    let id = pod_db.add_feed(&title, &url, episode_list).unwrap();
-    episode_db.add_feed(id, info);
-    (title, id)
+    pod_db.update_episodes(podcast.title, episodes).unwrap();
+
+    (podcast.title.clone(), PodcastKey::from(podcast.title))
 }

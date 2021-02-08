@@ -1,4 +1,4 @@
-use crate::database::episodes::Key as EpisodeKey;
+use crate::database::EpisodeKey;
 use crate::{database, Message};
 use iced::Subscription;
 use std::path::PathBuf;
@@ -18,8 +18,8 @@ pub struct Downloader {
 }
 
 impl Downloader {
-    pub fn add(&mut self, key: EpisodeKey, db: &mut database::Episodes) -> iced::Command<Message> {
-        let episode = db.get(key)
+    pub fn add(&mut self, key: EpisodeKey, db: &mut database::PodcastDb) -> iced::Command<Message> {
+        let episode = db.get_episode(key)
             .expect("item should be in database when we start downloading");
         let url = reqwest::Url::parse(&episode.stream_url).expect("url should be valid here");
         let extension = url.path().rsplitn(2, ".").next().expect("there has to be a file extension");

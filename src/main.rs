@@ -8,7 +8,7 @@ use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
 use error_level::ErrorLevel;
-use database::{EpisodeKey, PodcastKey, Episode, PodcastDb};
+use database::{EpisodeKey, PodcastKey, Episode, PodcastDb, Progress};
 use page::episodes::FileType;
 
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use iced::{button, executor, Application, Command, Element, Column, Settings, Su
 #[derive(Clone, Debug)]
 pub enum Message {
     ToEpisodes(PodcastKey),
-    ToEpisodesFinish(HashMap<u64, FileType>, Vec<Episode>, u64),
+    ToEpisodesFinish(HashMap<u64, FileType>, Vec<Episode>, PodcastKey),
     PlayBackTick(std::time::Instant),
     Stream(EpisodeKey),
     Play(EpisodeKey, FileType, f32),
@@ -57,9 +57,9 @@ impl Application for App {
         let pod_db = PodcastDb::open(&db).unwrap();
         (App {
             podcasts: page::Podcasts::from_db(pod_db.clone()),
-            episodes: page::Episodes::from_db(&episode_db), 
+            episodes: page::Episodes::from_db(pod_db.clone()), 
             current: Page::Podcasts,
-            player: Player::from_db(&episode_db), 
+            player: Player::from_db(pod_db.clone()), 
             downloader: Downloader::default(),
             controls: Controls::default(),
             pod_db,
@@ -90,9 +90,10 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let list = self.pod_db.get_episodes(podcast_id).unwrap();
+                let podcast = self.pod_db.get_podcast(podcast_id).unwrap();
                 Command::perform(
-                    page::episodes::scan_podcast_wrapper(list, podcast),
-                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast),
+                    page::episodes::scan_podcast_wrapper(list, podcast.title),
+                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast_id),
                 )
             }
             Message::ToEpisodesFinish(downloaded, list, podcast_id) => {
@@ -140,8 +141,9 @@ impl Application for App {
             }
             Message::PlayBackTick(_) => {
                 if let Some(pos) = self.player.should_store_pos() {
-                    if let Some(key) = self.player.current.info().map(|i| i.key) {
-                        self.pod_db.update_pos(key, pos);
+                    if let Some(info) = self.player.current.info() {
+                        let progress = Progress::Listening(pos);
+                        self.pod_db.update_episode_progress(info.id, progress);
                     }
                 }
                 // also used to trigger a redraw
@@ -149,10 +151,10 @@ impl Application for App {
             }
             Message::AddPodcast(url) => {
                 let pod_db = self.pod_db.clone();
-                let ep_db = self.episode_db.clone();
                 Command::perform(
-                    feed::add_podcast(pod_db, ep_db, url), 
-                    |x| Message::Podcasts(page::podcasts::Message::AddedPodcast(x.0,x.1)))
+                    feed::add_podcast(pod_db, url), 
+                    |(title, id)| Message::Podcasts(page::podcasts::Message::AddedPodcast(title,id))
+                )
             }
             Message::Stream(key) => {
                 self.player.add_stream(key);
@@ -166,7 +168,7 @@ impl Application for App {
                 self.player.skip(f);
                 Command::none()
             }
-            Message::Download(key) => self.downloader.add(key, &mut self.episode_db),
+            Message::Download(key) => self.downloader.add(key, &mut self.pod_db),
             Message::Remove(key, file_type) => todo!(),
             Message::PlayPause => self.player.play_pause(),
             Message::Podcasts(m) => self.podcasts.update(m),

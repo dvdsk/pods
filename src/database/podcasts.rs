@@ -1,4 +1,4 @@
-use super::types::{Episode, Podcast};
+use super::types::{Episode, Podcast, Progress};
 use super::error::Error;
 
 // TODO FIXME rewrite using From trait, EpisodeKey should use From PodcastKey
@@ -16,9 +16,23 @@ fn hash_str(s: impl AsRef<str>) -> u64 {
 #[derive(Debug, Clone, Copy)]
 pub struct PodcastKey(u64);
 
+impl From<&Podcast> for PodcastKey {
+    fn from(podcast: &Podcast) -> Self {
+        let hash = hash_str(podcast.title.as_str());
+        Self(hash)
+    }
+}
+
 impl From<&str> for PodcastKey {
     fn from(podcast: &str) -> Self {
         let hash = hash_str(podcast);
+        Self(hash)
+    }
+}
+
+impl From<String> for PodcastKey {
+    fn from(podcast: String) -> Self {
+        let hash = hash_str(podcast.as_str());
         Self(hash)
     }
 }
@@ -53,6 +67,12 @@ impl PodcastKey {
 impl Into<sled::IVec> for PodcastKey {
     fn into(self) -> sled::IVec {
         sled::IVec::from(&self.0.to_be_bytes())
+    }
+}
+
+impl AsRef<[u8]> for PodcastKey {
+    fn as_ref(&self) -> &[u8] {
+        &self.0.to_be_bytes()
     }
 }
 
@@ -117,14 +137,21 @@ impl PodcastDb {
         Ok(list)
     }
 
-    pub fn get_podcast(&self, podcast_id: u64) -> Result<Podcast, Error> {
-        let bytes = self.basic.get(podcast_id.to_be_bytes())?.expect("podcast not in database"); 
+    pub fn get_podcast(&self, podcast_id: impl Into<PodcastKey>) -> Result<Podcast, Error> {
+        let bytes = self.basic.get(podcast_id.into())?.expect("podcast not in database"); 
         let podcast = bincode::deserialize(&bytes).unwrap();
         Ok(podcast)
     }
 
-    pub fn get_episodes(&self, key: impl Into<PodcastKey>) -> Result<Vec<Episode>, Error> {
-        let podcast_key = key.into();
+    pub fn add_podcast(&self, podcast: &Podcast) -> Result<(), Error> {
+        let podcast_id = PodcastKey::from(podcast);
+        let bytes = bincode::serialize(&podcast).unwrap();
+        self.basic.insert(podcast_id.into(), bytes)?; 
+        Ok(())
+    }
+
+    pub fn get_episodes(&self, podcast_id: impl Into<PodcastKey>) -> Result<Vec<Episode>, Error> {
+        let podcast_key = podcast_id.into();
         let start = EpisodeKey::podcast_start(podcast_key);
         let end = EpisodeKey::podcast_end(podcast_key);
         let mut list = Vec::new();
@@ -133,6 +160,27 @@ impl PodcastDb {
             list.push(episode);
         }
         Ok(list)
+    }
+
+    pub fn get_episode(&self, podcast_id: impl Into<PodcastKey>) -> Result<Episode, Error> {
+        let podcast_id = podcast_id.into();
+        let bytes = self.basic.get(podcast_id)?.ok_or(Error::NotInDatabase)?;
+        let episode = bincode::deserialize(&bytes).unwrap();
+        Ok(episode)
+    }
+
+    fn update_progress(progress: Progress, old: Option<&[u8]>) -> Option<impl Into<sled::IVec>> {
+        let old = old.expect("item should be in database to update progress");
+        let mut episode: Episode = bincode::deserialize(&old).unwrap();
+        episode.progress = progress;
+        let new = bincode::serialize(&episode).unwrap();
+        Some(new)
+    }
+
+    pub fn update_episode_progress(&self, episode_id: EpisodeKey, progress: Progress) {
+        self.basic.fetch_and_update(episode_id, move |old| Self::update_progress(progress, old))
+            .unwrap()
+            .unwrap();
     }
 
     fn update_basic(mut new: Episode, old: Option<&[u8]>) -> Option<impl Into<sled::IVec>>{
@@ -144,11 +192,20 @@ impl PodcastDb {
         Some(bytes)
     }
 
-    pub fn update_episodes(&self, podcast: impl Into<PodcastKey>, new_list: Vec<Episode>) {
+    pub fn update_episodes(&self, podcast_id: impl Into<PodcastKey>, new_list: Vec<Episode>) 
+    -> Result<(), Error> {
         for new in new_list {
-            let key = EpisodeKey::from_title(podcast, new.title);
-            self.basic.fetch_and_update(key, move |old| Self::update_basic(new, old));
+            let key = EpisodeKey::from_title(podcast_id, new.title);
+            self.basic.fetch_and_update(key, move |old| Self::update_basic(new, old))?;
             // self.extended.fetch_and_update(key)
         }
+        Ok(())
+    }
+
+    pub fn update_podcast(&self, podcast_id: impl Into<PodcastKey>, podcast: Podcast) 
+    -> Result<(), Error> {
+        let bytes = bincode::serialize(&podcast).unwrap();
+        self.basic.insert(podcast_id.into(), bytes)?;
+        Ok(())
     }
 }

@@ -4,16 +4,17 @@ use iced::{scrollable, Scrollable};
 use iced::{TextInput, text_input};
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use itertools::izip;
 
 use crate::feed;
-use crate::database;
+use crate::database::{self, PodcastKey};
 
 #[derive(Debug, Clone)]
 pub enum Message {
     SearchSubmit,
     SearchInputChanged(String),
     SearchResults(Vec<feed::SearchResult>),
-    AddedPodcast(String, u64),
+    AddedPodcast(String, PodcastKey),
 }
 
 impl Into<crate::Message> for Message {
@@ -76,7 +77,7 @@ impl Search {
 
 #[derive(Default)]
 struct List {
-    podcast_buttons: Vec<(u64, button::State)>,
+    podcast_buttons: Vec<(PodcastKey, button::State)>,
     podcast_names: Vec<String>,
     feedres_buttons: Vec<button::State>,
     feedres_info: Vec<feed::SearchResult>,
@@ -93,7 +94,7 @@ fn feedres_button(button: &mut button::State, res: feed::SearchResult) -> Button
     .padding(12)
     .width(Length::Fill)
 }
-fn podcast_button(button: &mut button::State, text: String, id: u64) -> Button<crate::Message> {
+fn podcast_button(button: &mut button::State, text: String, id: PodcastKey) -> Button<crate::Message> {
     Button::new(button, 
         Text::new(text).horizontal_alignment(HorizontalAlignment::Center)
     )
@@ -113,8 +114,10 @@ impl List {
 
             scrollable = scrollable.push(feedres_button(button, info.clone()));
         }
-        for ((id, button), name) in self.podcast_buttons.iter_mut()
-            .zip(self.podcast_names.iter().filter(|n| n.contains(search_term))) {
+        let valid_names = self.podcast_names.iter().filter(|n| n.contains(search_term)); 
+        for ((id, button), name) in izip!(
+            self.podcast_buttons.iter_mut(), 
+            valid_names) {
 
             scrollable = scrollable.push(podcast_button(button, name.to_owned(), *id));
         }
@@ -139,7 +142,7 @@ impl List {
     fn remove_feedres(&mut self) {
         self.feedres_info.clear();
     }
-    fn add(&mut self, title: String, id: u64) {
+    fn add(&mut self, title: String, id: PodcastKey) {
         self.podcast_names.push(title);
         self.podcast_buttons.push((id, button::State::new()));
     }
@@ -149,20 +152,21 @@ pub struct Podcasts {
     /// the podcasts title
     list: List,
     search: Search,
-    podcasts: database::Podcasts,
+    podcasts: database::PodcastDb,
     // possible opt to do, cache the view
 }
 
 impl Podcasts {
-    pub fn from_db(db: database::Podcasts) -> Self {
+    pub fn from_db(db: database::PodcastDb) -> Self {
         let mut page = Podcasts {
             list: List::default(),
             search: Search::default(),
             podcasts: db,
         };
-        for database::podcasts::PodcastInfo{title, local_id, ..} in page.podcasts.get_podcastlist().unwrap() {
+        for database::Podcast{title, ..} in page.podcasts.get_podcasts().unwrap() {
+            let id = PodcastKey::from(title.as_str());
             page.list.podcast_names.push(title);
-            page.list.podcast_buttons.push((local_id, button::State::new()));
+            page.list.podcast_buttons.push((id, button::State::new()));
         }
         page
     }

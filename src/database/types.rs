@@ -23,6 +23,14 @@ pub struct Podcast {
     pub title: String,
 }
 
+impl From<&rss::Channel> for Podcast {
+    fn from(channel: &rss::Channel) -> Self {
+        Self {
+            title: channel.title().to_owned(),
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub enum Progress {
     None,

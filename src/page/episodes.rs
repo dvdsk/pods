@@ -5,7 +5,7 @@ use iced::widget::scrollable::{self, Scrollable};
 use std::collections::HashMap;
 use crate::database::{Episode, EpisodeExt, PodcastDb};
 use crate::database::Progress;
-use crate::database::EpisodeKey;
+use crate::database::{PodcastKey, EpisodeKey};
 
 #[derive(Debug, Clone, Copy)]
 pub enum FileType {
@@ -102,7 +102,7 @@ pub struct Episodes {
     list: Vec<ListItem>,
     scroll_state: scrollable::State,
     pub podcast: Option<String>,
-    podcast_id: Option<u64>,
+    podcast_id: Option<PodcastKey>,
     // number of rows we scrolled down
     scrolled_down: usize,
 }
@@ -127,7 +127,7 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.saturating_sub(Self::MAXSCROLLABLE);
     }
     /// fill the view from a list of episodes
-    pub fn populate(&mut self, episodes: Vec<Episode>, podcast_id: u64, downloaded_episodes: HashMap<u64, FileType>) {
+    pub fn populate(&mut self, episodes: Vec<Episode>, podcast_id: PodcastKey, downloaded_episodes: HashMap<u64, FileType>) {
         self.list.clear();
         self.podcast = Some(self.db.get_podcast(podcast_id).unwrap().title);
         self.podcast_id = Some(podcast_id);
@@ -151,8 +151,8 @@ impl Episodes {
             .skip(self.scrolled_down)
             .take(Self::MAXSCROLLABLE) {
 
-            let podcast_hash = *self.podcast_id.as_ref().unwrap();
-            let key = EpisodeKey::from_hash(podcast_hash, item.title);
+            let podcast_id = *self.podcast_id.as_ref().unwrap();
+            let key = EpisodeKey::from_title(podcast_id, item.title);
             let mut row = Row::new();
             if let Some(file_type) = item.file {
                 row = row.push(play_button(&mut item.play_button, key.clone(), file_type, item.title.clone(), item.progress.clone()));
