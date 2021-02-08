@@ -3,7 +3,7 @@ use iced::{button, Button, Element, Text, HorizontalAlignment, Row};
 use iced::widget::scrollable::{self, Scrollable};
 
 use std::collections::HashMap;
-use crate::database::{Episode, EpisodeExt, PodcastDb};
+use crate::database::{Episode, PodcastDb};
 use crate::database::Progress;
 use crate::database::{PodcastKey, EpisodeKey};
 
@@ -136,7 +136,6 @@ impl Episodes {
         }
     }
     pub fn update_downloaded(&mut self, downloaded_episodes: HashMap<u64, FileType>) {
-        let podcast = self.podcast.as_ref().unwrap();
         for item in &mut self.list {
             let file = downloaded_episodes.get(&hash(&item.title)).copied();
             item.file = file;

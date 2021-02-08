@@ -3,7 +3,7 @@ use std::str::FromStr;
 use eyre::WrapErr;
 
 mod search;
-use crate::database::{Episode, EpisodeExt, Progress, PodcastKey, Podcast};
+use crate::database::{EpisodeExt, PodcastKey, Podcast};
 use crate::database;
 pub use search::{Search, SearchResult};
 

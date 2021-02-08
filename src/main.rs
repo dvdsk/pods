@@ -12,7 +12,7 @@ use database::{EpisodeKey, PodcastKey, Episode, PodcastDb, Progress};
 use page::episodes::FileType;
 
 use std::collections::HashMap;
-use iced::{button, executor, Application, Command, Element, Column, Settings, Subscription};
+use iced::{executor, Application, Command, Element, Column, Settings, Subscription};
 
 #[derive(Clone, Debug)]
 pub enum Message {
