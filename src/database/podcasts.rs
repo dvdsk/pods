@@ -1,4 +1,4 @@
-use super::types::{Episode, EpisodeExt, Podcast, Progress};
+use super::types::{Episode, EpisodeExt, Podcast, Progress, Date};
 use super::error::Error;
 
 // TODO FIXME rewrite using From trait, EpisodeKey should use From PodcastKey
@@ -42,10 +42,6 @@ impl From<&[u8]> for PodcastKey {
         let mut id = [0u8;8];
         id[0..8].copy_from_slice(slice);
         Self(id)
-        // let slice = bytes;
-        // key[0..8].copy_from_slice(slice);
-        // let hash = u64::from_be_bytes(key);
-        // Self(hash)
     }
 }
 
@@ -174,8 +170,6 @@ impl PodcastDb {
             let episode = bincode::deserialize(&value?).unwrap();
             list.push(episode);
         }
-        // should not sort here, sorting is part of viewing the episodes
-        // list.sort_unstable_by_key(|i| i.title.clone());
         Ok(list)
     }
 
@@ -204,6 +198,9 @@ impl PodcastDb {
         if let Some(existing) = old {
             let existing: Episode = bincode::deserialize(&existing).unwrap();
             new.progress = existing.progress;
+            if let Date::Added(_) = new.date {
+                new.date = existing.date
+            }
         }
         let bytes = bincode::serialize(&new).unwrap();
         Some(bytes)
