@@ -125,16 +125,29 @@ impl PodcastDb {
             extended,
         })
     }
+    fn next_podcast(&self, id: PodcastKey) -> Result<Option<(PodcastKey, Podcast)>,Error> {
+        let res = self.basic.get_gt(id)?;
+        if res.is_none() {
+            return Ok(None);
+        }
+
+        let (key_bytes, value) = res.unwrap();
+        if key_bytes.len() != 8 {
+            return Ok(None); //no more podcast keys in db
+        }
+
+        let podcast = bincode::deserialize(&value).unwrap();
+        let id = PodcastKey::from(key_bytes);
+        let id = id.increment(); // make sure we get another podcast next call
+        Ok(Some((id, podcast)))
+    }
+
     pub fn get_podcasts(&self) -> Result<Vec<Podcast>, Error> {
         let mut list = Vec::new();
-        let mut key = PodcastKey([0u8;8]);
-        while let Some(kv) = self.basic.get_gt(key)? {
-            let (key_bytes, value) = kv;
-            let podcast = bincode::deserialize(&value).unwrap();
+        let mut id = PodcastKey([0u8;8]);
+        while let Some((next_id, podcast)) = self.next_podcast(id)? {
             list.push(podcast);
-
-            key = PodcastKey::from(key_bytes);
-            key.increment(); // make sure we get another podcast next call
+            id = next_id;
         }
         Ok(list)
     }
