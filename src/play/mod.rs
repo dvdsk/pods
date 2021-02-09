@@ -163,6 +163,7 @@ impl Player {
         let source = rodio::Decoder::new(BufReader::new(file)).unwrap();
         self.start_play(source);
         self.sink.as_mut().unwrap().set_pos(starting_pos);
+        self.offset = starting_pos;
 
         self.current = Track::File(
             TrackInfo {
