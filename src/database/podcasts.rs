@@ -169,11 +169,13 @@ impl PodcastDb {
         let podcast_key = podcast_id.into();
         let start = EpisodeKey::podcast_start(podcast_key);
         let end = EpisodeKey::podcast_end(podcast_key);
-        let mut list = Vec::new();
+        let mut list: Vec<Episode> = Vec::new();
         for value in self.basic.range(start..end).values() {
             let episode = bincode::deserialize(&value?).unwrap();
             list.push(episode);
         }
+        // should not sort here, sorting is part of viewing the episodes
+        // list.sort_unstable_by_key(|i| i.title.clone());
         Ok(list)
     }
 

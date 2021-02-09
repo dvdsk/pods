@@ -28,6 +28,7 @@ struct ListItem {
     progress: Progress,
     file: Option<FileType>,
     title: String,
+    date: String,
 }
 
 impl ListItem {
@@ -38,12 +39,15 @@ impl ListItem {
             .get(&hash(&title))
             .copied();
 
+        let date = episode.date.format();
+
         ListItem {
             file_button: button::State::new(),
             play_button: button::State::new(),
             progress,
             file, // is none if no file was found 
             title,
+            date,
         }
     }
 }
@@ -127,10 +131,13 @@ impl Episodes {
         self.scrolled_down = self.scrolled_down.saturating_sub(Self::MAXSCROLLABLE);
     }
     /// fill the view from a list of episodes
-    pub fn populate(&mut self, episodes: Vec<Episode>, podcast_id: PodcastKey, downloaded_episodes: HashMap<u64, FileType>) {
+    pub fn populate(&mut self, mut episodes: Vec<Episode>, podcast_id: PodcastKey, downloaded_episodes: HashMap<u64, FileType>) {
         self.list.clear();
         self.podcast = Some(self.db.get_podcast(podcast_id).unwrap().title);
         self.podcast_id = Some(podcast_id);
+        
+        episodes.sort_unstable_by_key(|e| e.date.inner().clone());
+        episodes.reverse();
         for info in episodes {
             self.list.push(ListItem::from(info, &downloaded_episodes));
         }

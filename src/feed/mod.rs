@@ -3,7 +3,7 @@ use std::str::FromStr;
 use eyre::WrapErr;
 
 mod search;
-use crate::database::{EpisodeExt, PodcastKey, Podcast};
+use crate::database::{EpisodeExt, PodcastKey, Podcast, Date};
 use crate::database;
 pub use search::{Search, SearchResult};
 
@@ -109,5 +109,6 @@ fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, E
         duration,
         title: title.to_owned(),
         podcast,
+        date: Date::from_item(item),
     })
 }

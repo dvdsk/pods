@@ -7,7 +7,7 @@ mod error;
 mod types;
 
 pub use podcasts::{PodcastDb, PodcastKey, EpisodeKey};
-pub use types::{Podcast, Episode, EpisodeExt, Progress};
+pub use types::{Podcast, Episode, EpisodeExt, Progress, Date};
 pub use error::Error;
 
 pub fn open() -> Result<sled::Db> {

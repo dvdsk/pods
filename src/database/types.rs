@@ -1,4 +1,43 @@
 use serde::{Serialize, Deserialize};
+use chrono::{Utc, FixedOffset, Local, DateTime};
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum Date {
+    Publication(DateTime<Utc>),
+    Added(DateTime<Utc>),
+}
+
+impl Date {
+    pub fn from_item(item: &rss::Item) -> Date {
+        let pub_date = item.pub_date()
+            .map(DateTime::parse_from_rfc2822)
+            .map(Result::ok)
+            .flatten()
+            .map(DateTime::from); // convert to Utc
+        match pub_date {
+            Some(date) => Date::Publication(date),
+            None => Date::Added(Utc::now()),
+        }
+    }
+    pub fn inner(&self) -> &DateTime<Utc> {
+        match self {
+            Self::Publication(d) => d,
+            Self::Added(d) => d,
+        }
+    }
+    pub fn format(&self) -> String {
+        let local: DateTime<Local> = self.inner().clone().into();
+        let since = local.signed_duration_since(Local::now());
+        if since.num_days() > 30 {
+            return format!("{}", local.format("%d:%m:%Y"));
+        }
+        if since.num_hours() > 48 {
+            return format!("{} days ago", since.num_days());
+        }
+
+        format!("{} hours ago", since.num_hours())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Episode {
@@ -6,6 +45,7 @@ pub struct Episode {
     /// the duration of the episode in seconds
     pub duration: f32,
     pub progress: Progress,
+    pub date: Date,
 }
 
 impl From<&EpisodeExt> for Episode {
@@ -14,6 +54,7 @@ impl From<&EpisodeExt> for Episode {
             title: episode.title.to_owned(),
             duration: episode.duration,
             progress: Progress::None,
+            date: episode.date,
         }
     }
 }
@@ -25,6 +66,7 @@ pub struct EpisodeExt {
     pub duration: f32,
     pub title: String,
     pub podcast: String,
+    pub date: Date,
     // some extra fields
 }
 
