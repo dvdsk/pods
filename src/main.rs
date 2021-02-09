@@ -219,7 +219,9 @@ impl Application for App {
 }
 
 pub fn main() -> iced::Result {
-    log4rs::init_file("log4rs.yml", Default::default()).unwrap();
+    if std::path::Path::new("log4rs.yml").exists() {
+        log4rs::init_file("log4rs.yml", Default::default()).unwrap();
+    }
     let settings = build_settings();
     App::run(settings)
 }
