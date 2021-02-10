@@ -187,10 +187,11 @@ impl PodcastDb {
         Some(new)
     }
 
-    pub fn update_episode_progress(&self, episode_id: EpisodeKey, progress: Progress) {
+    pub async fn update_episode_progress(&self, episode_id: EpisodeKey, progress: Progress) {
         self.basic.fetch_and_update(episode_id, |old| Self::update_progress(&progress, old))
             .unwrap()
             .unwrap();
+        self.basic.flush_async().await.unwrap();
     }
 
     fn update_basic(new: &EpisodeExt, old: Option<&[u8]>) -> Option<impl Into<sled::IVec>>{

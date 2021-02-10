@@ -37,6 +37,7 @@ pub enum Message {
     SearchInputChanged(String),
     SearchResults(Vec<feed::SearchResult>),
     AddedPodcast(String, PodcastKey),
+    None,
 }
 
 pub struct App {
@@ -58,6 +59,15 @@ fn update_podcasts(pod_db: PodcastDb) -> Command<Message> {
         update(pod_db),
         |_| Message::PodcastsUpdated,
     )
+}
+
+fn update_episode_progress(db: &PodcastDb, id: EpisodeKey, progress: Progress) -> Command<Message> {
+    async fn update(db: PodcastDb, id: EpisodeKey, progress: Progress) {
+        db.update_episode_progress(id, progress).await;
+    }
+
+    let db = db.clone();
+    Command::perform(update(db, id, progress), |_| Message::None)
 }
 
 impl Application for App {
@@ -156,7 +166,7 @@ impl Application for App {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
                         let progress = Progress::Listening(pos);
-                        self.pod_db.update_episode_progress(info.id, progress);
+                        return update_episode_progress(&self.pod_db, info.id, progress);
                     }
                 }
                 // also used to trigger a redraw
@@ -207,6 +217,7 @@ impl Application for App {
                 self.podcasts.list.add(title, id);
                 Command::none()
             }
+            Message::None => Command::none(),
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
