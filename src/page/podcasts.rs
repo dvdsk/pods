@@ -17,15 +17,15 @@ pub struct Search {
 }
 
 impl Search {
-    pub fn do_search(&mut self) -> Command<crate::Message> {
+    pub fn do_search(&mut self, ignore_budget: bool) -> Command<crate::Message> {
         // always do a web search if a search was submitted
         let term = self.input_value.clone();
         let search = self.search.clone();
         Command::perform(
-            async move {search.lock().await.search(term, true).await},
+            async move {search.lock().await.search(term, ignore_budget).await},
             |r| Message::SearchResults(r))
     }
-    pub fn search_input_changed(&mut self, pod_db: PodcastDb, input: String) -> Command<crate::Message> {
+    pub fn input_changed(&mut self, pod_db: PodcastDb, input: String) -> Command<crate::Message> {
         self.input_value = input;
         if feed::valid_url(&self.input_value) {
             let url = self.input_value.clone();
@@ -33,8 +33,7 @@ impl Search {
                 feed::add_podcast(pod_db, url), 
                 |(title, id)| Message::AddedPodcast(title,id))
         } else if self.input_value.len() > 4 {
-            self.do_search();
-            Command::none() 
+            self.do_search(false)
         } else {
             Command::none() 
         }
