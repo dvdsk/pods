@@ -16,7 +16,7 @@ impl Default for Search {
                 .build()
                 .expect("could not construct http client for podcast searching"),
             title_url: Regex::new(r#""title":"(.+?)","url":"(.+?)","originalUrl":"#).unwrap(),
-            budget: ApiBudget::from(5),
+            budget: ApiBudget::from(20),
         }
     }
 }
