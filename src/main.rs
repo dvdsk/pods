@@ -192,11 +192,11 @@ impl Application for App {
             Message::SearchSubmit => self
                 .podcasts
                 .search
-                .do_search(),
+                .do_search(true),
             Message::SearchInputChanged(input) => self
                 .podcasts
                 .search
-                .search_input_changed(self.pod_db.clone(), input),
+                .input_changed(self.pod_db.clone(), input),
             Message::SearchResults(r) => {
                 self.podcasts.list.update_feedres(r);
                 Command::none()
