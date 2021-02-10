@@ -222,13 +222,6 @@ impl PodcastDb {
         Ok(())
     }
 
-    pub fn insert_podcast(&self, podcast_id: impl Into<PodcastKey>, podcast: Podcast) 
-    -> Result<(), Error> {
-        let bytes = bincode::serialize(&podcast).unwrap();
-        self.basic.insert(podcast_id.into(), bytes)?;
-        Ok(())
-    }
-
     pub async fn update_podcasts(&self) -> Result<(), Error> {
         use crate::feed::add_podcast;
 

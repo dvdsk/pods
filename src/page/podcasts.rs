@@ -6,22 +6,8 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use itertools::izip;
 
-use crate::feed;
-use crate::database::{self, PodcastKey};
-
-#[derive(Debug, Clone)]
-pub enum Message {
-    SearchSubmit,
-    SearchInputChanged(String),
-    SearchResults(Vec<feed::SearchResult>),
-    AddedPodcast(String, PodcastKey),
-}
-
-impl Into<crate::Message> for Message {
-    fn into(self) -> crate::Message {
-        crate::Message::Podcasts(self)
-    }
-}
+use crate::{feed, Message};
+use crate::database::{self, PodcastKey, PodcastDb};
 
 #[derive(Default)]
 pub struct Search {
@@ -31,33 +17,26 @@ pub struct Search {
 }
 
 impl Search {
-    pub fn update(&mut self, message: Message) -> Command<crate::Message> {
-        match message {
-            Message::SearchSubmit => {
-                // always do a web search if a search was submitted
-                let term = self.input_value.clone();
-                let search = self.search.clone();
-                Command::perform(
-                    async move {search.lock().await.search(term, true).await},
-                    |r| crate::Message::Podcasts(Message::SearchResults(r))
-            )}
-            Message::SearchInputChanged(s) => {
-                self.input_value = s;
-                if feed::valid_url(&self.input_value) {
-                    todo!();
-                    Command::none()
-                } else if self.input_value.len() > 4 {
-                    let term = self.input_value.clone();
-                    let search = self.search.clone();
-                    Command::perform(
-                        async move {search.lock().await.search(term, true).await},
-                        |r| crate::Message::Podcasts(Message::SearchResults(r)) )
-                } else {
-                    Command::none() 
-                }
-            }
-            Message::SearchResults(_) => Command::none(),
-            Message::AddedPodcast(_,_) => panic!("addpodcast should not be handled in search::update"),
+    pub fn do_search(&mut self) -> Command<crate::Message> {
+        // always do a web search if a search was submitted
+        let term = self.input_value.clone();
+        let search = self.search.clone();
+        Command::perform(
+            async move {search.lock().await.search(term, true).await},
+            |r| Message::SearchResults(r))
+    }
+    pub fn search_input_changed(&mut self, pod_db: PodcastDb, input: String) -> Command<crate::Message> {
+        self.input_value = input;
+        if feed::valid_url(&self.input_value) {
+            let url = self.input_value.clone();
+            Command::perform(
+                feed::add_podcast(pod_db, url), 
+                |(title, id)| Message::AddedPodcast(title,id))
+        } else if self.input_value.len() > 4 {
+            self.do_search();
+            Command::none() 
+        } else {
+            Command::none() 
         }
     }
     pub fn view(&mut self) -> TextInput<crate::Message> {
@@ -65,10 +44,10 @@ impl Search {
             &mut self.input, 
             "Add podcast url", 
             &self.input_value, 
-            |s| crate::Message::Podcasts(Message::SearchInputChanged(s)),
+            |s| Message::SearchInputChanged(s),
         ) 
         .width(Length::Fill)
-        .on_submit(crate::Message::Podcasts(Message::SearchSubmit))
+        .on_submit(Message::SearchSubmit)
     }
     pub fn reset(&mut self) {
         self.input_value.clear();
@@ -76,7 +55,7 @@ impl Search {
 }
 
 #[derive(Default)]
-struct List {
+pub struct List {
     podcast_buttons: Vec<(PodcastKey, button::State)>,
     podcast_names: Vec<String>,
     feedres_buttons: Vec<button::State>,
@@ -131,7 +110,7 @@ impl List {
         self.scrolled_down -= 10;
         self.scrolled_down = self.scrolled_down.max(0);
     }
-    fn update_feedres(&mut self, results: Vec<feed::SearchResult>) {
+    pub fn update_feedres(&mut self, results: Vec<feed::SearchResult>) {
         //TODO add feedres_buttons
         self.feedres_info = results;
         let needed_buttons = self.feedres_info.len().saturating_sub(self.feedres_buttons.len());
@@ -139,10 +118,10 @@ impl List {
             self.feedres_buttons.push(button::State::new());
         }
     }
-    fn remove_feedres(&mut self) {
+    pub fn remove_feedres(&mut self) {
         self.feedres_info.clear();
     }
-    fn add(&mut self, title: String, id: PodcastKey) {
+    pub fn add(&mut self, title: String, id: PodcastKey) {
         self.podcast_names.push(title);
         self.podcast_buttons.push((id, button::State::new()));
     }
@@ -150,8 +129,8 @@ impl List {
 
 pub struct Podcasts {
     /// the podcasts title
-    list: List,
-    search: Search,
+    pub list: List,
+    pub search: Search,
     podcasts: database::PodcastDb,
     // possible opt to do, cache the view
 }
@@ -175,22 +154,6 @@ impl Podcasts {
     }
     pub fn up(&mut self) {
         self.list.up()
-    }
-    pub fn update(&mut self, message: Message) -> Command<crate::Message> {
-        match message {
-            Message::SearchSubmit => self.search.update(message),
-            Message::SearchInputChanged(_) => self.search.update(message),
-            Message::SearchResults(r) => {
-                self.list.update_feedres(r);
-                Command::none()
-            }
-            Message::AddedPodcast(title, id) => {
-                self.list.remove_feedres();
-                self.search.reset();
-                self.list.add(title, id);
-                Command::none()
-            }
-        }
     }
     pub fn view(&mut self) -> Element<crate::Message> {
         let scrollable = self.list.view(&self.search.input_value);

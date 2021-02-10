@@ -27,13 +27,16 @@ pub enum Message {
     Up,
     Down,
     PlayPause,
-    Podcasts(page::podcasts::Message),
     AddPodcast(String),
     PodcastsUpdated,
     StreamProgress(play::subscribe::Progress),
     DownloadProgress(download::Progress),
     DownloadFinished(HashMap<u64, FileType>),
     Skip(f32),
+    SearchSubmit,
+    SearchInputChanged(String),
+    SearchResults(Vec<feed::SearchResult>),
+    AddedPodcast(String, PodcastKey),
 }
 
 pub struct App {
@@ -163,8 +166,7 @@ impl Application for App {
                 let pod_db = self.pod_db.clone();
                 Command::perform(
                     feed::add_podcast(pod_db, url), 
-                    |(title, id)| Message::Podcasts(page::podcasts::Message::AddedPodcast(title,id))
-                )
+                    |(title, id)| Message::AddedPodcast(title,id))
             }
             Message::PodcastsUpdated => {
                 if let Page::Episodes = self.current {
@@ -187,7 +189,24 @@ impl Application for App {
             Message::Download(key) => self.downloader.add(key, &mut self.pod_db),
             Message::Remove(key, file_type) => todo!(),
             Message::PlayPause => self.player.play_pause(),
-            Message::Podcasts(m) => self.podcasts.update(m),
+            Message::SearchSubmit => self
+                .podcasts
+                .search
+                .do_search(),
+            Message::SearchInputChanged(input) => self
+                .podcasts
+                .search
+                .search_input_changed(self.pod_db.clone(), input),
+            Message::SearchResults(r) => {
+                self.podcasts.list.update_feedres(r);
+                Command::none()
+            }
+            Message::AddedPodcast(title,id) => {
+                self.podcasts.list.remove_feedres();
+                self.podcasts.search.reset();
+                self.podcasts.list.add(title, id);
+                Command::none()
+            }
         }
     }
     fn subscription(&self) -> Subscription<Self::Message> {
@@ -214,7 +233,7 @@ impl Application for App {
     }
     fn view(&mut self) -> Element<Self::Message> {
         let content = match self.current {
-            Page::Podcasts => self.podcasts.view(), // TODO load from a cache
+            Page::Podcasts => self.podcasts.view(),
             Page::Episodes => self.episodes.view(),
         };
         let column = Column::new();
