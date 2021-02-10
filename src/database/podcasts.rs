@@ -222,10 +222,21 @@ impl PodcastDb {
         Ok(())
     }
 
-    pub fn update_podcast(&self, podcast_id: impl Into<PodcastKey>, podcast: Podcast) 
+    pub fn insert_podcast(&self, podcast_id: impl Into<PodcastKey>, podcast: Podcast) 
     -> Result<(), Error> {
         let bytes = bincode::serialize(&podcast).unwrap();
         self.basic.insert(podcast_id.into(), bytes)?;
+        Ok(())
+    }
+
+    pub async fn update_podcasts(&self) -> Result<(), Error> {
+        use crate::feed::add_podcast;
+
+        let mut id = PodcastKey([0u8;8]);
+        while let Some((next_id, podcast)) = self.next_podcast(id)? {
+            add_podcast(self.clone(), podcast.url.clone()).await;
+            id = next_id;
+        }
         Ok(())
     }
 }

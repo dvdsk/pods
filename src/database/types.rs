@@ -73,12 +73,14 @@ pub struct EpisodeExt {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Podcast {
     pub title: String,
+    pub url: String,
 }
 
-impl From<&rss::Channel> for Podcast {
-    fn from(channel: &rss::Channel) -> Self {
+impl Podcast {
+    pub fn from_url(channel: &rss::Channel, url: String) -> Self {
         Self {
             title: channel.title().to_owned(),
+            url,
         }
     }
 }

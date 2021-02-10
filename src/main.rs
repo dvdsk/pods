@@ -8,8 +8,8 @@ use download::Downloader;
 use page::{Page, Controls};
 use play::Player;
 use error_level::ErrorLevel;
-use database::{EpisodeKey, PodcastKey, Episode, PodcastDb, Progress};
-use page::episodes::FileType;
+use database::{EpisodeKey, PodcastKey, PodcastDb, Progress};
+use download::FileType;
 
 use std::collections::HashMap;
 use iced::{executor, Application, Command, Element, Column, Settings, Subscription};
@@ -17,11 +17,10 @@ use iced::{executor, Application, Command, Element, Column, Settings, Subscripti
 #[derive(Clone, Debug)]
 pub enum Message {
     ToEpisodes(PodcastKey),
-    ToEpisodesFinish(HashMap<u64, FileType>, Vec<Episode>, PodcastKey),
+    ToEpisodesFinish(HashMap<u64, FileType>, PodcastKey),
     PlayBackTick(std::time::Instant),
     Stream(EpisodeKey),
     Play(EpisodeKey, FileType, f32),
-    // PlayCallback(play::WebToDecoderStream),
     Download(EpisodeKey),
     Remove(EpisodeKey, FileType),
     Back,
@@ -29,12 +28,12 @@ pub enum Message {
     Down,
     PlayPause,
     Podcasts(page::podcasts::Message),
-    AddPodcast(String), //url
+    AddPodcast(String),
+    PodcastsUpdated,
     StreamProgress(play::subscribe::Progress),
     DownloadProgress(download::Progress),
     DownloadFinished(HashMap<u64, FileType>),
     Skip(f32),
-    // Episodes(page::episodes::Message),
 }
 
 pub struct App {
@@ -47,6 +46,17 @@ pub struct App {
     pod_db: PodcastDb,
 }
 
+fn update_podcasts(pod_db: PodcastDb) -> Command<Message> {
+    async fn update(pod_db: PodcastDb) {
+        pod_db.update_podcasts().await.unwrap();
+    }
+
+    Command::perform(
+        update(pod_db),
+        |_| Message::PodcastsUpdated,
+    )
+}
+
 impl Application for App {
     type Executor = executor::Default;
     type Message = Message;
@@ -55,6 +65,7 @@ impl Application for App {
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         let db = database::open().unwrap();
         let pod_db = PodcastDb::open(&db).unwrap();
+        let startup = update_podcasts(pod_db.clone());
         (App {
             podcasts: page::Podcasts::from_db(pod_db.clone()),
             episodes: page::Episodes::from_db(pod_db.clone()), 
@@ -63,7 +74,7 @@ impl Application for App {
             downloader: Downloader::default(),
             controls: Controls::default(),
             pod_db,
-        }, Command::none())
+        }, startup)
     }
     fn title(&self) -> String {
         String::from("Podcasts")
@@ -89,15 +100,14 @@ impl Application for App {
                 Command::none()
             }
             Message::ToEpisodes(podcast_id) => {
-                let list = self.pod_db.get_episodes(podcast_id).unwrap();
                 let podcast = self.pod_db.get_podcast(podcast_id).unwrap();
                 Command::perform(
-                    page::episodes::scan_podcast_wrapper(list, podcast.title),
-                    move |(set,list)| Message::ToEpisodesFinish(set,list, podcast_id),
+                    download::scan_podcast_dir(podcast.title),
+                    move |set| Message::ToEpisodesFinish(set, podcast_id),
                 )
             }
-            Message::ToEpisodesFinish(downloaded, list, podcast_id) => {
-                self.episodes.populate(list, podcast_id, downloaded);
+            Message::ToEpisodesFinish(downloaded, podcast_id) => {
+                self.episodes.populate(podcast_id, downloaded);
                 self.current = Page::Episodes;
                 Command::none()
             }
@@ -128,7 +138,7 @@ impl Application for App {
                         log::info!("finished download");
                         let podcast = self.episodes.podcast.as_ref().unwrap().clone();
                         Command::perform(
-                            page::episodes::scan_podcast_dir(podcast),
+                            download::scan_podcast_dir(podcast),
                             Message::DownloadFinished
                         )
                     }
@@ -155,6 +165,12 @@ impl Application for App {
                     feed::add_podcast(pod_db, url), 
                     |(title, id)| Message::Podcasts(page::podcasts::Message::AddedPodcast(title,id))
                 )
+            }
+            Message::PodcastsUpdated => {
+                if let Page::Episodes = self.current {
+                    self.episodes.repopulate(HashMap::new());
+                }
+                Command::none()
             }
             Message::Stream(key) => {
                 self.player.add_stream(key);

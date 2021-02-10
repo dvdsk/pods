@@ -41,7 +41,7 @@ fn get_episode_info(items: &[rss::Item], podcast_title: &str) -> Result<Vec<Epis
 pub async fn add_podcast(pod_db: database::PodcastDb, url: String) -> (String, PodcastKey) {
     let info = get_podcast_info(&url).await.unwrap();
 
-    let podcast = Podcast::from(&info);
+    let podcast = Podcast::from_url(&info, url);
     pod_db.add_podcast(&podcast).unwrap();
 
     let episodes = get_episode_info(info.items(), &podcast.title).unwrap();

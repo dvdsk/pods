@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use iced::{Command, button, Column, Text, Row, Space, Button, Length};
 use crate::Message;
 use crate::database;
-use crate::page::episodes::FileType;
+use crate::download::FileType;
 
 mod stream;
 pub use stream::ReadableReciever;
