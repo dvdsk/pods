@@ -262,6 +262,33 @@ impl Player {
     }
 }
 
+pub fn handle_media_keys() -> iced::Subscription<Message> {
+    use iced_native::subscription::events_with;
+    use iced_native::event::{Event, Status};
+    use iced::keyboard::{self, KeyCode};
+
+    events_with(|event, status| {
+        if let Status::Captured = status {
+            return None;
+        }
+
+        if let Event::Keyboard(keyboard::Event::KeyPressed {key_code, ..}) = event {
+            match key_code {
+                KeyCode::Pause => todo!(),
+                KeyCode::PlayPause => Some(Message::PlayPause),
+                KeyCode::MediaStop => todo!(),
+                KeyCode::Stop => todo!(),
+                KeyCode::NextTrack => todo!(),
+                KeyCode::PrevTrack => todo!(),
+                _ => None,
+            }
+        } else {
+            None
+        }
+    })
+}
+
+
 #[cfg(test)]
 mod test {
     use super::*;
