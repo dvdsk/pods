@@ -238,7 +238,7 @@ impl Application for App {
             }
             _ => (),
         }
-
+        subs.push(play::handle_media_keys());
         subs.extend(self.downloader.subs());
         Subscription::batch(subs)
     }

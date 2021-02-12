@@ -20,6 +20,7 @@ rodio = { git = "https://github.com/dskleingeld/rodio.git" , branch = "SourceExt
 # seems to solve "Error: GraphicsAdapterNotFound"
 iced = { git= "https://github.com/dskleingeld/iced", features = ["glow", "tokio"] }
 iced_futures = { git="https://github.com/dskleingeld/iced" }
+iced_native = { git="https://github.com/dskleingeld/iced" } 
 sled = "0.34"
 rss = "1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
