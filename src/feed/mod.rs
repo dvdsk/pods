@@ -38,16 +38,16 @@ fn get_episode_info(items: &[rss::Item], podcast_title: &str) -> Result<Vec<Epis
     list
 }
 
-pub async fn add_podcast(pod_db: database::PodcastDb, url: String) -> (String, PodcastKey) {
+pub async fn add_podcast(pod_db: database::PodcastDb, url: String) -> Result<(String, PodcastKey), Error> {
     let info = get_podcast_info(&url).await.unwrap();
 
     let podcast = Podcast::from_url(&info, url);
-    pod_db.add_podcast(&podcast).unwrap();
+    pod_db.add_podcast(&podcast)?;
 
-    let episodes = get_episode_info(info.items(), &podcast.title).unwrap();
-    pod_db.update_episodes(podcast.title.as_str(), episodes).unwrap();
+    let episodes = get_episode_info(info.items(), &podcast.title)?;
+    pod_db.update_episodes(podcast.title.as_str(), episodes)?;
 
-    (podcast.title.clone(), PodcastKey::from(podcast.title))
+    Ok((podcast.title.clone(), PodcastKey::from(podcast.title)))
 }
 
 fn url_from_extensions(item: &rss::Item) -> Option<String> {
@@ -83,6 +83,8 @@ pub enum Error {
     MissingDuration,
     #[error("No title for podcast episode")]
     MissingEpisodeTitle,
+    #[error("Database Error")]
+    DatabaseError(#[from] database::Error),
 }
 
 fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, Error> {

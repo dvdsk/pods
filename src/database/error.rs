@@ -4,4 +4,6 @@ pub enum Error {
     Internal(#[from] sled::Error),
     #[error("Episode is not in database")]
     NotInDatabase,
+    #[error("Podcast was already added")]
+    PodcastAlreadyAdded,
 }

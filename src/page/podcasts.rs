@@ -7,6 +7,7 @@ use std::sync::Arc;
 use itertools::izip;
 
 use crate::{feed, Message};
+use crate::iced_wrapped;
 use crate::database::{self, PodcastKey, PodcastDb};
 
 #[derive(Default)]
@@ -29,9 +30,7 @@ impl Search {
         self.input_value = input;
         if feed::valid_url(&self.input_value) {
             let url = self.input_value.clone();
-            Command::perform(
-                feed::add_podcast(pod_db, url), 
-                |(title, id)| Message::AddedPodcast(title,id))
+            iced_wrapped::add_podcast(&pod_db, url)
         } else if self.input_value.len() > 4 {
             self.do_search(false)
         } else {

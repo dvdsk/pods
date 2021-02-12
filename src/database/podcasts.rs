@@ -154,11 +154,17 @@ impl PodcastDb {
         Ok(podcast)
     }
 
+    /// add a podcast, if it was already there return an error
     pub fn add_podcast(&self, podcast: &Podcast) -> Result<(), Error> {
         let podcast_id = PodcastKey::from(podcast);
         let bytes = bincode::serialize(&podcast).unwrap();
-        self.basic.insert(podcast_id, bytes)?; 
-        Ok(())
+
+        let existing = self.basic.insert(podcast_id, bytes)?; 
+        if existing.is_some() {
+            Err(Error::PodcastAlreadyAdded)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn get_episodes(&self, podcast_id: impl Into<PodcastKey>) -> Result<Vec<Episode>, Error> {

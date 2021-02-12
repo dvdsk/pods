@@ -1,3 +1,4 @@
+mod iced_wrapped;
 mod page;
 mod database;
 mod feed;
@@ -50,26 +51,6 @@ pub struct App {
     pod_db: PodcastDb,
 }
 
-fn update_podcasts(pod_db: PodcastDb) -> Command<Message> {
-    async fn update(pod_db: PodcastDb) {
-        pod_db.update_podcasts().await.unwrap();
-    }
-
-    Command::perform(
-        update(pod_db),
-        |_| Message::PodcastsUpdated,
-    )
-}
-
-fn update_episode_progress(db: &PodcastDb, id: EpisodeKey, progress: Progress) -> Command<Message> {
-    async fn update(db: PodcastDb, id: EpisodeKey, progress: Progress) {
-        db.update_episode_progress(id, progress).await;
-    }
-
-    let db = db.clone();
-    Command::perform(update(db, id, progress), |_| Message::None)
-}
-
 impl Application for App {
     type Executor = executor::Default;
     type Message = Message;
@@ -78,7 +59,7 @@ impl Application for App {
     fn new(_flags: Self::Flags) -> (App, Command<Self::Message>) {
         let db = database::open().unwrap();
         let pod_db = PodcastDb::open(&db).unwrap();
-        let startup = update_podcasts(pod_db.clone());
+        let startup = iced_wrapped::update_podcasts(pod_db.clone());
         (App {
             podcasts: page::Podcasts::from_db(pod_db.clone()),
             episodes: page::Episodes::from_db(pod_db.clone()), 
@@ -166,17 +147,14 @@ impl Application for App {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
                         let progress = Progress::Listening(pos);
-                        return update_episode_progress(&self.pod_db, info.id, progress);
+                        return iced_wrapped::update_episode_progress(&self.pod_db, info.id, progress);
                     }
                 }
                 // also used to trigger a redraw
                 Command::none()
             }
             Message::AddPodcast(url) => {
-                let pod_db = self.pod_db.clone();
-                Command::perform(
-                    feed::add_podcast(pod_db, url), 
-                    |(title, id)| Message::AddedPodcast(title,id))
+                iced_wrapped::add_podcast(&self.pod_db, url)
             }
             Message::PodcastsUpdated => {
                 if let Page::Episodes = self.current {
