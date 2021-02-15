@@ -4,6 +4,7 @@ mod database;
 mod feed;
 mod play;
 mod download;
+mod widgets;
 
 use download::Downloader;
 use page::{Page, Controls};
