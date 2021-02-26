@@ -1,5 +1,5 @@
+use super::{ApiBudget, Error, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
 use regex::Regex;
-use super::{Error, ApiBudget, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
 
 #[derive(Clone)]
 pub struct Search {
@@ -25,23 +25,34 @@ impl Search {
     fn to_results(&self, text: &str) -> Vec<SearchResult> {
         let mut results = Vec::new();
         for cap in self.title_url.captures_iter(text) {
-            results.push(SearchResult{ 
-                title: cap.get(1)
+            results.push(SearchResult {
+                title: cap
+                    .get(1)
                     .expect("malformed search result")
-                    .as_str().to_owned(),
-                url: cap.get(2)
+                    .as_str()
+                    .to_owned(),
+                url: cap
+                    .get(2)
                     .expect("malformed search result")
-                    .as_str().to_owned().replace(r#"\/"#, r#"/"#),
+                    .as_str()
+                    .to_owned()
+                    .replace(r#"\/"#, r#"/"#),
             });
         }
         results
     }
 
-    async fn request(&mut self, headers: reqwest::header::HeaderMap, search_term: &str) -> Result<String, Error> {
-        let text = self.client.get("https://api.podcastindex.org/api/1.0/search/byterm")
+    async fn request(
+        &mut self,
+        headers: reqwest::header::HeaderMap,
+        search_term: &str,
+    ) -> Result<String, Error> {
+        let text = self
+            .client
+            .get("https://api.podcastindex.org/api/1.0/search/byterm")
             .headers(headers)
             .timeout(std::time::Duration::from_millis(1000))
-            .query(&[("q",search_term)])
+            .query(&[("q", search_term)])
             .send()
             .await
             .map_err(Error::CouldNotConnect)?
@@ -53,31 +64,42 @@ impl Search {
         Ok(text)
     }
 
-
-    pub async fn search(&mut self, search_term: &str, ignore_budget: bool) -> Result<Vec<SearchResult>, Error> {
+    pub async fn search(
+        &mut self,
+        search_term: &str,
+        ignore_budget: bool,
+    ) -> Result<Vec<SearchResult>, Error> {
         use reqwest::header::{HeaderMap, HeaderName};
+        use sha1::{Digest, Sha1};
         use std::time::{SystemTime, UNIX_EPOCH};
-        use sha1::{Sha1, Digest};
 
         if self.budget.left() <= 2 && !ignore_budget {
             return Err(Error::OutOfCalls);
         }
 
         let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH).unwrap()
-            .as_secs().to_string();
-        
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs()
+            .to_string();
+
         let hash = Sha1::new()
             .chain(&APIKEY)
             .chain(&APISECRET)
             .chain(&now)
             .finalize();
         let hash = format!("{:x}", hash);
-        
+
         let mut headers = HeaderMap::new();
         headers.insert(HeaderName::from_static("x-auth-date"), now.parse().unwrap());
-        headers.insert(HeaderName::from_static("x-auth-key"), APIKEY.parse().unwrap());
-        headers.insert(HeaderName::from_static("authorization"), hash.parse().unwrap());
+        headers.insert(
+            HeaderName::from_static("x-auth-key"),
+            APIKEY.parse().unwrap(),
+        );
+        headers.insert(
+            HeaderName::from_static("authorization"),
+            hash.parse().unwrap(),
+        );
 
         self.budget.register_call();
         let text = self.request(headers, search_term).await;
@@ -90,16 +112,17 @@ impl Search {
 }
 
 #[test]
-fn test_podcast_index(){
+fn test_podcast_index() {
     use tokio::runtime::Runtime;
 
     let mut searcher = Search::default();
     // Create the runtime
-    Runtime::new()
-        .unwrap()
-        .block_on(async {
-            let res = searcher.search("Soft Skills Engineering").await.unwrap();
-            assert_eq!(res[0].title, "Soft Skills Engineering");
-            assert_eq!(res[0].url, "http://feeds.feedburner.com/SoftSkillsEngineering");
-        });
+    Runtime::new().unwrap().block_on(async {
+        let res = searcher.search("Soft Skills Engineering").await.unwrap();
+        assert_eq!(res[0].title, "Soft Skills Engineering");
+        assert_eq!(
+            res[0].url,
+            "http://feeds.feedburner.com/SoftSkillsEngineering"
+        );
+    });
 }

@@ -1,18 +1,18 @@
-mod page;
 mod database;
-mod feed;
-mod play;
 mod download;
+mod feed;
+mod page;
+mod play;
 
+use database::{EpisodeKey, PodcastDb, PodcastKey, Progress};
 use download::Downloader;
-use page::{Page, Controls};
-use play::Player;
-use error_level::ErrorLevel;
-use database::{EpisodeKey, PodcastKey, PodcastDb, Progress};
 use download::FileType;
+use error_level::ErrorLevel;
+use page::{Controls, Page};
+use play::Player;
 
+use iced::{executor, Application, Column, Command, Element, Settings, Subscription};
 use std::collections::HashMap;
-use iced::{executor, Application, Command, Element, Column, Settings, Subscription};
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -54,10 +54,7 @@ fn update_podcasts(pod_db: PodcastDb) -> Command<Message> {
         pod_db.update_podcasts().await.unwrap();
     }
 
-    Command::perform(
-        update(pod_db),
-        |_| Message::PodcastsUpdated,
-    )
+    Command::perform(update(pod_db), |_| Message::PodcastsUpdated)
 }
 
 impl Application for App {
@@ -69,56 +66,48 @@ impl Application for App {
         let db = database::open().unwrap();
         let pod_db = PodcastDb::open(&db).unwrap();
         let startup = update_podcasts(pod_db.clone());
-        (App {
-            podcasts: page::Podcasts::from_db(pod_db.clone()),
-            episodes: page::Episodes::from_db(pod_db.clone()), 
-            current: Page::Podcasts,
-            player: Player::from_db(pod_db.clone()), 
-            downloader: Downloader::default(),
-            controls: Controls::default(),
-            pod_db,
-        }, startup)
+        (
+            App {
+                podcasts: page::Podcasts::from_db(pod_db.clone()),
+                episodes: page::Episodes::from_db(pod_db.clone()),
+                current: Page::Podcasts,
+                player: Player::from_db(pod_db.clone()),
+                downloader: Downloader::default(),
+                controls: Controls::default(),
+                pod_db,
+            },
+            startup,
+        )
     }
     fn title(&self) -> String {
         String::from("Podcasts")
     }
     fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
         match message {
-            Message::Back => {
-                self.current.back();
-                Command::none()
-            }
-            Message::Up => {
-                match &self.current {
-                    Page::Podcasts => self.podcasts.up(),
-                    Page::Episodes => self.episodes.up(),
-                }
-                Command::none()
-            }
-            Message::Down => {
-                match &self.current {
-                    Page::Podcasts => self.podcasts.down(),
-                    Page::Episodes => self.episodes.down(),
-                }
-                Command::none()
-            }
+            Message::Back => self.current.back(),
+            Message::Up => match &self.current {
+                Page::Podcasts => self.podcasts.up(),
+                Page::Episodes => self.episodes.up(),
+            },
+            Message::Down => match &self.current {
+                Page::Podcasts => self.podcasts.down(),
+                Page::Episodes => self.episodes.down(),
+            },
             Message::ToEpisodes(podcast_id) => {
                 let podcast = self.pod_db.get_podcast(podcast_id).unwrap();
-                Command::perform(
-                    download::scan_podcast_dir(podcast.title),
-                    move |set| Message::ToEpisodesFinish(set, podcast_id),
-                )
+                return Command::perform(download::scan_podcast_dir(podcast.title), move |set| {
+                    Message::ToEpisodesFinish(set, podcast_id)
+                });
             }
             Message::ToEpisodesFinish(downloaded, podcast_id) => {
                 self.episodes.populate(podcast_id, downloaded);
                 self.current = Page::Episodes;
-                Command::none()
             }
             Message::StreamProgress(p) => {
                 use play::subscribe::Progress;
                 match p {
                     Progress::ToShortError => log::warn!("stream was to short to play audio"),
-                    Progress::StreamError(e) => log::error!("errored stream {}",e),
+                    Progress::StreamError(e) => log::error!("errored stream {}", e),
                     Progress::Started(rx) => self.player.rx = Some(rx),
                     Progress::Finished => (),
                     Progress::Advanced(p) => {
@@ -128,30 +117,18 @@ impl Application for App {
                         }
                     }
                 }
-                Command::none()
             }
-            Message::DownloadProgress(p) => {
-                use download::Progress::*;
-                match p {
-                    Error(e) => {
-                        e.log_error();
-                        Command::none()
-                    }
-                    Finished => {
-                        log::info!("finished download");
-                        let podcast = self.episodes.podcast.as_ref().unwrap().clone();
-                        Command::perform(
-                            download::scan_podcast_dir(podcast),
-                            Message::DownloadFinished
-                        )
-                    }
-                    _ => Command::none(),
-                }
+            Message::DownloadProgress(download::Progress::Error(e)) => e.log_error(),
+            Message::DownloadProgress(download::Progress::Finished) => {
+                log::info!("finished download");
+                let podcast = self.episodes.podcast.as_ref().unwrap().clone();
+                return Command::perform(
+                    download::scan_podcast_dir(podcast),
+                    Message::DownloadFinished,
+                );
             }
-            Message::DownloadFinished(set) => {
-                self.episodes.update_downloaded(set);
-                Command::none()
-            }
+            Message::DownloadProgress(_) => (),
+            Message::DownloadFinished(set) => self.episodes.update_downloaded(set),
             Message::PlayBackTick(_) => {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
@@ -160,54 +137,39 @@ impl Application for App {
                     }
                 }
                 // also used to trigger a redraw
-                Command::none()
             }
             Message::AddPodcast(url) => {
                 let pod_db = self.pod_db.clone();
-                Command::perform(
-                    feed::add_podcast(pod_db, url), 
-                    |(title, id)| Message::AddedPodcast(title,id))
+                return Command::perform(feed::add_podcast(pod_db, url), |(title, id)| {
+                    Message::AddedPodcast(title, id)
+                });
             }
             Message::PodcastsUpdated => {
                 if let Page::Episodes = self.current {
                     self.episodes.repopulate(HashMap::new());
                 }
-                Command::none()
             }
-            Message::Stream(key) => {
-                self.player.add_stream(key);
-                Command::none()
+            Message::Stream(key) => self.player.add_stream(key),
+            Message::Play(key, file_type, pos) => self.player.add_file(key, file_type, pos),
+            Message::Skip(f) => self.player.skip(f),
+            Message::Download(key) => return self.downloader.add(key, &mut self.pod_db),
+            Message::Remove(_key, _file_type) => todo!(),
+            Message::PlayPause => return self.player.play_pause(),
+            Message::SearchSubmit => return self.podcasts.search.do_search(true),
+            Message::SearchInputChanged(input) => {
+                return self
+                    .podcasts
+                    .search
+                    .input_changed(self.pod_db.clone(), input)
             }
-            Message::Play(key, file_type, pos) => {
-                self.player.add_file(key, file_type, pos);
-                Command::none()
-            }
-            Message::Skip(f) => {
-                self.player.skip(f);
-                Command::none()
-            }
-            Message::Download(key) => self.downloader.add(key, &mut self.pod_db),
-            Message::Remove(key, file_type) => todo!(),
-            Message::PlayPause => self.player.play_pause(),
-            Message::SearchSubmit => self
-                .podcasts
-                .search
-                .do_search(true),
-            Message::SearchInputChanged(input) => self
-                .podcasts
-                .search
-                .input_changed(self.pod_db.clone(), input),
-            Message::SearchResults(r) => {
-                self.podcasts.list.update_feedres(r);
-                Command::none()
-            }
-            Message::AddedPodcast(title,id) => {
+            Message::SearchResults(r) => self.podcasts.list.update_feedres(r),
+            Message::AddedPodcast(title, id) => {
                 self.podcasts.list.remove_feedres();
                 self.podcasts.search.reset();
                 self.podcasts.list.add(title, id);
-                Command::none()
             }
         }
+        Command::none()
     }
     fn subscription(&self) -> Subscription<Self::Message> {
         use play::Track;
@@ -215,14 +177,16 @@ impl Application for App {
 
         let mut subs = Vec::new();
         match &self.player.current {
-            Track::Stream(_,_,url) => {
+            Track::Stream(_, _, url) => {
                 let stream = play::subscribe::play(url.to_owned()).map(Message::StreamProgress);
-                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+                let time =
+                    iced::time::every(Duration::from_millis(1000 / 6)).map(Message::PlayBackTick);
                 subs.push(stream);
                 subs.push(time);
             }
-            Track::File(_,_) => {
-                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+            Track::File(_, _) => {
+                let time =
+                    iced::time::every(Duration::from_millis(1000 / 6)).map(Message::PlayBackTick);
                 subs.push(time);
             }
             _ => (),
@@ -236,19 +200,17 @@ impl Application for App {
             Page::Podcasts => self.podcasts.view(),
             Page::Episodes => self.episodes.view(),
         };
-        let column = Column::new();
-        let column = column.push(content);
-        let column = column.push(self.player.view());
-        let column = column.push(self.controls.view());
-        
+        let column = Column::new()
+            .push(content)
+            .push(self.player.view())
+            .push(self.controls.view());
+
         iced::Container::new(column).into()
     }
     fn mode(&self) -> iced::window::Mode {
-        #[cfg(features="pinephone")]
-        dbg!("fullliyyyyy");
-        #[cfg(features="pinephone")]
+        #[cfg(features = "pinephone")]
         return iced::window::Mode::Fullscreen;
-        #[cfg(not(features="pinephone"))]
+        #[cfg(not(features = "pinephone"))]
         return iced::window::Mode::Windowed;
     }
 }
@@ -266,9 +228,9 @@ fn build_settings() -> Settings<()> {
         window: iced::window::Settings::default(),
         flags: (),
         default_font: None,
-        #[cfg(not(features="pinephone"))]
+        #[cfg(not(features = "pinephone"))]
         default_text_size: 20,
-        #[cfg(features="pinephone")]
+        #[cfg(features = "pinephone")]
         default_text_size: 1,
         antialiasing: false,
     }

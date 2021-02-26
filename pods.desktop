@@ -1,9 +1,9 @@
 [Desktop Entry]
 Name=Pods
-Exec=/home/mobian/bin/start_pods.sh
+Exec=/home/mobian/bin/start_alarm.sh
 Path=/home/mobian/bin/
 Type=Application
-Icon=/home/mobian/bin/icon.png
+Icon=/home/mobian/bin/alarm.png
 Comment=Subscribe, download and stream podcasts
 Keywords=Sound;Podcast;podcasts;
 Categories=Audio;

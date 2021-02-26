@@ -1,8 +1,8 @@
+use super::Download;
+use error_level::ErrorLevel;
 use iced_futures::futures;
 use std::path::PathBuf;
-use super::Download;
 use std::sync::Arc;
-use error_level::ErrorLevel;
 use tokio::fs;
 use tokio::io::{self, AsyncWriteExt};
 
@@ -28,8 +28,8 @@ pub enum Error {
     NoExtension,
 }
 
-impl<H, I> iced_futures::subscription::Recipe<H, I> for Download 
-where 
+impl<H, I> iced_futures::subscription::Recipe<H, I> for Download
+where
     H: std::hash::Hasher,
 {
     type Output = Progress;
@@ -44,28 +44,25 @@ where
         self: Box<Self>,
         _input: futures::stream::BoxStream<'static, I>,
     ) -> futures::stream::BoxStream<'static, Self::Output> {
-        Box::pin(
-            futures::stream::unfold(
-                State::Start(self.url, self.path), |state| async move {
-                    stream_state_machine(state).await
-                }
-            )
-        )
+        Box::pin(futures::stream::unfold(
+            State::Start(self.url, self.path),
+            |state| async move { stream_state_machine(state).await },
+        ))
     }
 }
 
 type StateResult = Option<(Progress, State)>;
 async fn stream_state_machine(current: State) -> StateResult {
     match current {
-        State::Start(url, path) => 
-            start(url,path).await.unwrap_or_else(
-                |e| Some((Progress::Error(e), State::Errored))),
-        State::Downloading(data) =>
-            downloading(data).await.unwrap_or_else(
-                |e| Some((Progress::Error(e), State::Errored))),
+        State::Start(url, path) => start(url, path)
+            .await
+            .unwrap_or_else(|e| Some((Progress::Error(e), State::Errored))),
+        State::Downloading(data) => downloading(data)
+            .await
+            .unwrap_or_else(|e| Some((Progress::Error(e), State::Errored))),
         State::Finished(temp_path) => {
             let mut path = temp_path.clone(); // name.extension.part
-            path.set_extension(""); // this removes the .part 
+            path.set_extension(""); // this removes the .part
             fs::rename(temp_path, path).await.unwrap();
             None
         }
@@ -82,13 +79,23 @@ async fn start(url: reqwest::Url, path: PathBuf) -> Result<StateResult> {
     let file = fs::File::create(&path).await.map_err(Arc::from)?;
     let file = io::BufWriter::new(file);
     let state = DownloadData {
-        res, file, total, downloaded: 0, path,
+        res,
+        file,
+        total,
+        downloaded: 0,
+        path,
     };
     Ok(Some((Progress::Started, State::Downloading(state))))
 }
 
 async fn downloading(data: DownloadData) -> Result<StateResult> {
-    let DownloadData {mut res, mut file, total, mut downloaded, path} = data;
+    let DownloadData {
+        mut res,
+        mut file,
+        total,
+        mut downloaded,
+        path,
+    } = data;
     match res.chunk().await.map_err(Arc::from)? {
         None => Ok(Some((Progress::Finished, State::Finished(path)))),
         Some(chunk) => {
@@ -96,10 +103,16 @@ async fn downloading(data: DownloadData) -> Result<StateResult> {
             file.write_all(&chunk).await.map_err(Arc::from)?;
 
             let percentage = total
-                .map(|t| 100.0 * downloaded as f32/ t as f32)
+                .map(|t| 100.0 * downloaded as f32 / t as f32)
                 .unwrap_or(0.0);
             let progress = Progress::Advanced(percentage);
-            let data = DownloadData {res, file, total, downloaded, path};
+            let data = DownloadData {
+                res,
+                file,
+                total,
+                downloaded,
+                path,
+            };
             Ok(Some((progress, State::Downloading(data))))
         }
     }
@@ -108,7 +121,6 @@ async fn downloading(data: DownloadData) -> Result<StateResult> {
 #[derive(Debug)]
 pub struct DownloadData {
     res: reqwest::Response,
-    // file: fs::File,
     file: io::BufWriter<fs::File>,
     total: Option<u64>,
     downloaded: u64,
@@ -116,9 +128,10 @@ pub struct DownloadData {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum State {
     Start(reqwest::Url, PathBuf),
-    Downloading(DownloadData),
+    Downloading(DownloadData), //keep unboxed
     Finished(PathBuf),
     Errored,
 }
