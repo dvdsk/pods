@@ -3,47 +3,18 @@ use iced::Length;
 use iced::{button, Button, Element, HorizontalAlignment, Row, Text};
 
 use crate::database::Progress;
-use crate::widgets::episode;
+use crate::widgets::{episode, style};
 use crate::database::{Episode, PodcastDb};
 use crate::database::{EpisodeKey, PodcastKey};
 use crate::download::{hash, FileType};
 use std::collections::HashMap;
 
-#[derive(Debug)]
-struct ListItem {
-    // either download or delete
-    file_button: button::State,
-    play_button: button::State,
-    progress: Progress,
-    file: Option<FileType>,
-    title: String,
-    date: String,
-}
-
-impl ListItem {
-    fn from(episode: Episode, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
-        let title = episode.title.to_owned();
-        let progress = episode.progress;
-        let file = episodes_on_disk.get(&hash(&title)).copied();
-
-        let date = episode.date.format();
-
-        ListItem {
-            file_button: button::State::new(),
-            play_button: button::State::new(),
-            progress,
-            file, // is none if no file was found
-            title,
-            date,
-        }
-    }
-}
-
 /// Episodes view
 #[derive(Debug)]
 pub struct Episodes {
     db: PodcastDb,
-    list: Vec<ListItem>,
+    list: Vec<episode::Collapsed>,
+    expanded: Option<(u16, episode::Expanded)>,
     scroll_state: scrollable::State,
     pub podcast: Option<String>,
     podcast_id: Option<PodcastKey>,
@@ -57,6 +28,7 @@ impl Episodes {
         Self {
             db,
             list: Vec::new(),
+            expanded: None,
             scroll_state: scrollable::State::new(),
             podcast: None,
             podcast_id: None,
@@ -79,7 +51,7 @@ impl Episodes {
         episodes.sort_unstable_by_key(|e| *e.date.inner());
         episodes.reverse();
         for info in episodes {
-            self.list.push(ListItem::from(info, &downloaded_episodes));
+            self.list.push(episode::Collapsed::from(info, &downloaded_episodes));
         }
     }
     /// fill the view from a list of episodes
@@ -97,7 +69,7 @@ impl Episodes {
             item.file = file;
         }
     }
-    pub fn view(&mut self) -> Element<crate::Message> {
+    pub fn view(&mut self, theme: style::Theme) -> Element<crate::Message> {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
@@ -107,15 +79,9 @@ impl Episodes {
             .skip(self.scrolled_down)
             .take(Self::MAXSCROLLABLE)
         {
-            let podcast_id = *self.podcast_id.as_ref().unwrap();
-            let key = EpisodeKey::from_title(podcast_id, &item.title);
-            let mut collapsed = episode::Collapsed {
-                title: item.title.clone(),
-                age: String::from(""),
-                duration: String::from(""),
-                enqueue: button::State::new(),
-            };
-            let test = collapsed.view();
+            // let podcast_id = *self.podcast_id.as_ref().unwrap();
+            // let key = EpisodeKey::from_title(podcast_id, &item.title);
+            let test = item.view(theme);
 
             scrollable = scrollable.push(test);
         }

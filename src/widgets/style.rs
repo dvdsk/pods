@@ -1,5 +1,6 @@
 use iced::container;
 
+#[derive(Copy, Clone)]
 pub enum Theme {
     Light,
     Dark,

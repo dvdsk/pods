@@ -1,65 +1,89 @@
-use iced::{button, Button, Element, Text, HorizontalAlignment, Row, Column, Container};
-use iced::widget::container::Style;
-use crate::database::{Progress, Date};
+use std::collections::HashMap;
+
+use iced::{button, Button, Space, Element, Text, HorizontalAlignment, Row, Column, Container};
+
+use crate::database::{Episode, Progress, Date};
 use crate::download::FileType;
 use crate::Message;
 use super::style;
 
+#[derive(Debug)]
 pub struct Collapsed {
-    title: String,
+    pub title: String,
     age: String,
     duration: String,
     date: Date,
     progress: Progress,
-    file: Option<FileType>,
+    pub file: Option<FileType>,
     enqueue: button::State,
 }
 
 fn enqueue_button(state: &mut button::State) -> Button<Message> {
     let icon = Text::new("+".to_string())
         .horizontal_alignment(HorizontalAlignment::Center)
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
         .size(20);
     Button::new(state, icon)
-        .on_press(Message::None) //TODO
+        .on_press(Message::None)
 }
 
 impl Collapsed {
     fn age(&self) -> Text {
-        Text::new(&self.age)
+        Text::new(format!("{} ", &self.age))
             .horizontal_alignment(HorizontalAlignment::Left)
-            .size(10)
+            .size(25)
     }
     fn duration(&self) -> Text {
         Text::new(&self.duration)
             .horizontal_alignment(HorizontalAlignment::Right)
-            .size(10)
+            .size(25)
     }
     fn title(&self) -> Text {
         Text::new(&self.title)
             .horizontal_alignment(HorizontalAlignment::Left)
-            .size(10)
+            .size(40)
     }
 
     pub fn view(&mut self, theme: style::Theme) -> Element<crate::Message> {
-        let meta = Column::new()
+        let meta = Row::new()
             .push(self.age())
             .push(self.duration());
 
-        let column = Row::new()
+        let column = Column::new()
             .push(self.title())
             .push(meta);
-
-        let row = Column::new()
-            .push(column)
+        let row = Row::new()
             .push(enqueue_button(&mut self.enqueue))
-            .into();
+            .push(column);
+
         let element = Container::new(row)
             .style(theme)
+            .width(iced::Length::Fill)
             .into();
         element
     }
+
+    pub fn from(episode: Episode, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
+        use crate::download::hash;
+
+        let file = episodes_on_disk
+            .get(&hash(&episode.title))
+            .copied();
+
+        Self {
+            title: episode.title,
+            age: String::from("2 weeks"),
+            duration: String::from("35m"),
+            date: episode.date,
+            progress: episode.progress,
+            file, // none if no file on disk
+            enqueue: button::State::new(),
+        }
+    }
 }
 
+#[derive(Debug)]
 pub struct Expanded {
     collapsed: Collapsed,
     description: String,

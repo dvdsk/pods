@@ -50,6 +50,7 @@ pub struct App {
     player: Player,
     controls: Controls, //Should only be needed on desktop platforms
     pod_db: PodcastDb,
+    theme: widgets::style::Theme,
 }
 
 impl Application for App {
@@ -69,6 +70,7 @@ impl Application for App {
             downloader: Downloader::default(),
             controls: Controls::default(),
             pod_db,
+            theme: widgets::style::Theme::Light,
         }, startup)
     }
     fn title(&self) -> String {
@@ -186,7 +188,7 @@ impl Application for App {
     fn view(&mut self) -> Element<Self::Message> {
         let content = match self.current {
             Page::Podcasts => self.podcasts.view(),
-            Page::Episodes => self.episodes.view(),
+            Page::Episodes => self.episodes.view(self.theme),
         };
         let column = Column::new()
             .push(content)
