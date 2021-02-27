@@ -1,11 +1,11 @@
 // use futures::Stream;
-use std::io::BufReader;
-use std::time::Instant;
-use std::sync::mpsc;
-use iced::{Command, button, Column, Text, Row, Space, Button, Length};
-use crate::Message;
 use crate::database;
 use crate::download::FileType;
+use crate::Message;
+use iced::{button, Button, Column, Command, Length, Row, Space, Text};
+use std::io::BufReader;
+use std::sync::mpsc;
+use std::time::Instant;
 
 mod stream;
 pub use stream::ReadableReciever;
@@ -36,9 +36,7 @@ impl Track {
     }
     /// Duration in seconds
     pub fn duration(&self) -> f32 {
-        self.info()
-            .map(|i| i.duration)
-            .unwrap_or(0f32)
+        self.info().map(|i| i.duration).unwrap_or(0f32)
     }
 }
 
@@ -76,7 +74,10 @@ pub struct Player {
 impl Player {
     pub fn from_db(db: database::PodcastDb) -> Self {
         Self {
-            controls: Controls { skip_dur: 5f32, .. Controls::default()},
+            controls: Controls {
+                skip_dur: 5f32,
+                ..Controls::default()
+            },
             current: Track::None,
             sink: None,
             output_stream: None,
@@ -98,11 +99,11 @@ impl Player {
     }
 
     fn start_play<S>(&mut self, source: S)
-        where
-            S: rodio::source::Source + Send + 'static,
-            S: rodio::source::SourceExt + Send + 'static,
-            S::Item: rodio::Sample,
-            S::Item: Send,
+    where
+        S: rodio::source::Source + Send + 'static,
+        S: rodio::source::SourceExt + Send + 'static,
+        S::Item: rodio::Sample,
+        S::Item: Send,
     {
         let (stream, stream_handle) = rodio::OutputStream::try_default().unwrap();
         let sink = rodio::Sink::try_new(&stream_handle).unwrap();
@@ -115,10 +116,11 @@ impl Player {
     }
 
     fn pos(&self) -> f32 {
-        let elapsed = self.last_started
-            .map(|t| t.elapsed().as_secs_f32() )
+        let elapsed = self
+            .last_started
+            .map(|t| t.elapsed().as_secs_f32())
             .unwrap_or(0f32);
-        self.offset+elapsed
+        self.offset + elapsed
     }
 
     pub fn should_store_pos(&mut self) -> Option<f32> {
@@ -145,9 +147,10 @@ impl Player {
                 title: String::default(),
                 paused: false,
                 duration: dbg!(meta.duration),
-            }, 
-            0f32, 
-            meta.stream_url);
+            },
+            0f32,
+            meta.stream_url,
+        );
     }
 
     // TODO figure out better way to get extension into here
@@ -171,14 +174,15 @@ impl Player {
                 title: String::default(),
                 paused: false,
                 duration: episode.duration,
-            }, 
-            path);
+            },
+            path,
+        );
     }
 
     pub fn stream_ready(&self, p: f32) -> bool {
         const MINIMUM_BUF_DUR: f32 = 60f32; // duration (seconds) that needs to be downloaded before we start playing
-        let downloaded_duration = p/100f32*self.current.duration();
-        let sink_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true); 
+        let downloaded_duration = p / 100f32 * self.current.duration();
+        let sink_empty = self.sink.as_ref().map(|s| s.empty()).unwrap_or(true);
         let downloaded_enough = downloaded_duration > MINIMUM_BUF_DUR;
 
         sink_empty && downloaded_enough
@@ -186,16 +190,16 @@ impl Player {
 
     pub fn skip(&mut self, dur: f32) {
         let pos = self.pos();
-        let target = f32::max(pos+dur, 0f32);
+        let target = f32::max(pos + dur, 0f32);
         let target = match &self.current {
             Track::None => return,
             // can not seek further then what was downloaded
             // because of varying compression throughout the stream we
-            // keep a safety bound of 10 percent. TODO FIXME make sure 
+            // keep a safety bound of 10 percent. TODO FIXME make sure
             // the visualisation does not show beyond the safety bound
             Track::Stream(info, dl_pos_percent, _) => {
                 if *dl_pos_percent <= 100. {
-                    let dl_pos_secs = dl_pos_percent*(info.duration)/100.;
+                    let dl_pos_secs = dl_pos_percent * (info.duration) / 100.;
                     let dl_pos_secs = dl_pos_secs * 0.9;
                     f32::min(target, dl_pos_secs)
                 } else {
@@ -205,14 +209,12 @@ impl Player {
             // can not seek beyond the length of the audio file
             Track::File(info, _) => f32::min(target, info.duration),
         };
-        self.offset += target-pos;
+        self.offset += target - pos;
         self.sink.as_mut().unwrap().set_pos(target);
     }
 
     pub fn play_pause(&mut self) -> Command<crate::Message> {
-        if let Some(elapsed) = self.last_started
-            .take()
-            .map(|t| t.elapsed()) {
+        if let Some(elapsed) = self.last_started.take().map(|t| t.elapsed()) {
             self.offset += elapsed.as_secs_f32();
             self.sink.as_mut().unwrap().pause();
         } else {
@@ -230,7 +232,10 @@ impl Player {
                 let download_progress_bar = iced::ProgressBar::new(0.0..=100.0, *download);
                 let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
                 let controls = Self::view_controls(&mut self.controls, info);
-                column.push(download_progress_bar).push(playback_bar).push(controls)
+                column
+                    .push(download_progress_bar)
+                    .push(playback_bar)
+                    .push(controls)
             }
             Track::File(info, _) => {
                 let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
@@ -247,32 +252,43 @@ impl Player {
             (Text::new("Resume"), Message::PlayPause)
         };
 
-        let Controls {play_pauze, skip_forward, skip_backward, skip_dur} = controls;
+        let Controls {
+            play_pauze,
+            skip_forward,
+            skip_backward,
+            skip_dur,
+        } = controls;
         Row::new()
             .push(Space::with_width(Length::FillPortion(2)))
-            .push(Button::new(play_pauze, button_text)
-                .on_press(button_action)
-                .width(Length::FillPortion(1)))
-            .push(Button::new(skip_forward, Text::new("fwd"))
-                .on_press(Message::Skip(*skip_dur))
-                .width(Length::FillPortion(1)))
-            .push(Button::new(skip_backward, Text::new("bck"))
-                .on_press(Message::Skip(-1f32*(*skip_dur)))
-                .width(Length::FillPortion(1)))
+            .push(
+                Button::new(play_pauze, button_text)
+                    .on_press(button_action)
+                    .width(Length::FillPortion(1)),
+            )
+            .push(
+                Button::new(skip_forward, Text::new("fwd"))
+                    .on_press(Message::Skip(*skip_dur))
+                    .width(Length::FillPortion(1)),
+            )
+            .push(
+                Button::new(skip_backward, Text::new("bck"))
+                    .on_press(Message::Skip(-1f32 * (*skip_dur)))
+                    .width(Length::FillPortion(1)),
+            )
     }
 }
 
 pub fn handle_media_keys() -> iced::Subscription<Message> {
-    use iced_native::subscription::events_with;
-    use iced_native::event::{Event, Status};
     use iced::keyboard::{self, KeyCode};
+    use iced_native::event::{Event, Status};
+    use iced_native::subscription::events_with;
 
     events_with(|event, status| {
         if let Status::Captured = status {
             return None;
         }
 
-        if let Event::Keyboard(keyboard::Event::KeyPressed {key_code, ..}) = event {
+        if let Event::Keyboard(keyboard::Event::KeyPressed { key_code, .. }) = event {
             match key_code {
                 KeyCode::Pause => todo!(),
                 KeyCode::PlayPause => Some(Message::PlayPause),
@@ -287,7 +303,6 @@ pub fn handle_media_keys() -> iced::Subscription<Message> {
         }
     })
 }
-
 
 #[cfg(test)]
 mod test {
@@ -305,15 +320,15 @@ mod test {
         let t2 = Bytes::from(T2);
         tx.send(t1).unwrap();
 
-        let mut buffer = vec![0;T1.len()];
+        let mut buffer = vec![0; T1.len()];
         readable_rx.read_exact(&mut buffer).unwrap();
         assert_eq!(T1.as_bytes(), buffer);
 
         tx.send(t2).unwrap();
         readable_rx.seek(SeekFrom::Start(0)).unwrap();
-        let mut buffer = vec![0;T1.len()+T2.len()];
+        let mut buffer = vec![0; T1.len() + T2.len()];
         readable_rx.read_exact(&mut buffer).unwrap();
-        assert_eq!([T1,T2].concat().as_bytes(), buffer);
+        assert_eq!([T1, T2].concat().as_bytes(), buffer);
     }
 
     #[test]
@@ -331,14 +346,14 @@ mod test {
         let child = thread::spawn(move || {
             let mut buffer = String::new();
             readable_rx.read_to_string(&mut buffer).unwrap();
-            assert_eq!([T1,T2].concat(), buffer);
+            assert_eq!([T1, T2].concat(), buffer);
         });
 
         let t2 = Bytes::from(T2);
         tx.send(t2).unwrap();
 
         drop(tx); // indicates the end (EOF)
-        // only now the child thread can read to end of file
+                  // only now the child thread can read to end of file
         child.join().unwrap();
     }
 }

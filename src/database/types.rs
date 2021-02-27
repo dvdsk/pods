@@ -1,5 +1,5 @@
-use serde::{Serialize, Deserialize};
-use chrono::{Utc, Local, DateTime};
+use chrono::{DateTime, Local, Utc};
+use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
 pub enum Date {
@@ -9,7 +9,8 @@ pub enum Date {
 
 impl Date {
     pub fn from_item(item: &rss::Item) -> Date {
-        let pub_date = item.pub_date()
+        let pub_date = item
+            .pub_date()
             .map(DateTime::parse_from_rfc2822)
             .map(Result::ok)
             .flatten()

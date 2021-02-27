@@ -1,10 +1,10 @@
-use url::Url;
-use std::str::FromStr;
 use eyre::WrapErr;
+use std::str::FromStr;
+use url::Url;
 
 mod search;
-use crate::database::{EpisodeExt, PodcastKey, Podcast, Date};
 use crate::database;
+use crate::database::{Date, EpisodeExt, Podcast, PodcastKey};
 pub use search::{Search, SearchResult};
 
 pub fn valid_url(s: &str) -> bool {
@@ -31,7 +31,7 @@ async fn get_podcast_info(url: &str) -> eyre::Result<rss::Channel> {
 }
 
 fn get_episode_info(items: &[rss::Item], podcast_title: &str) -> Result<Vec<EpisodeExt>, Error> {
-    let list: Result<Vec<EpisodeExt>,_> = items
+    let list: Result<Vec<EpisodeExt>, _> = items
         .iter()
         .map(|i| to_episode_ext(i, podcast_title))
         .collect();
@@ -54,24 +54,32 @@ fn url_from_extensions(item: &rss::Item) -> Option<String> {
     let media = item.extensions().get("media")?;
     let content = media.get("content")?;
     let extention = content.first()?;
-    if extention.name() != "media:content" { return None }
-    extention.attrs().get("url").map(|u| u.clone())
+    if extention.name() != "media:content" {
+        return None;
+    }
+    extention.attrs().get("url").cloned()
 }
 
 fn duration_from_extensions(item: &rss::Item) -> Option<f32> {
     let media = item.extensions().get("media")?;
     let content = media.get("content")?;
     let extention = content.first()?;
-    if extention.name() != "media:content" { return None }
-    extention.attrs().get("duration").map(|u| u.parse().ok()).flatten()
+    if extention.name() != "media:content" {
+        return None;
+    }
+    extention
+        .attrs()
+        .get("duration")
+        .map(|u| u.parse().ok())
+        .flatten()
 }
 
 fn parse_itunes_duration(duration: &str) -> Option<f32> {
-    let mut parts = duration.rsplitn(3, ":");
+    let mut parts = duration.rsplitn(3, ':');
     let seconds: f32 = parts.next()?.parse().ok()?;
     let minutes: f32 = parts.next()?.parse().ok()?;
     let hours: f32 = parts.next().unwrap_or("0").parse().ok()?;
-    let seconds = seconds + 60.*(minutes + 60.*hours);
+    let seconds = seconds + 60. * (minutes + 60. * hours);
     Some(seconds)
 }
 
@@ -92,14 +100,15 @@ fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, E
     let stream_url = item.enclosure().map(|encl| encl.url().to_owned());
 
     //try to get the url and duration possible extensions
-    let stream_url = stream_url.or(url_from_extensions(item));
+    let stream_url = stream_url.or_else(|| url_from_extensions(item));
     let duration = duration_from_extensions(item);
 
     //try to get duration from any included itunes extensions
-    let duration = duration.or(item.itunes_ext()
-        .map(|ext| ext.duration()
-            .map(parse_itunes_duration).flatten()
-        ).flatten());
+    let duration = duration.or_else(|| {
+        item.itunes_ext()
+            .map(|ext| ext.duration().map(parse_itunes_duration).flatten())
+            .flatten()
+    });
 
     let stream_url = stream_url.ok_or(Error::MissingStreamUrl)?;
     let duration = duration.ok_or(Error::MissingDuration)?;

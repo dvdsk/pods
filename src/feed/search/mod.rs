@@ -1,20 +1,16 @@
+use arraydeque::{ArrayDeque, Wrapping};
 use std::collections::HashSet;
 use std::time::Duration;
 use std::time::Instant;
-use arraydeque::{ArrayDeque, Wrapping};
 
 mod apikey;
 pub use apikey::{APIKEY, APISECRET};
 
-mod podcastindex;
 mod applepodcasts;
+mod podcastindex;
 
 // Name user agent after app
-static APP_USER_AGENT: &str = concat!(
-    env!("CARGO_PKG_NAME"),
-    "/",
-    env!("CARGO_PKG_VERSION"),
-);
+static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -28,13 +24,13 @@ pub enum Error {
     OutOfCalls,
 }
 
-//TODO const generic for initial api budget when that stabilizes 
+//TODO const generic for initial api budget when that stabilizes
 #[derive(Clone)]
 struct ApiBudget {
     max_per_min: u8,
     current_per_min: u8,
     last_called: Instant,
-    called: ArrayDeque<[Instant;20], Wrapping>,
+    called: ArrayDeque<[Instant; 20], Wrapping>,
 }
 
 impl ApiBudget {
@@ -43,7 +39,7 @@ impl ApiBudget {
             max_per_min,
             current_per_min: max_per_min,
             last_called: Instant::now(),
-            called: ArrayDeque::new(), 
+            called: ArrayDeque::new(),
         }
     }
     /// modify the apibudget depending on how the last api call went
@@ -57,14 +53,17 @@ impl ApiBudget {
     }
     fn calls_in_last_minute(&self) -> usize {
         dbg!(&self.called);
-        let calls = self.called.iter()
+        let calls = self
+            .called
+            .iter()
             .take_while(|t| t.elapsed() < Duration::from_secs(61))
             .count();
         log::trace!("calls in last minute: {}", calls);
         calls
     }
     pub fn left(&self) -> u8 {
-        self.current_per_min.saturating_sub(self.calls_in_last_minute() as u8)
+        self.current_per_min
+            .saturating_sub(self.calls_in_last_minute() as u8)
     }
     pub fn register_call(&mut self) {
         self.called.push_front(Instant::now());
@@ -84,16 +83,15 @@ pub struct SearchResult {
 }
 
 impl Search {
-    pub async fn search(&mut self, search_term: String, ignore_budget: bool) 
-    -> Vec<SearchResult> {
+    pub async fn search(&mut self, search_term: String, ignore_budget: bool) -> Vec<SearchResult> {
         log::debug!("performing search for: {}", &search_term);
         let search_a = self.apple_podcasts.search(&search_term, ignore_budget);
         let search_b = self.podcast_index.search(&search_term, ignore_budget);
 
         let (res_a, res_b) = tokio::join!(search_a, search_b);
         match (res_a, res_b) {
-            (Err(e1), Err(e2)) => { 
-                log::debug!("backends errored: {}, {}",e1,e2); 
+            (Err(e1), Err(e2)) => {
+                log::debug!("backends errored: {}, {}", e1, e2);
                 return Vec::new();
             }
             (Err(e1), Ok(b)) => {
@@ -106,7 +104,7 @@ impl Search {
             }
             (Ok(mut a), Ok(mut b)) => {
                 let mut result = HashSet::new();
-                for res in a.drain(..).chain(b.drain(..)){
+                for res in a.drain(..).chain(b.drain(..)) {
                     result.insert(res);
                 }
                 let result = result.drain().collect();
@@ -117,15 +115,16 @@ impl Search {
 }
 
 #[test]
-fn find_99pi(){
+fn find_99pi() {
     use tokio::runtime::Runtime;
 
     let mut searcher = Search::default();
     // Create the runtime
-    Runtime::new()
-        .unwrap()
-        .block_on(async {
-            let res = searcher.search("Soft Skills Engineering".to_owned(), false).await.unwrap();
-            assert_eq!(res[0].title, "Soft Skills Engineering");
-        });
+    Runtime::new().unwrap().block_on(async {
+        let res = searcher
+            .search("Soft Skills Engineering".to_owned(), false)
+            .await
+            .unwrap();
+        assert_eq!(res[0].title, "Soft Skills Engineering");
+    });
 }
