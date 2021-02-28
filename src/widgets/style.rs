@@ -1,4 +1,4 @@
-use iced::container;
+use iced::{container, button};
 
 #[derive(Copy, Clone)]
 pub enum Theme {
@@ -49,6 +49,18 @@ mod dark {
     impl container::StyleSheet for Container {
         fn style(&self) -> container::Style {
             container::Style::default()
+        }
+    }
+}
+
+pub struct Clear;
+impl button::StyleSheet for Clear {
+    fn active(&self) -> button::Style {
+        button::Style {
+            background: None,
+            border_radius: 0.,
+            border_width: 0.,
+            .. button::Style::default()
         }
     }
 }

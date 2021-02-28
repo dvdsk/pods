@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use iced::{button, Button, Space, Element, Text, HorizontalAlignment, Row, Column, Container};
+use iced::{button, Button, Align, Length, Space, Element, Text, HorizontalAlignment, Row, Column, Container};
 
 use crate::database::{Episode, Progress, Date};
 use crate::download::FileType;
@@ -15,15 +15,16 @@ pub struct Collapsed {
     date: Date,
     progress: Progress,
     pub file: Option<FileType>,
+    expand: button::State,
     enqueue: button::State,
 }
 
 fn enqueue_button(state: &mut button::State) -> Button<Message> {
     let icon = Text::new("+".to_string())
         .horizontal_alignment(HorizontalAlignment::Center)
-        .width(iced::Length::Fill)
-        .height(iced::Length::Fill)
-        .size(20);
+        .width(Length::Fill)
+        .height(Length::Fill)
+        .size(40);
     Button::new(state, icon)
         .on_press(Message::None)
 }
@@ -48,20 +49,26 @@ impl Collapsed {
     pub fn view(&mut self, theme: style::Theme) -> Element<crate::Message> {
         let meta = Row::new()
             .push(self.age())
+            .push(Space::with_width(Length::Fill))
             .push(self.duration());
 
         let column = Column::new()
             .push(self.title())
             .push(meta);
-        let row = Row::new()
-            .push(enqueue_button(&mut self.enqueue))
-            .push(column);
+        let column = Button::new(&mut self.expand, column)
+            // .style(style::Clear)
+            .on_press(Message::None);
+        let column = Container::new(column)
+            .width(Length::FillPortion(2));
+            // .style(theme);
 
-        let element = Container::new(row)
-            .style(theme)
-            .width(iced::Length::Fill)
-            .into();
-        element
+        let row = Row::new()
+            .push(column)
+            .push(enqueue_button(&mut self.enqueue))
+            .spacing(10)
+            .align_items(Align::Start);
+
+        row.into()
     }
 
     pub fn from(episode: Episode, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
@@ -78,6 +85,7 @@ impl Collapsed {
             date: episode.date,
             progress: episode.progress,
             file, // none if no file on disk
+            expand: button::State::new(),
             enqueue: button::State::new(),
         }
     }
