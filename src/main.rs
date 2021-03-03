@@ -4,7 +4,7 @@ mod database;
 mod download;
 mod feed;
 mod play;
-mod widgets;
+pub mod widgets;
 
 use database::{EpisodeKey, PodcastDb, PodcastKey, Progress};
 use download::Downloader;

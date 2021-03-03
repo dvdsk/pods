@@ -5,16 +5,48 @@ use iced::{button, Button, Element, HorizontalAlignment, Row, Text};
 use crate::database::Progress;
 use crate::widgets::{episode, style};
 use crate::database::{Episode, PodcastDb};
-use crate::database::{EpisodeKey, PodcastKey};
+use crate::database::{EpisodeKey, PodcastKey, Date};
 use crate::download::{hash, FileType};
+use crate::widgets::episode::Collapsed;
 use std::collections::HashMap;
+
+
+#[derive(Debug)]
+pub struct CollapsedItem {
+    pub title: String,
+    age: String,
+    duration: String,
+    date: Date,
+    progress: Progress,
+    pub file: Option<FileType>,
+}
+
+impl CollapsedItem {
+    pub fn new(episode: Episode, episodes_on_disk: &HashMap<u64, FileType>) -> Self {
+        let file = episodes_on_disk
+            .get(&hash(&episode.title))
+            .copied();
+
+        Self {
+            title: episode.title,
+            age: String::from("2 weeks"),
+            duration: String::from("35m"),
+            date: episode.date,
+            progress: episode.progress,
+            file, // none if no file on disk
+        }
+    }
+    pub fn view(&self) -> Collapsed {
+        Collapsed::new(self.title.clone(), self.age.clone(), self.duration.clone())
+    }
+}
 
 /// Episodes view
 #[derive(Debug)]
 pub struct Episodes {
     db: PodcastDb,
-    list: Vec<episode::Collapsed>,
-    expanded: Option<(u16, episode::Expanded)>,
+    list: Vec<CollapsedItem>,
+    // expanded: Option<(u16, episode::Expanded)>,
     scroll_state: scrollable::State,
     pub podcast: Option<String>,
     podcast_id: Option<PodcastKey>,
@@ -28,7 +60,7 @@ impl Episodes {
         Self {
             db,
             list: Vec::new(),
-            expanded: None,
+            // expanded: None,
             scroll_state: scrollable::State::new(),
             podcast: None,
             podcast_id: None,
@@ -51,7 +83,7 @@ impl Episodes {
         episodes.sort_unstable_by_key(|e| *e.date.inner());
         episodes.reverse();
         for info in episodes {
-            self.list.push(episode::Collapsed::from(info, &downloaded_episodes));
+            self.list.push(CollapsedItem::new(info, &downloaded_episodes));
         }
     }
     /// fill the view from a list of episodes
@@ -81,8 +113,7 @@ impl Episodes {
         {
             // let podcast_id = *self.podcast_id.as_ref().unwrap();
             // let key = EpisodeKey::from_title(podcast_id, &item.title);
-            let test = item.view(theme);
-
+            let test = item.view();
             scrollable = scrollable.push(test);
         }
         scrollable.into()
