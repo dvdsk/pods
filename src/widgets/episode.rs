@@ -4,7 +4,7 @@ use iced::{button, Button, Align, Length, Space, Element, Text, HorizontalAlignm
 use iced_native::{Widget, layout, Hasher, mouse, Size, Layout, Point, Rectangle, Clipboard};
 use iced_native::event::{Event, Status};
 use iced_native::text::Renderer as _;
-use iced_graphics::{backend, Backend, Defaults, Primitive, Renderer, Color, Background, Font};
+use iced_graphics::{Vector, backend, Backend, Defaults, Primitive, Renderer, Color, Background, Font};
 
 use crate::database::{Episode, Progress, Date};
 use crate::download::FileType;
@@ -14,17 +14,20 @@ use crate::Message;
 #[derive(Debug)]
 pub struct Collapsed {
     pub title: String,
-    pub age: String,
+    pub published: String,
     pub duration: String,
     pub title_bounds: Size,
     pub widget_bounds: Size,
 }
 
+const TITLE_SIZE: f32 = 70.0;
+const META_SIZE: f32 = 20.0;
+
 impl Collapsed {
     pub fn new(title: String, age: String, duration: String) -> Self {
         Self {
-            title,
-            age,
+            title: String::from("Test long title of a random podcast, look it is long"),
+            published: age,
             duration,
             title_bounds: Size::ZERO,
             widget_bounds: Size::ZERO,
@@ -45,14 +48,14 @@ where
     fn layout(&self, renderer: &Renderer<B>, limits: &layout::Limits) -> layout::Node {
         let Size {width: w_full, height} = limits.max();
         let text_bounds = Size::new(0.8*w_full, height);
-        let (_, height) = renderer.measure("test", 70, Font::Default, text_bounds);
-        // let title_bounds = Size::new(width, height);
-        let widget_bounds = Size::new(w_full, height);
+        let (_, title_h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, dbg!(text_bounds));
+        let widget_bounds = Size::new(w_full, title_h+2.*META_SIZE);
 
         layout::Node::new(widget_bounds)
     }
     fn hash_layout(&self, state: &mut Hasher) {
         use std::hash::Hash;
+        self.title.hash(state);
         // state
     }
     fn draw(&self, 
@@ -65,16 +68,16 @@ where
         
         // TODO title bounds
         let Rectangle {x, y, width: w_full, height} = layout.bounds();
+
         let text_bounds = Size::new(0.8*w_full, height);
-        let (width, height) = renderer.measure(
-            "Test long title of a random podcast, look it is long", 
-            70, Font::Default, text_bounds);
+        let (width, height) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, text_bounds);
         let title_bounds = Rectangle {x, y, width, height};
+        let pub_bounds = Rectangle {x, y: y+title_bounds.height, width: 0.4*w_full, height: 0.2*height};
 
-        
         // TODO meta bounds
+        let primitives = self.primitives(layout, title_bounds, pub_bounds);
 
-        (primitive(layout, title_bounds), mouse_grabbed())
+        (primitives, mouse_grabbed())
     }
     fn on_event(&mut self, 
         _event: Event, 
@@ -94,23 +97,52 @@ impl<'a, Message> Into<Element<'a, Message>> for Collapsed {
     }
 }
 
-fn primitive(layout: Layout<'_>, title_bounds: Rectangle) -> Primitive {
-    use Primitive::*;
-    // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
-    let size = layout.bounds().size();
-    let Rectangle {x, y, width, ..} = layout.bounds();
+impl Collapsed {
+    fn primitives(&self, layout: Layout<'_>, title_bounds: Rectangle, pub_bounds: Rectangle) -> Primitive {
+        use Primitive::*;
+        // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
+        let size = layout.bounds().size();
+        let Rectangle {x, y, width, ..} = layout.bounds();
+        // dbg!(y, size);
 
-    let bottem_line = h_line(x, x+width, y, 10.0, Color::BLACK);
-    let v_line = v_line(y, y+0.2*width, x+0.8*width, 10.0, Color::BLACK);
-    let mesh = merge_mesh2d(bottem_line, v_line);
-    let mesh = Primitive::Mesh2D{buffers: mesh, size};
+        let y = 0.0;
+        let x = 0.0;
+        let h_line = h_line(x, x+width, y, 5.0, Color::BLACK);
+        let v_line = v_line(y, y+0.2*width, x+0.8*width, 5.0, Color::BLACK);
+        let mesh = merge_mesh2d(h_line, v_line);
+        let y = y + 0.5*title_bounds.height;
+        let plus = plus(x+0.9*width, y, TITLE_SIZE, 5.0, Color::BLACK);
+        let mesh = merge_mesh2d(mesh, plus);
 
-    let title = title(
-        "Test long title of a random podcast, look it is long".to_owned(), 
-        title_bounds);
-    
-    let primitives = vec![mesh, title];
-    Group{primitives}
+        let mesh = Primitive::Mesh2D{buffers: mesh, size};
+        let mesh = Primitive::Translate {
+            translation: Vector::new(layout.bounds().x, layout.bounds().y),
+            content: Box::new(mesh),
+        };
+        // dbg!(&mesh);
+
+        let title = text_left_aligned(
+            self.title.clone(), 
+            title_bounds,
+            TITLE_SIZE);
+
+        let published = text_left_aligned(
+            self.title.clone(), 
+            pub_bounds,
+            META_SIZE);
+        
+        let primitives = vec![mesh, title, published];
+        // let primitives = vec![mesh];
+        Group{primitives}
+    }
+}
+
+/// draws a plus centred at x,y
+fn plus(x: f32, y: f32, size: f32, stroke: f32, color: Color) -> Mesh2D {
+    let r = size/2.0;
+    let h_line = h_line(x-r, x+r, y-stroke/2.0, stroke, color);
+    let v_line = v_line(y-r, y+r, x-stroke/2.0, stroke, color);
+    merge_mesh2d(h_line, v_line)
 }
 
 use iced_graphics::triangle::{Vertex2D, Mesh2D};
@@ -139,12 +171,13 @@ fn v_line(y1: f32, y2: f32, x: f32, width: f32, color: Color) -> Mesh2D {
     }
 }
 
-fn title(text: String, bounds: Rectangle) -> Primitive {
+fn text_left_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
+    bounds.y += 1.0*size;
     Primitive::Text {
         content: text,
         bounds,
         color: Color::BLACK,
-        size: 70.0,
+        size,
         font: Font::Default,
         horizontal_alignment: HorizontalAlignment::Left,
         vertical_alignment: iced::VerticalAlignment::Center,
