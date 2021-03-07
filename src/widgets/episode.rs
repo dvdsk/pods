@@ -37,13 +37,11 @@ impl Collapsed {
         // TODO title bounds
         let Rectangle {x, y, width, height} = layout.bounds();
 
-        let title_bounds = Size::new(width - PLUS_H_SPACE, height);
-        let (w, h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, title_bounds);
         let title_bounds = Rectangle {x, y, 
-            width: w, 
-            height: h};
+            width: width - PLUS_H_SPACE,
+            height};
         let pub_bounds = Rectangle {x, 
-            y: y+title_bounds.height, 
+            y: y+height-META_SIZE-WIDTH, 
             width: title_bounds.width, 
             height: 2.0*META_SIZE};
 
