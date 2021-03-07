@@ -11,6 +11,51 @@ use crate::download::FileType;
 use crate::Message;
 // use super::style;
 
+const TITLE_SIZE: f32 = 70.0;
+const META_SIZE: f32 = 20.0;
+const WIDTH: f32 = 5.0;
+
+struct ElementsLayout {
+    bounds: Rectangle,
+    title_bounds: Rectangle,
+    pub_bounds: Rectangle,
+    h_line: (f32,f32,f32),
+    v_line: (f32,f32,f32),
+    plus: (f32,f32),
+}
+
+impl Collapsed {
+    fn layout<B: backend::Text + Backend>(&self, layout: Layout, renderer: &mut Renderer<B>) -> ElementsLayout {
+        // TODO title bounds
+        let Rectangle {x, y, width, height} = layout.bounds();
+        dbg!(y);
+
+        let title_bounds = Size::new(0.8*width, height);
+        let (w, h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, title_bounds);
+        dbg!(h);
+        let title_bounds = Rectangle {x, y, 
+            width: w, 
+            height: h};
+        let pub_bounds = Rectangle {x, 
+            y: y+title_bounds.height, 
+            width: 0.4*width, 
+            height: 2.0*META_SIZE};
+
+        let h_line = (0.0, x+width, height-WIDTH);
+        let v_line = (title_bounds.y, pub_bounds.y+pub_bounds.height, x+0.8*width);
+        let plus = (0.9*width, y + TITLE_SIZE);
+
+        ElementsLayout {
+            bounds: layout.bounds(),
+            title_bounds,
+            pub_bounds,
+            h_line,
+            v_line,
+            plus,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Collapsed {
     pub title: String,
@@ -20,15 +65,13 @@ pub struct Collapsed {
     pub widget_bounds: Size,
 }
 
-const TITLE_SIZE: f32 = 70.0;
-const META_SIZE: f32 = 20.0;
 
 impl Collapsed {
     pub fn new(title: String, age: String, duration: String) -> Self {
         Self {
             title: String::from("Test long title of a random podcast, look it is long"),
-            published: age,
-            duration,
+            published: String::from("5 weeks ago"),
+            duration: String::from("22:30"),
             title_bounds: Size::ZERO,
             widget_bounds: Size::ZERO,
         }
@@ -46,12 +89,13 @@ where
         Length::Fill
     }
     fn layout(&self, renderer: &Renderer<B>, limits: &layout::Limits) -> layout::Node {
-        let Size {width: w_full, height} = limits.max();
-        let text_bounds = Size::new(0.8*w_full, height);
-        let (_, title_h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, dbg!(text_bounds));
-        let widget_bounds = Size::new(w_full, title_h+2.*META_SIZE);
+        let Size {width, height} = limits.max();
+        let text_bounds = Size::new(0.8*width, height);
+        let (_, mut height) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, text_bounds);
+        height += 2.0*META_SIZE;
+        height += WIDTH;
 
-        layout::Node::new(widget_bounds)
+        layout::Node::new(Size::new(width, height))
     }
     fn hash_layout(&self, state: &mut Hasher) {
         use std::hash::Hash;
@@ -65,17 +109,9 @@ where
         _cursor_position: Point, 
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
-        
-        // TODO title bounds
-        let Rectangle {x, y, width: w_full, height} = layout.bounds();
-
-        let text_bounds = Size::new(0.8*w_full, height);
-        let (width, height) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, text_bounds);
-        let title_bounds = Rectangle {x, y, width, height};
-        let pub_bounds = Rectangle {x, y: y+title_bounds.height, width: 0.4*w_full, height: 0.2*height};
-
         // TODO meta bounds
-        let primitives = self.primitives(layout, title_bounds, pub_bounds);
+        let layout = self.layout(layout, renderer);
+        let primitives = self.primitives(layout);
 
         (primitives, mouse_grabbed())
     }
@@ -98,42 +134,38 @@ impl<'a, Message> Into<Element<'a, Message>> for Collapsed {
 }
 
 impl Collapsed {
-    fn primitives(&self, layout: Layout<'_>, title_bounds: Rectangle, pub_bounds: Rectangle) -> Primitive {
+    // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
+    fn primitives(&self, layout: ElementsLayout) -> Primitive {
         use Primitive::*;
-        // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
-        let size = layout.bounds().size();
-        let Rectangle {x, y, width, ..} = layout.bounds();
-        // dbg!(y, size);
 
-        let y = 0.0;
-        let x = 0.0;
-        let h_line = h_line(x, x+width, y, 5.0, Color::BLACK);
-        let v_line = v_line(y, y+0.2*width, x+0.8*width, 5.0, Color::BLACK);
+        let (x1,x2,y) = layout.h_line;
+        let h_line = h_line(x1, x2, dbg!(y), WIDTH, Color::BLACK);
+        let (y1,y2,x) = layout.v_line;
+        let v_line = v_line(y1, y2, x, WIDTH, Color::BLACK);
         let mesh = merge_mesh2d(h_line, v_line);
-        let y = y + 0.5*title_bounds.height;
-        let plus = plus(x+0.9*width, y, TITLE_SIZE, 5.0, Color::BLACK);
+        let (x,y) = layout.plus;
+        let plus = plus(x, y, TITLE_SIZE, WIDTH, Color::BLACK);
         let mesh = merge_mesh2d(mesh, plus);
 
-        let mesh = Primitive::Mesh2D{buffers: mesh, size};
-        let mesh = Primitive::Translate {
-            translation: Vector::new(layout.bounds().x, layout.bounds().y),
-            content: Box::new(mesh),
-        };
-        // dbg!(&mesh);
+        let mesh = Primitive::Mesh2D{buffers: mesh, size: layout.bounds.size()};
 
         let title = text_left_aligned(
             self.title.clone(), 
-            title_bounds,
+            dbg!(layout.title_bounds),
             TITLE_SIZE);
 
         let published = text_left_aligned(
-            self.title.clone(), 
-            pub_bounds,
+            self.published.clone(), 
+            dbg!(layout.pub_bounds),
             META_SIZE);
         
         let primitives = vec![mesh, title, published];
-        // let primitives = vec![mesh];
-        Group{primitives}
+        let group = Group{primitives};
+        let mesh = Primitive::Translate {
+            translation: Vector::new(layout.bounds.x, layout.bounds.y),
+            content: Box::new(group)
+        };
+        mesh
     }
 }
 
@@ -172,7 +204,6 @@ fn v_line(y1: f32, y2: f32, x: f32, width: f32, color: Color) -> Mesh2D {
 }
 
 fn text_left_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
-    bounds.y += 1.0*size;
     Primitive::Text {
         content: text,
         bounds,
@@ -180,7 +211,7 @@ fn text_left_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitiv
         size,
         font: Font::Default,
         horizontal_alignment: HorizontalAlignment::Left,
-        vertical_alignment: iced::VerticalAlignment::Center,
+        vertical_alignment: iced::VerticalAlignment::Top,
     }
 }
 
