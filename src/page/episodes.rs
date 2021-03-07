@@ -109,8 +109,7 @@ impl Episodes {
             .list
             .iter_mut()
             .skip(self.scrolled_down)
-            // .take(Self::MAXSCROLLABLE)
-            .take(1)
+            .take(Self::MAXSCROLLABLE)
         {
             // let podcast_id = *self.podcast_id.as_ref().unwrap();
             // let key = EpisodeKey::from_title(podcast_id, &item.title);

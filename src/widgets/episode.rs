@@ -28,11 +28,9 @@ impl Collapsed {
     fn layout<B: backend::Text + Backend>(&self, layout: Layout, renderer: &mut Renderer<B>) -> ElementsLayout {
         // TODO title bounds
         let Rectangle {x, y, width, height} = layout.bounds();
-        dbg!(y);
 
         let title_bounds = Size::new(0.8*width, height);
         let (w, h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, title_bounds);
-        dbg!(h);
         let title_bounds = Rectangle {x, y, 
             width: w, 
             height: h};
@@ -42,8 +40,8 @@ impl Collapsed {
             height: 2.0*META_SIZE};
 
         let h_line = (0.0, x+width, height-WIDTH);
-        let v_line = (title_bounds.y, pub_bounds.y+pub_bounds.height, x+0.8*width);
-        let plus = (0.9*width, y + TITLE_SIZE);
+        let v_line = (0.0, pub_bounds.y+pub_bounds.height, x+0.8*width);
+        let plus = (0.9*width, 0.0 + TITLE_SIZE);
 
         ElementsLayout {
             bounds: layout.bounds(),
@@ -139,7 +137,7 @@ impl Collapsed {
         use Primitive::*;
 
         let (x1,x2,y) = layout.h_line;
-        let h_line = h_line(x1, x2, dbg!(y), WIDTH, Color::BLACK);
+        let h_line = h_line(x1, x2, y, WIDTH, Color::BLACK);
         let (y1,y2,x) = layout.v_line;
         let v_line = v_line(y1, y2, x, WIDTH, Color::BLACK);
         let mesh = merge_mesh2d(h_line, v_line);
@@ -148,24 +146,23 @@ impl Collapsed {
         let mesh = merge_mesh2d(mesh, plus);
 
         let mesh = Primitive::Mesh2D{buffers: mesh, size: layout.bounds.size()};
+        let mesh = Primitive::Translate {
+            translation: Vector::new(layout.bounds.x, layout.bounds.y),
+            content: Box::new(mesh)
+        };
 
         let title = text_left_aligned(
             self.title.clone(), 
-            dbg!(layout.title_bounds),
+            layout.title_bounds,
             TITLE_SIZE);
 
         let published = text_left_aligned(
             self.published.clone(), 
-            dbg!(layout.pub_bounds),
+            layout.pub_bounds,
             META_SIZE);
         
         let primitives = vec![mesh, title, published];
-        let group = Group{primitives};
-        let mesh = Primitive::Translate {
-            translation: Vector::new(layout.bounds.x, layout.bounds.y),
-            content: Box::new(group)
-        };
-        mesh
+        Group{primitives}
     }
 }
 
