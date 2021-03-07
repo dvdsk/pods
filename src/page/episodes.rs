@@ -36,7 +36,7 @@ impl CollapsedItem {
             file, // none if no file on disk
         }
     }
-    pub fn view(&self) -> Collapsed {
+    pub fn view(&self) -> Collapsed<crate::Message> {
         Collapsed::new(self.title.clone(), self.age.clone(), self.duration.clone())
     }
 }

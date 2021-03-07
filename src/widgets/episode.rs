@@ -32,9 +32,8 @@ struct ElementsLayout {
     plus: (f32,f32),
 }
 
-impl Collapsed {
-    fn layout<B: backend::Text + Backend>(&self, layout: Layout, renderer: &mut Renderer<B>) -> ElementsLayout {
-        // TODO title bounds
+impl Collapsed<Message> {
+    fn layout_elements(&self, layout: Layout) -> ElementsLayout {
         let Rectangle {x, y, width, height} = layout.bounds();
 
         let title_bounds = Rectangle {x, y, 
@@ -68,7 +67,11 @@ impl Collapsed {
 }
 
 #[derive(Debug)]
-pub struct Collapsed {
+pub struct Collapsed<Message> {
+    cursor: Option<Point>,
+
+    pub on_title: Option<Message>,
+
     pub title: String,
     pub published: String,
     pub duration: String,
@@ -77,19 +80,22 @@ pub struct Collapsed {
 }
 
 
-impl Collapsed {
+impl<Message> Collapsed<Message> {
     pub fn new(title: String, age: String, duration: String) -> Self {
         Self {
+            on_title: None,
+
             title: String::from("Test long title of a random podcast, look it is long"),
             published: String::from("published: 5 weeks ago"),
             duration: String::from("22:30"),
             title_bounds: Size::ZERO,
             widget_bounds: Size::ZERO,
+            cursor: None,
         }
     }
 }
 
-impl<Message, B> Widget<Message, Renderer<B>> for Collapsed
+impl<Message, B> Widget<Message, Renderer<B>> for Collapsed<Message>
 where
     B: Backend + backend::Text,
 {
@@ -114,38 +120,59 @@ where
         // state
     }
     fn draw(&self, 
-        renderer: &mut Renderer<B>, 
+        _renderer: &mut Renderer<B>, 
         _defaults: &Defaults, 
         layout: Layout<'_>, 
         _cursor_position: Point, 
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
         // TODO meta bounds
-        let layout = self.layout(layout, renderer);
+        let layout = self.layout_elements(layout);
         let primitives = self.primitives(layout);
 
         (primitives, mouse_grabbed())
     }
     fn on_event(&mut self, 
-        _event: Event, 
-        _layout: Layout<'_>, 
+        event: Event, 
+        layout: Layout<'_>, 
         _cursor_position: Point, 
-        _messages: &mut Vec<Message>, 
+        messages: &mut Vec<Message>, 
         _renderer: &Renderer<B>, 
         _clipboard: Option<&dyn Clipboard>
     ) -> Status {
+
+        match event {
+            Event::Mouse(mouse::Event::CursorMoved{position}) => self.cursor = Some(position),
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
+                if let Some(p) = self.cursor {
+                    self.handle_click(layout, p);
+                }
+            }
+            Event::Touch(iced_native::touch::Event::FingerPressed{id: _, position}) => {
+                self.handle_click(layout, position);
+            }
+            _ => (),
+        }
 
         Status::Ignored
     }
 }
 
-impl<'a, Message> Into<Element<'a, Message>> for Collapsed {
+impl<'a, Message: 'a> Into<Element<'a, Message>> for Collapsed<Message> {
     fn into(self) -> Element<'a, Message> {
         Element::new(self)
     }
 }
 
-impl Collapsed {
+impl Collapsed<Message> {
+
+    //
+    fn handle_click(self, layout: Layout, position: Point, messages: &mut Vec<Message>) {
+        if let Some(message) = self.on_title {
+            messages.push(message);
+        }
+    }
+
     // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
     fn primitives(&self, layout: ElementsLayout) -> Primitive {
         use Primitive::*;
