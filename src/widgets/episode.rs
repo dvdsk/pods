@@ -11,14 +11,22 @@ use crate::download::FileType;
 use crate::Message;
 // use super::style;
 
-const TITLE_SIZE: f32 = 70.0;
+const TITLE_SIZE: f32 = 50.0;
 const META_SIZE: f32 = 20.0;
+const PLUS_SIZE: f32 = 30.0;
+
 const WIDTH: f32 = 5.0;
+const VLINE_WIDTH: f32 = WIDTH*1.5;
+const PLUS_WIDTH: f32 = WIDTH*0.8;
+
+const PLUS_H_SPACE: f32 = PLUS_SIZE *2.0;
+
 
 struct ElementsLayout {
     bounds: Rectangle,
     title_bounds: Rectangle,
     pub_bounds: Rectangle,
+    dur_bounds: Rectangle,
     h_line: (f32,f32,f32),
     v_line: (f32,f32,f32),
     plus: (f32,f32),
@@ -29,24 +37,31 @@ impl Collapsed {
         // TODO title bounds
         let Rectangle {x, y, width, height} = layout.bounds();
 
-        let title_bounds = Size::new(0.8*width, height);
+        let title_bounds = Size::new(width - PLUS_H_SPACE, height);
         let (w, h) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, title_bounds);
         let title_bounds = Rectangle {x, y, 
             width: w, 
             height: h};
         let pub_bounds = Rectangle {x, 
             y: y+title_bounds.height, 
-            width: 0.4*width, 
+            width: title_bounds.width, 
             height: 2.0*META_SIZE};
 
-        let h_line = (0.0, x+width, height-WIDTH);
-        let v_line = (0.0, pub_bounds.y+pub_bounds.height, x+0.8*width);
-        let plus = (0.9*width, 0.0 + TITLE_SIZE);
+        let h_line = (0.0, width, height-WIDTH);
+        let v_line = (0.0, pub_bounds.y+pub_bounds.height, width-PLUS_H_SPACE);
+        let plus = (
+            width + 0.5*VLINE_WIDTH - 0.5*PLUS_H_SPACE, 
+            0.5*(title_bounds.height + pub_bounds.height));
+
+        let dur_bounds = Rectangle {
+            x: v_line.2,// - pub_bounds.width - META_SIZE,
+            .. pub_bounds};
 
         ElementsLayout {
             bounds: layout.bounds(),
             title_bounds,
             pub_bounds,
+            dur_bounds,
             h_line,
             v_line,
             plus,
@@ -68,7 +83,7 @@ impl Collapsed {
     pub fn new(title: String, age: String, duration: String) -> Self {
         Self {
             title: String::from("Test long title of a random podcast, look it is long"),
-            published: String::from("5 weeks ago"),
+            published: String::from("published: 5 weeks ago"),
             duration: String::from("22:30"),
             title_bounds: Size::ZERO,
             widget_bounds: Size::ZERO,
@@ -88,9 +103,9 @@ where
     }
     fn layout(&self, renderer: &Renderer<B>, limits: &layout::Limits) -> layout::Node {
         let Size {width, height} = limits.max();
-        let text_bounds = Size::new(0.8*width, height);
+        let text_bounds = Size::new(width - PLUS_H_SPACE, height);
         let (_, mut height) = renderer.measure(&self.title, TITLE_SIZE as u16, Font::Default, text_bounds);
-        height += 2.0*META_SIZE;
+        height += 1.2*META_SIZE;
         height += WIDTH;
 
         layout::Node::new(Size::new(width, height))
@@ -121,6 +136,7 @@ where
         _renderer: &Renderer<B>, 
         _clipboard: Option<&dyn Clipboard>
     ) -> Status {
+
         Status::Ignored
     }
 }
@@ -139,10 +155,10 @@ impl Collapsed {
         let (x1,x2,y) = layout.h_line;
         let h_line = h_line(x1, x2, y, WIDTH, Color::BLACK);
         let (y1,y2,x) = layout.v_line;
-        let v_line = v_line(y1, y2, x, WIDTH, Color::BLACK);
+        let v_line = v_line(y1, y2, x, VLINE_WIDTH, Color::BLACK);
         let mesh = merge_mesh2d(h_line, v_line);
         let (x,y) = layout.plus;
-        let plus = plus(x, y, TITLE_SIZE, WIDTH, Color::BLACK);
+        let plus = plus(x, y, PLUS_SIZE, PLUS_WIDTH, Color::BLACK);
         let mesh = merge_mesh2d(mesh, plus);
 
         let mesh = Primitive::Mesh2D{buffers: mesh, size: layout.bounds.size()};
@@ -160,8 +176,13 @@ impl Collapsed {
             self.published.clone(), 
             layout.pub_bounds,
             META_SIZE);
+
+        let duration = text_right_aligned(
+            self.duration.clone(), 
+            layout.dur_bounds,
+            META_SIZE);
         
-        let primitives = vec![mesh, title, published];
+        let primitives = vec![mesh, title, published, duration];
         Group{primitives}
     }
 }
@@ -201,13 +222,19 @@ fn v_line(y1: f32, y2: f32, x: f32, width: f32, color: Color) -> Mesh2D {
 }
 
 fn text_left_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
+    text_aligned(text, bounds, size, HorizontalAlignment::Left)
+}
+fn text_right_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
+    text_aligned(text, bounds, size, HorizontalAlignment::Right)
+}
+fn text_aligned(text: String, mut bounds: Rectangle, size: f32, horizontal_alignment: HorizontalAlignment) -> Primitive {
     Primitive::Text {
         content: text,
         bounds,
         color: Color::BLACK,
         size,
         font: Font::Default,
-        horizontal_alignment: HorizontalAlignment::Left,
+        horizontal_alignment,
         vertical_alignment: iced::VerticalAlignment::Top,
     }
 }
