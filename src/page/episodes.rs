@@ -1,11 +1,10 @@
+use iced::Element;
 use iced::widget::scrollable::{self, Scrollable};
-use iced::Length;
-use iced::{button, Button, Element, HorizontalAlignment, Row, Text};
 
-use crate::database::Progress;
-use crate::widgets::{episode, style};
+use crate::database::{Date, PodcastKey, Progress};
+use crate::widgets::style;
 use crate::database::{Episode, PodcastDb};
-use crate::database::{EpisodeKey, PodcastKey, Date};
+// use crate::database::{EpisodeKey, PodcastKey, Date};
 use crate::download::{hash, FileType};
 use crate::widgets::episode::Collapsed;
 use std::collections::HashMap;
@@ -101,7 +100,7 @@ impl Episodes {
             item.file = file;
         }
     }
-    pub fn view(&mut self, theme: style::Theme) -> Element<crate::Message> {
+    pub fn view(&mut self, _theme: style::Theme) -> Element<crate::Message> {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
@@ -109,7 +108,8 @@ impl Episodes {
             .list
             .iter_mut()
             .skip(self.scrolled_down)
-            .take(Self::MAXSCROLLABLE)
+            // .take(Self::MAXSCROLLABLE)
+            .take(2)
         {
             // let podcast_id = *self.podcast_id.as_ref().unwrap();
             // let key = EpisodeKey::from_title(podcast_id, &item.title);
@@ -118,62 +118,4 @@ impl Episodes {
         }
         scrollable.into()
     }
-}
-
-fn play_button(
-    state: &mut button::State,
-    key: EpisodeKey,
-    file_type: FileType,
-    episode_name: String,
-    progress: Progress,
-) -> Button<crate::Message> {
-    let msg = crate::Message::Play(key, file_type, progress.into());
-    Button::new(
-        state,
-        Text::new(episode_name).horizontal_alignment(HorizontalAlignment::Left),
-    )
-    .on_press(msg)
-    .padding(12)
-    .width(Length::FillPortion(4))
-}
-
-fn stream_button(
-    state: &mut button::State,
-    key: EpisodeKey,
-    episode_name: String,
-) -> Button<crate::Message> {
-    let msg = crate::Message::Stream(key);
-    Button::new(
-        state,
-        Text::new(episode_name).horizontal_alignment(HorizontalAlignment::Left),
-    )
-    .on_press(msg)
-    .padding(12)
-    .width(Length::FillPortion(4))
-}
-
-fn download_button(state: &mut button::State, key: EpisodeKey) -> Button<crate::Message> {
-    let msg = crate::Message::Download(key);
-    Button::new(
-        state,
-        Text::new("dl").horizontal_alignment(HorizontalAlignment::Center),
-    )
-    .on_press(msg)
-    .padding(12)
-    .width(Length::FillPortion(1))
-}
-
-fn delete_button(
-    state: &mut button::State,
-    key: EpisodeKey,
-    file_type: FileType,
-) -> Button<crate::Message> {
-    let msg = crate::Message::Remove(key, file_type);
-    Button::new(
-        state,
-        Text::new("rm").horizontal_alignment(HorizontalAlignment::Center),
-    )
-    .on_press(msg)
-    .padding(12)
-    .width(Length::FillPortion(1))
 }

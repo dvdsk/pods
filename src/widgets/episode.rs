@@ -1,15 +1,8 @@
-use std::collections::HashMap;
-
-use iced::{button, Button, Align, Length, Space, Element, Text, HorizontalAlignment, Row, Column, Container};
+use iced::{Length, Element, HorizontalAlignment};
 use iced_native::{Widget, layout, Hasher, mouse, Size, Layout, Point, Rectangle, Clipboard};
 use iced_native::event::{Event, Status};
 use iced_native::text::Renderer as _;
-use iced_graphics::{Vector, backend, Backend, Defaults, Primitive, Renderer, Color, Background, Font};
-
-use crate::database::{Episode, Progress, Date};
-use crate::download::FileType;
-use crate::Message;
-// use super::style;
+use iced_graphics::{Vector, backend, Backend, Defaults, Primitive, Renderer, Color, Font};
 
 const TITLE_SIZE: f32 = 50.0;
 const META_SIZE: f32 = 20.0;
@@ -32,20 +25,22 @@ struct ElementsLayout {
     plus: (f32,f32),
 }
 
-impl Collapsed<Message> {
+impl<Message> Collapsed<Message> {
     fn layout_elements(&self, layout: Layout) -> ElementsLayout {
-        let Rectangle {x, y, width, height} = layout.bounds();
+        let Rectangle {width, height, ..} = layout.bounds();
 
+        let y = 0.;
+        let x = 0.;
         let title_bounds = Rectangle {x, y, 
             width: width - PLUS_H_SPACE,
             height};
         let pub_bounds = Rectangle {x, 
             y: y+height-META_SIZE-WIDTH, 
             width: title_bounds.width, 
-            height: 2.0*META_SIZE};
+            height: 1.0*META_SIZE};
 
-        let h_line = (0.0, width, height-WIDTH);
-        let v_line = (0.0, pub_bounds.y+pub_bounds.height, width-PLUS_H_SPACE);
+        let h_line = (x, width, y+height-WIDTH);
+        let v_line = (y, pub_bounds.y+pub_bounds.height, width-PLUS_H_SPACE);
         let plus = (
             width + 0.5*VLINE_WIDTH - 0.5*PLUS_H_SPACE, 
             0.5*(title_bounds.height + pub_bounds.height));
@@ -68,9 +63,8 @@ impl Collapsed<Message> {
 
 #[derive(Debug)]
 pub struct Collapsed<Message> {
-    cursor: Option<Point>,
-
     pub on_title: Option<Message>,
+    pub on_plus: Option<Message>,
 
     pub title: String,
     pub published: String,
@@ -81,21 +75,27 @@ pub struct Collapsed<Message> {
 
 
 impl<Message> Collapsed<Message> {
-    pub fn new(title: String, age: String, duration: String) -> Self {
+    pub fn new(_title: String, _age: String, _duration: String) -> Self {
         Self {
             on_title: None,
+            on_plus: None,
 
             title: String::from("Test long title of a random podcast, look it is long"),
             published: String::from("published: 5 weeks ago"),
             duration: String::from("22:30"),
             title_bounds: Size::ZERO,
             widget_bounds: Size::ZERO,
-            cursor: None,
         }
+    }
+    pub fn on_title(&mut self, msg: Message) {
+        self.on_title = Some(msg);
+    }
+    pub fn on_plus(&mut self, msg: Message) {
+        self.on_plus = Some(msg);
     }
 }
 
-impl<Message, B> Widget<Message, Renderer<B>> for Collapsed<Message>
+impl<Message: Clone, B> Widget<Message, Renderer<B>> for Collapsed<Message>
 where
     B: Backend + backend::Text,
 {
@@ -123,58 +123,84 @@ where
         _renderer: &mut Renderer<B>, 
         _defaults: &Defaults, 
         layout: Layout<'_>, 
-        _cursor_position: Point, 
+        cursor_position: Point, 
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
         // TODO meta bounds
         let layout = self.layout_elements(layout);
-        let primitives = self.primitives(layout);
+        let primitives = self.primitives(&layout);
+        let mouse = mouse_grabbed(layout, cursor_position);
 
-        (primitives, mouse_grabbed())
+        (primitives, mouse)
     }
     fn on_event(&mut self, 
         event: Event, 
         layout: Layout<'_>, 
-        _cursor_position: Point, 
+        cursor_position: Point, 
         messages: &mut Vec<Message>, 
         _renderer: &Renderer<B>, 
         _clipboard: Option<&dyn Clipboard>
     ) -> Status {
+        use mouse::Event::ButtonReleased;
+        use iced_native::touch::Event::FingerPressed;
 
         match event {
-            Event::Mouse(mouse::Event::CursorMoved{position}) => self.cursor = Some(position),
-            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left)) => {
-                if let Some(p) = self.cursor {
-                    self.handle_click(layout, p);
-                }
-            }
-            Event::Touch(iced_native::touch::Event::FingerPressed{id: _, position}) => {
-                self.handle_click(layout, position);
-            }
-            _ => (),
+            Event::Mouse(ButtonReleased(mouse::Button::Left)) =>
+                self.handle_click(layout, cursor_position, messages),
+            Event::Touch(FingerPressed{id: _, position}) =>
+                self.handle_click(layout, position, messages),
+            _ => Status::Ignored,
         }
-
-        Status::Ignored
     }
 }
 
-impl<'a, Message: 'a> Into<Element<'a, Message>> for Collapsed<Message> {
+impl<'a, Message: 'a+Clone> Into<Element<'a, Message>> for Collapsed<Message> {
     fn into(self) -> Element<'a, Message> {
         Element::new(self)
     }
 }
 
-impl Collapsed<Message> {
+fn mouse_grabbed(layout: ElementsLayout, position: Point) -> mouse::Interaction {
+    // TODO FIXME, 
+    if !layout.bounds.contains(position) {
+        return mouse::Interaction::default();
+    }
+    if layout.title_bounds.contains(position) {
+        return mouse::Interaction::Grab;
+    }
+    if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
+        return mouse::Interaction::Grab;
+    }
 
+    mouse::Interaction::default()
+}
+
+impl<Message: Clone> Collapsed<Message> {
     //
-    fn handle_click(self, layout: Layout, position: Point, messages: &mut Vec<Message>) {
-        if let Some(message) = self.on_title {
-            messages.push(message);
+    fn handle_click(&self, layout: Layout, position: Point, messages: &mut Vec<Message>) -> Status {
+        if !layout.bounds().contains(position) {
+            return Status::Ignored;
         }
+        let layout = self.layout_elements(layout);
+
+        if layout.title_bounds.contains(position) {
+            if let Some(message) = &self.on_title {
+                messages.push(message.clone());
+                return Status::Captured;
+            }
+        }
+
+        if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
+            if let Some(message) = &self.on_plus {
+                messages.push(message.clone());
+                return Status::Captured;
+            }
+        }
+        Status::Ignored
     }
 
     // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
-    fn primitives(&self, layout: ElementsLayout) -> Primitive {
+    fn primitives(&self, layout: &ElementsLayout) -> Primitive {
         use Primitive::*;
 
         let (x1,x2,y) = layout.h_line;
@@ -187,10 +213,6 @@ impl Collapsed<Message> {
         let mesh = merge_mesh2d(mesh, plus);
 
         let mesh = Primitive::Mesh2D{buffers: mesh, size: layout.bounds.size()};
-        let mesh = Primitive::Translate {
-            translation: Vector::new(layout.bounds.x, layout.bounds.y),
-            content: Box::new(mesh)
-        };
 
         let title = text_left_aligned(
             self.title.clone(), 
@@ -208,7 +230,12 @@ impl Collapsed<Message> {
             META_SIZE);
         
         let primitives = vec![mesh, title, published, duration];
-        Group{primitives}
+        let primitives = Group{primitives};
+        let primitives = Primitive::Translate {
+            translation: Vector::new(layout.bounds.x, layout.bounds.y),
+            content: Box::new(primitives)
+        };
+        primitives
     }
 }
 
@@ -220,8 +247,8 @@ fn plus(x: f32, y: f32, size: f32, stroke: f32, color: Color) -> Mesh2D {
     merge_mesh2d(h_line, v_line)
 }
 
-use iced_graphics::triangle::{Vertex2D, Mesh2D};
 /// horizontal line from x1 to x2 at height y
+use iced_graphics::triangle::{Vertex2D, Mesh2D};
 fn h_line(x1: f32, x2: f32, y: f32, width: f32, color: Color) -> Mesh2D {
     let color = color.into_linear();
     let top_l = Vertex2D {position: [x1, y], color};
@@ -233,6 +260,7 @@ fn h_line(x1: f32, x2: f32, y: f32, width: f32, color: Color) -> Mesh2D {
         indices: vec![0,1,2,1,2,3],
     }
 }
+
 /// vertical line from y1 to y2 at position x
 fn v_line(y1: f32, y2: f32, x: f32, width: f32, color: Color) -> Mesh2D {
     let color = color.into_linear();
@@ -246,13 +274,13 @@ fn v_line(y1: f32, y2: f32, x: f32, width: f32, color: Color) -> Mesh2D {
     }
 }
 
-fn text_left_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
+fn text_left_aligned(text: String, bounds: Rectangle, size: f32) -> Primitive {
     text_aligned(text, bounds, size, HorizontalAlignment::Left)
 }
-fn text_right_aligned(text: String, mut bounds: Rectangle, size: f32) -> Primitive {
+fn text_right_aligned(text: String, bounds: Rectangle, size: f32) -> Primitive {
     text_aligned(text, bounds, size, HorizontalAlignment::Right)
 }
-fn text_aligned(text: String, mut bounds: Rectangle, size: f32, horizontal_alignment: HorizontalAlignment) -> Primitive {
+fn text_aligned(text: String, bounds: Rectangle, size: f32, horizontal_alignment: HorizontalAlignment) -> Primitive {
     Primitive::Text {
         content: text,
         bounds,
@@ -262,10 +290,6 @@ fn text_aligned(text: String, mut bounds: Rectangle, size: f32, horizontal_align
         horizontal_alignment,
         vertical_alignment: iced::VerticalAlignment::Top,
     }
-}
-
-fn mouse_grabbed() -> mouse::Interaction {
-    mouse::Interaction::default()
 }
 
 use std::iter::Extend;
