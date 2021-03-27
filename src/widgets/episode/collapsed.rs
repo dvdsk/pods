@@ -69,8 +69,6 @@ pub struct Collapsed<Message> {
     pub title: String,
     pub published: String,
     pub duration: String,
-    pub title_bounds: Size,
-    pub widget_bounds: Size,
 }
 
 
@@ -83,8 +81,6 @@ impl<Message> Collapsed<Message> {
             title: String::from("Test long title of a random podcast, look it is long"),
             published: String::from("published: 5 weeks ago"),
             duration: String::from("22:30"),
-            title_bounds: Size::ZERO,
-            widget_bounds: Size::ZERO,
         }
     }
     pub fn on_title(&mut self, msg: Message) {
