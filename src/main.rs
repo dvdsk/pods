@@ -19,6 +19,7 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 pub enum Message {
     ToEpisodes(PodcastKey),
+    ToEpisodesDetails(usize),
     ToEpisodesFinish(HashMap<u64, FileType>, PodcastKey),
     PlayBackTick(std::time::Instant),
     Stream(EpisodeKey),
@@ -97,6 +98,7 @@ impl Application for App {
                 self.episodes.populate(podcast_id, downloaded);
                 self.current = Page::Episodes;
             }
+            Message::ToEpisodesDetails(idx) => self.episodes.expanded = Some(idx),
             Message::StreamProgress(p) => {
                 use play::subscribe::Progress;
                 match p {

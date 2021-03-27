@@ -91,6 +91,8 @@ pub enum Error {
     MissingDuration,
     #[error("No title for podcast episode")]
     MissingEpisodeTitle,
+    #[error("No descriptin for this episode")]
+    MissingDescription,
     #[error("Database Error")]
     DatabaseError(#[from] database::Error),
 }
@@ -113,6 +115,7 @@ fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, E
     let stream_url = stream_url.ok_or(Error::MissingStreamUrl)?;
     let duration = duration.ok_or(Error::MissingDuration)?;
     let title = item.title().ok_or(Error::MissingEpisodeTitle)?;
+    let description = item.description().ok_or(Error::MissingDescription)?;
     let podcast = podcast_title.to_owned();
 
     Ok(EpisodeExt {
@@ -121,5 +124,6 @@ fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, E
         title: title.to_owned(),
         podcast,
         date: Date::from_item(item),
+        description: description.to_owned(),
     })
 }

@@ -68,6 +68,7 @@ pub struct EpisodeExt {
     pub title: String,
     pub podcast: String,
     pub date: Date,
+    pub description: String,
     // some extra fields
 }
 

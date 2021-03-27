@@ -1,4 +1,4 @@
-mod collapsed;
+pub mod collapsed;
 mod expanded;
 
 pub use collapsed::Collapsed;

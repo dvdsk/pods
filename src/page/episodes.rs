@@ -3,10 +3,9 @@ use iced::widget::scrollable::{self, Scrollable};
 
 use crate::database::{Date, PodcastKey, Progress};
 use crate::widgets::style;
-use crate::database::{Episode, PodcastDb};
-// use crate::database::{EpisodeKey, PodcastKey, Date};
+use crate::database::{Episode, PodcastDb, EpisodeKey};
 use crate::download::{hash, FileType};
-use crate::widgets::episode::Collapsed;
+use crate::widgets::episode::{Collapsed, Expanded};
 use std::collections::HashMap;
 
 
@@ -45,7 +44,7 @@ impl CollapsedItem {
 pub struct Episodes {
     db: PodcastDb,
     list: Vec<CollapsedItem>,
-    // expanded: Option<(u16, episode::Expanded)>,
+    pub expanded: Option<usize>,
     scroll_state: scrollable::State,
     pub podcast: Option<String>,
     podcast_id: Option<PodcastKey>,
@@ -59,7 +58,7 @@ impl Episodes {
         Self {
             db,
             list: Vec::new(),
-            // expanded: None,
+            expanded: None,
             scroll_state: scrollable::State::new(),
             podcast: None,
             podcast_id: None,
@@ -104,17 +103,25 @@ impl Episodes {
         let mut scrollable = Scrollable::new(&mut self.scroll_state)
             .padding(10)
             .height(iced::Length::Fill);
-        for item in self
+        
+        for (i, item) in self
             .list
             .iter_mut()
             .skip(self.scrolled_down)
             // .take(Self::MAXSCROLLABLE)
             .take(2)
+            .enumerate()
         {
-            // let podcast_id = *self.podcast_id.as_ref().unwrap();
-            // let key = EpisodeKey::from_title(podcast_id, &item.title);
-            let test = item.view();
-            scrollable = scrollable.push(test);
+            let collapsed = item.view()
+                .on_title(crate::Message::ToEpisodesDetails(i+self.scrolled_down));
+            scrollable = if Some(i) == self.expanded {
+                let key = EpisodeKey::from_title(self.podcast_id.unwrap(), &item.title);
+                let description = self.db.get_episode_ext(key).unwrap().description;
+                let expanded = Expanded::from_collapsed(collapsed, description);
+                scrollable.push(expanded)
+            } else {
+                scrollable.push(collapsed)
+            };
         }
         scrollable.into()
     }
