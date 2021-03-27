@@ -46,7 +46,7 @@ impl<Message> Collapsed<Message> {
             0.5*(title_bounds.height + pub_bounds.height));
 
         let dur_bounds = Rectangle {
-            x: v_line.2,// - pub_bounds.width - META_SIZE,
+            x: v_line.2 - VLINE_WIDTH,
             .. pub_bounds};
 
         ElementsLayout {
@@ -117,7 +117,6 @@ where
     fn hash_layout(&self, state: &mut Hasher) {
         use std::hash::Hash;
         self.title.hash(state);
-        // state
     }
     fn draw(&self, 
         _renderer: &mut Renderer<B>, 
@@ -161,7 +160,6 @@ impl<'a, Message: 'a+Clone> Into<Element<'a, Message>> for Collapsed<Message> {
 }
 
 fn mouse_grabbed(layout: ElementsLayout, position: Point) -> mouse::Interaction {
-    // TODO FIXME, 
     if !layout.bounds.contains(position) {
         return mouse::Interaction::default();
     }
