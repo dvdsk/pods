@@ -5,13 +5,13 @@ use iced_native::text::Renderer as _;
 use iced_graphics::{Vector, backend, Backend, Defaults, Primitive, Renderer, Color, Font};
 use super::super::util::{h_line, v_line, text_left_aligned, text_right_aligned, merge_mesh2d, plus};
 
-const TITLE_SIZE: f32 = 50.0;
+const TITLE_SIZE: f32 = 40.0;
 pub const META_SIZE: f32 = 20.0;
 const PLUS_SIZE: f32 = 30.0;
 pub const MARGIN: f32 = PLUS_SIZE/2.0;
 
 pub const WIDTH: f32 = 5.0;
-const VLINE_WIDTH: f32 = WIDTH*1.5;
+const VLINE_WIDTH: f32 = WIDTH*1.2;
 const PLUS_WIDTH: f32 = WIDTH*0.8;
 
 const PLUS_H_SPACE: f32 = PLUS_SIZE *2.0;
@@ -28,9 +28,7 @@ pub struct ElementsLayout {
 }
 
 impl<Message> Collapsed<Message> {
-    pub fn layout_elements(&self, layout: Layout) -> ElementsLayout {
-        let Rectangle {width, height, ..} = layout.bounds();
-
+    pub fn layout_elements(&self, bounds: Rectangle, width: f32, height: f32) -> ElementsLayout {
         let y = 0.;
         let x = MARGIN;
         let title_bounds = Rectangle {x, y, 
@@ -46,14 +44,14 @@ impl<Message> Collapsed<Message> {
         let v_line = (y, pub_bounds.y+pub_bounds.height, width-PLUS_H_SPACE);
         let plus = (
             width + 0.5*VLINE_WIDTH - 0.5*PLUS_H_SPACE, 
-            0.5*(title_bounds.height + pub_bounds.height));
+            0.5*height);
 
         let dur_bounds = Rectangle {
             x: v_line.2 - VLINE_WIDTH,
             .. pub_bounds};
 
         ElementsLayout {
-            bounds: layout.bounds(),
+            bounds,
             title_bounds,
             pub_bounds,
             dur_bounds,
@@ -127,7 +125,8 @@ where
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
         // TODO meta bounds
-        let layout = self.layout_elements(layout);
+        let Rectangle {width, height, ..} = layout.bounds();
+        let layout = self.layout_elements(layout.bounds(), width, height);
         let mouse = mouse_grabbed(&layout, cursor_position);
 
         let primitives = self.primitives(&layout, true);
@@ -183,21 +182,25 @@ fn mouse_grabbed(layout: &ElementsLayout, position: Point) -> mouse::Interaction
 impl<Message: Clone> Collapsed<Message> {
     //
     fn handle_click(&self, layout: Layout, position: Point, messages: &mut Vec<Message>) -> Status {
+        // dbg!(position);
         if !layout.bounds().contains(position) {
             return Status::Ignored;
         }
-        let layout = self.layout_elements(layout);
+        let Rectangle {width, height, ..} = layout.bounds();
+        let layout = self.layout_elements(layout.bounds(), width, height);
 
         if layout.title_bounds.contains(position) {
-            if let Some(message) = &self.on_title {
-                messages.push(message.clone());
+            dbg!("hihi");
+            if let Some(msg) = &self.on_title {
+                messages.push(msg.clone());
                 return Status::Captured;
             }
         }
 
         if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
-            if let Some(message) = &self.on_plus {
-                messages.push(message.clone());
+            dbg!("yoyo");
+            if let Some(msg) = &self.on_plus {
+                messages.push(msg.clone());
                 return Status::Captured;
             }
         }
@@ -205,22 +208,18 @@ impl<Message: Clone> Collapsed<Message> {
     }
 
     // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
-    pub fn primitives(&self, layout: &ElementsLayout, draw_hline: bool) -> Vec<Primitive> {
-
-        let (x1,x2,y) = layout.h_line;
-        let h_line = h_line(x1, x2, y, WIDTH, Color::BLACK);
-
-        let mesh = if draw_hline {
-            let (y1,y2,x) = layout.v_line;
-            let v_line = v_line(y1, y2, x, VLINE_WIDTH, Color::BLACK);
-            merge_mesh2d(h_line, v_line)
-        } else {
-            h_line
-        };
+    pub fn primitives(&self, layout: &ElementsLayout, collapsed: bool) -> Vec<Primitive> {
 
         let (x,y) = layout.plus;
         let plus = plus(x, y, PLUS_SIZE, PLUS_WIDTH, Color::BLACK);
-        let mesh = merge_mesh2d(mesh, plus);
+        let (y1,y2,x) = layout.v_line;
+        let v_line = v_line(y1, y2, x, VLINE_WIDTH, Color::BLACK);
+        let mut mesh = merge_mesh2d(plus, v_line);
+        if collapsed {
+            let (x1,x2,y) = layout.h_line;
+            let h_line = h_line(x1, x2, y, WIDTH, Color::BLACK);
+            mesh = merge_mesh2d(mesh, h_line);
+        }; 
 
         let mesh = Primitive::Mesh2D{buffers: mesh, size: layout.bounds.size()};
 

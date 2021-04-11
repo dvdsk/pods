@@ -3,14 +3,17 @@ use iced_native::{Widget, layout, Hasher, mouse, Size, Layout, Point, Rectangle,
 use iced_native::event::{Event, Status};
 use iced_native::text::Renderer as _;
 use iced_graphics::{Vector, backend, Backend, Defaults, Primitive, Renderer, Color, Font};
+use std::cell::Cell;
 
 use super::collapsed::{self, Collapsed, MARGIN, META_SIZE, WIDTH};
 use super::super::util::{h_line, text_left_aligned, merge_mesh2d};
 
 const DESCRIPTION_SIZE: f32 = 18.0;
+const LOWER_H_SPACE: f32 = DESCRIPTION_SIZE/2.0;
 
 #[derive(Debug)]
 pub struct Expanded<Message> {
+    collapsed_height: Cell<Option<f32>>,
     collapsed: Collapsed<Message>,
     description: String,
     on_stream: Option<Message>,
@@ -31,10 +34,8 @@ impl<Message> Expanded<Message> {
     fn layout_elements(&self, layout: Layout) -> ElementsLayout {
         let Rectangle {width, height, ..} = layout.bounds();
 
-        let collapsed = self.collapsed.layout_elements(layout);
-        let y = collapsed.bounds.y;
+        let y = self.collapsed_height.get().unwrap();
         let x = MARGIN;
-
         let description_bounds = Rectangle {x, y, 
             width: width - MARGIN,
             height};
@@ -44,10 +45,14 @@ impl<Message> Expanded<Message> {
             width: description_bounds.width, 
             height: 1.0*META_SIZE};
 
-        let mid_line = (x, width, collapsed.bounds.height);
+        let mid_line = (x, width, self.collapsed_height.get().unwrap() - WIDTH);
 
         let x = 0.0;
         let bottom_line = (x, width, height - WIDTH);
+
+        let height = self.collapsed_height.get().unwrap();
+        let collapsed = self.collapsed
+            .layout_elements(layout.bounds(), width, height);
 
         ElementsLayout {
             bounds: layout.bounds(),
@@ -61,9 +66,11 @@ impl<Message> Expanded<Message> {
 }
 
 impl<Message> Expanded<Message> {
-    pub fn from_collapsed(collapsed: Collapsed<Message>, description: String) -> Self {
+    pub fn from_collapsed(collapsed: Collapsed<Message>, mut description: String) -> Self {
+        description.truncate(400);
         Self {
             collapsed,
+            collapsed_height: Cell::new(None),
             description,
             on_stream: None,
             on_add: None,
@@ -95,18 +102,21 @@ where
         let layout = self.collapsed.layout(renderer, limits);
         let Size {width, height: mut needed_height} = layout.size();
         let Size {height, ..} = limits.max();
+        self.collapsed_height.set(Some(needed_height));
 
         let text_bounds = Size::new(width - MARGIN, height);
         let (_, text_height) = renderer.measure(&self.description, DESCRIPTION_SIZE as u16, Font::Default, text_bounds);
         needed_height += text_height;
         needed_height += 1.2*META_SIZE;
         needed_height += WIDTH;
+        needed_height += LOWER_H_SPACE;
 
         layout::Node::new(Size::new(width, needed_height))
     }
     fn hash_layout(&self, state: &mut Hasher) {
         use std::hash::Hash;
         self.collapsed.title.hash(state);
+        1.hash(state); // force different hash from collapsed
     }
     fn draw(&self, 
         _renderer: &mut Renderer<B>, 
