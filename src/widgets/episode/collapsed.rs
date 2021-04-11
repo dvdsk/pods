@@ -28,9 +28,7 @@ pub struct ElementsLayout {
 }
 
 impl<Message> Collapsed<Message> {
-    pub fn layout_elements(&self, bounds: Rectangle, width: f32, height: f32) -> ElementsLayout {
-        let y = 0.;
-        let x = MARGIN;
+    pub fn elements(&self, bounds: Rectangle, width: f32, height: f32, x: f32, y: f32) -> ElementsLayout {
         let title_bounds = Rectangle {x, y, 
             width: width - PLUS_H_SPACE - MARGIN,
             height};
@@ -39,7 +37,6 @@ impl<Message> Collapsed<Message> {
             width: title_bounds.width, 
             height: 1.0*META_SIZE};
 
-        let x = 0.0;
         let h_line = (x, width, y+height-WIDTH);
         let v_line = (y, pub_bounds.y+pub_bounds.height, width-PLUS_H_SPACE);
         let plus = (
@@ -125,14 +122,14 @@ where
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
         // TODO meta bounds
-        let Rectangle {width, height, ..} = layout.bounds();
-        let layout = self.layout_elements(layout.bounds(), width, height);
-        let mouse = mouse_grabbed(&layout, cursor_position);
+        let Rectangle {width, height, x, y} = layout.bounds();
+        let elements = self.elements(layout.bounds(), width, height, 0., 0.);
+        let mouse = mouse_grabbed(&elements, cursor_position);
 
-        let primitives = self.primitives(&layout, true);
+        let primitives = self.primitives(&elements, true);
         let primitives = Primitive::Group{primitives};
         let primitives = Primitive::Translate {
-            translation: Vector::new(layout.bounds.x, layout.bounds.y),
+            translation: Vector::new(x, y),
             content: Box::new(primitives)
         };
 
@@ -180,25 +177,21 @@ fn mouse_grabbed(layout: &ElementsLayout, position: Point) -> mouse::Interaction
 }
 
 impl<Message: Clone> Collapsed<Message> {
-    //
     fn handle_click(&self, layout: Layout, position: Point, messages: &mut Vec<Message>) -> Status {
-        // dbg!(position);
         if !layout.bounds().contains(position) {
             return Status::Ignored;
         }
-        let Rectangle {width, height, ..} = layout.bounds();
-        let layout = self.layout_elements(layout.bounds(), width, height);
+        let Rectangle {width, height, x, y} = layout.bounds();
+        let elements = self.elements(layout.bounds(), width, height, x, y);
 
-        if layout.title_bounds.contains(position) {
-            dbg!("hihi");
+        if elements.title_bounds.contains(position) {
             if let Some(msg) = &self.on_title {
                 messages.push(msg.clone());
                 return Status::Captured;
             }
         }
 
-        if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
-            dbg!("yoyo");
+        if position.x > elements.title_bounds.position().x + VLINE_WIDTH {
             if let Some(msg) = &self.on_plus {
                 messages.push(msg.clone());
                 return Status::Captured;

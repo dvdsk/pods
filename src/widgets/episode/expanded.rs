@@ -19,6 +19,7 @@ pub struct Expanded<Message> {
     on_stream: Option<Message>,
     on_add: Option<Message>,
     on_remove: Option<Message>,
+    on_disk: bool,
 }
 
 struct ElementsLayout {
@@ -35,7 +36,8 @@ impl<Message> Expanded<Message> {
         let Rectangle {width, height, ..} = layout.bounds();
 
         let y = self.collapsed_height.get().unwrap();
-        let x = MARGIN;
+        let x = 0.0;
+        // let x = MARGIN;
         let description_bounds = Rectangle {x, y, 
             width: width - MARGIN,
             height};
@@ -52,7 +54,7 @@ impl<Message> Expanded<Message> {
 
         let height = self.collapsed_height.get().unwrap();
         let collapsed = self.collapsed
-            .layout_elements(layout.bounds(), width, height);
+            .elements(layout.bounds(), width, height, 0., 0.);
 
         ElementsLayout {
             bounds: layout.bounds(),
@@ -74,7 +76,8 @@ impl<Message> Expanded<Message> {
             description,
             on_stream: None,
             on_add: None,
-            on_remove: None
+            on_remove: None,
+            on_disk: false,
         }
     }
     pub fn on_stream(&mut self, msg: Message) {
@@ -207,8 +210,13 @@ impl<Message: Clone> Expanded<Message> {
             DESCRIPTION_SIZE);
         primitives.push(description);
 
+        let text = match self.on_disk {
+            true => "stream | add | remove",
+            false => "stream | add",
+        };
+
         let buttons = text_left_aligned(
-            "stream | add | remove".into(), 
+            text.into(), 
             layout.buttons_bounds,
             META_SIZE);
         primitives.push(buttons);

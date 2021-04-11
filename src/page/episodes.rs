@@ -108,8 +108,8 @@ impl Episodes {
             .list
             .iter_mut()
             .skip(self.scrolled_down)
-            // .take(Self::MAXSCROLLABLE)
-            .take(2)
+            .take(Self::MAXSCROLLABLE)
+            // .take(2)
             .enumerate()
         {
             let collapsed = item.view()
