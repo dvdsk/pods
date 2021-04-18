@@ -42,7 +42,7 @@ mod light {
 }
 
 mod dark {
-    use iced::{container, Color};
+    use iced::container;
 
     pub struct Container;
 

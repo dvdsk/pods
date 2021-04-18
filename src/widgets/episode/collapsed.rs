@@ -11,7 +11,7 @@ const PLUS_SIZE: f32 = 30.0;
 pub const MARGIN: f32 = PLUS_SIZE/2.0;
 
 pub const WIDTH: f32 = 5.0;
-const VLINE_WIDTH: f32 = WIDTH*1.2;
+pub const VLINE_WIDTH: f32 = WIDTH*1.2;
 const PLUS_WIDTH: f32 = WIDTH*0.8;
 
 const PLUS_H_SPACE: f32 = PLUS_SIZE *2.0;
@@ -139,9 +139,9 @@ where
         event: Event, 
         layout: Layout<'_>, 
         cursor_position: Point, 
-        messages: &mut Vec<Message>, 
         _renderer: &Renderer<B>, 
-        _clipboard: Option<&dyn Clipboard>
+        _clipboard: &mut dyn Clipboard,
+        messages: &mut Vec<Message>, 
     ) -> Status {
         use mouse::Event::ButtonReleased;
         use iced_native::touch::Event::FingerPressed;

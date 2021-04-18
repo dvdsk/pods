@@ -32,12 +32,10 @@ struct ElementsLayout {
 }
 
 impl<Message> Expanded<Message> {
-    fn layout_elements(&self, layout: Layout) -> ElementsLayout {
-        let Rectangle {width, height, ..} = layout.bounds();
-
+    fn elements(&self, bounds: Rectangle, width: f32, height: f32) -> ElementsLayout {
         let y = self.collapsed_height.get().unwrap();
         let x = 0.0;
-        // let x = MARGIN;
+
         let description_bounds = Rectangle {x, y, 
             width: width - MARGIN,
             height};
@@ -54,10 +52,10 @@ impl<Message> Expanded<Message> {
 
         let height = self.collapsed_height.get().unwrap();
         let collapsed = self.collapsed
-            .elements(layout.bounds(), width, height, 0., 0.);
+            .elements(bounds, width, height, 0., 0.);
 
         ElementsLayout {
-            bounds: layout.bounds(),
+            bounds,
             collapsed,
             description_bounds,
             buttons_bounds,
@@ -129,12 +127,14 @@ where
         _viewport: &Rectangle
     ) -> (Primitive, mouse::Interaction) {
         // TODO meta bounds
-        let layout = self.layout_elements(layout);
+        let Rectangle {width, height, x, y} = layout.bounds();
+        let elements = self.elements(layout.bounds(), width, height);
+        let mouse = mouse_grabbed(&elements, cursor_position);
 
-        let primitives = self.primitives(&layout);
+        let primitives = self.primitives(&elements);
         let primitives = Primitive::Group{primitives};
         let primitives = Primitive::Translate {
-            translation: Vector::new(layout.bounds.x, layout.bounds.y),
+            translation: Vector::new(x, y),
             content: Box::new(primitives)
         };
 
@@ -144,21 +144,20 @@ where
         event: Event, 
         layout: Layout<'_>, 
         cursor_position: Point, 
-        messages: &mut Vec<Message>, 
         _renderer: &Renderer<B>, 
-        _clipboard: Option<&dyn Clipboard>
+        _clipboard: &mut dyn Clipboard,
+        messages: &mut Vec<Message>, 
     ) -> Status {
-        // use mouse::Event::ButtonReleased;
-        // use iced_native::touch::Event::FingerPressed;
+        use mouse::Event::ButtonReleased;
+        use iced_native::touch::Event::FingerPressed;
 
-        // match event {
-        //     Event::Mouse(ButtonReleased(mouse::Button::Left)) =>
-        //         self.handle_click(layout, cursor_position, messages),
-        //     Event::Touch(FingerPressed{id: _, position}) =>
-        //         self.handle_click(layout, position, messages),
-        //     _ => Status::Ignored,
-        // }
-        Status::Ignored
+        match event {
+            Event::Mouse(ButtonReleased(mouse::Button::Left)) =>
+                self.handle_click(layout, cursor_position, messages),
+            Event::Touch(FingerPressed{id: _, position}) =>
+                self.handle_click(layout, position, messages),
+            _ => Status::Ignored,
+        }
     }
 }
 
@@ -168,29 +167,42 @@ impl<'a, Message: 'a+Clone> Into<Element<'a, Message>> for Expanded<Message> {
     }
 }
 
+fn mouse_grabbed(_layout: &ElementsLayout, _position: Point) -> mouse::Interaction {
+    /* if !layout.bounds.contains(position) {
+        return mouse::Interaction::default();
+    }
+    if layout.title_bounds.contains(position) {
+        return mouse::Interaction::Grab;
+    }
+    if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
+        return mouse::Interaction::Grab;
+    } */
+
+    mouse::Interaction::default()
+}
+
 impl<Message: Clone> Expanded<Message> {
-    //
-    // fn handle_click(&self, layout: Layout, position: Point, messages: &mut Vec<Message>) -> Status {
-    //     if !layout.bounds().contains(position) {
-    //         return Status::Ignored;
-    //     }
-    //     let layout = self.layout_elements(layout);
+    fn handle_click(&self, layout: Layout, position: Point, messages: &mut Vec<Message>) -> Status {
+        if !layout.bounds().contains(position) {
+            return Status::Ignored;
+        }
+        let Rectangle {width, height, x, y} = layout.bounds();
+        let elements = self.elements(layout.bounds(), width, height);
 
-    //     if layout.title_bounds.contains(position) {
-    //         if let Some(message) = &self.on_title {
-    //             messages.push(message.clone());
-    //             return Status::Captured;
-    //         }
-    //     }
+        /* if elements.title_bounds.contains(position) {
+            todo!("add collapse logic");
+            /* messages.push(msg.clone());
+            return Status::Captured; */
+        }
 
-    //     if position.x > layout.title_bounds.position().x + VLINE_WIDTH {
-    //         if let Some(message) = &self.on_plus {
-    //             messages.push(message.clone());
-    //             return Status::Captured;
-    //         }
-    //     }
-    //     Status::Ignored
-    // }
+        if position.x > elements.title_bounds.position().x + VLINE_WIDTH {
+            if let Some(msg) = &self.collapsed.on_plus {
+                messages.push(msg.clone());
+                return Status::Captured;
+            }
+        } */
+        Status::Ignored
+    }
 
     // https://docs.rs/iced_graphics/0.1.0/iced_graphics/enum.Primitive.html
     fn primitives(&self, layout: &ElementsLayout) -> Vec<Primitive> {

@@ -77,7 +77,7 @@ impl Application for App {
     fn title(&self) -> String {
         String::from("Podcasts")
     }
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message, _clipboard: &mut iced::Clipboard) -> Command<Self::Message> {
         match message {
             Message::Back => self.current.back(),
             Message::Up => match &self.current {
@@ -224,6 +224,7 @@ fn build_settings() -> Settings<()> {
         default_text_size: 20,
         #[cfg(features = "pinephone")]
         default_text_size: 1,
+        exit_on_close_request: true,
         antialiasing: false,
     }
 }
