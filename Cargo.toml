@@ -18,9 +18,10 @@ pinephone = ["iced/glow_OpenGL2ES"]
 rodio = { git = "https://github.com/dskleingeld/rodio.git" , branch = "SourceExt" }
 # using glow causes the app to use opengl instead of vulkan
 # seems to solve "Error: GraphicsAdapterNotFound"
-iced = { git= "https://github.com/dskleingeld/iced", features = ["glow", "tokio"] }
-iced_futures = { git="https://github.com/dskleingeld/iced" }
-iced_native = { git="https://github.com/dskleingeld/iced" } 
+iced = { git= "https://github.com/dskleingeld/iced", rev="3187850", features = ["glow", "tokio"] }
+iced_futures = { git="https://github.com/dskleingeld/iced", rev="3187850" }
+iced_native = { git="https://github.com/dskleingeld/iced", rev="3187850" } 
+
 sled = "0.34"
 rss = "1"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
