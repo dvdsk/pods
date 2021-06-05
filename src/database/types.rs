@@ -26,11 +26,12 @@ impl Date {
             Self::Added(d) => d,
         }
     }
-    pub fn format(&self) -> String {
-        let local: DateTime<Local> = self.inner().clone().into();
-        let since = local.signed_duration_since(Local::now());
-        if since.num_days() > 30 {
-            return format!("{}", local.format("%d:%m:%Y"));
+    pub fn age_string(&self) -> String {
+        let published: DateTime<Local> = self.inner().clone().into();
+        let now = Local::now();
+        let since = now.signed_duration_since(published);
+        if since.num_days() > 60 {
+            return format!("{}", published.format("%d:%m:%Y"));
         }
         if since.num_hours() > 48 {
             return format!("{} days ago", since.num_days());

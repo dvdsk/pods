@@ -67,7 +67,7 @@ impl<Message> Expanded<Message> {
 
 impl<Message> Expanded<Message> {
     pub fn from_collapsed(collapsed: Collapsed<Message>, mut description: String) -> Self {
-        description.truncate(400);
+        // description.truncate(400); //FIXME panics new len not on char boundary
         Self {
             collapsed,
             collapsed_height: Cell::new(None),

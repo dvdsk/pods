@@ -71,14 +71,14 @@ pub struct Collapsed<Message> {
 
 
 impl<Message> Collapsed<Message> {
-    pub fn new(_title: String, _age: String, _duration: String) -> Self {
+    pub fn new(title: String, age: String, duration: String) -> Self {
         Self {
             on_title: None,
             on_plus: None,
 
-            title: String::from("Test long title of a random podcast, look it is long"),
-            published: String::from("published: 5 weeks ago"),
-            duration: String::from("22:30"),
+            title,
+            published: age,
+            duration,
         }
     }
     pub fn on_title(mut self, msg: Message) -> Self {

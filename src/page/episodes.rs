@@ -14,7 +14,6 @@ pub struct CollapsedItem {
     pub title: String,
     age: String,
     duration: String,
-    date: Date,
     progress: Progress,
     pub file: Option<FileType>,
 }
@@ -27,9 +26,8 @@ impl CollapsedItem {
 
         Self {
             title: episode.title,
-            age: String::from("2 weeks"),
+            age: episode.date.age_string(),
             duration: String::from("35m"),
-            date: episode.date,
             progress: episode.progress,
             file, // none if no file on disk
         }
