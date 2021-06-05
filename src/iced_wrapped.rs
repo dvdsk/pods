@@ -31,6 +31,6 @@ pub fn add_podcast(pod_db: &PodcastDb, url: String) -> Command<Message> {
         |res| match res {
             Ok((title, id)) => Message::AddedPodcast(title,id),
             Err(feed::Error::DatabaseError(database::Error::PodcastAlreadyAdded)) => Message::None,
-            Err(e) => panic!(e),
+            Err(e) => panic!("{}", e),
         })
 }

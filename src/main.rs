@@ -1,19 +1,19 @@
+mod database;
+mod download;
+mod feed;
 mod iced_wrapped;
 mod page;
-mod database;
-mod feed;
 mod play;
-mod download;
 
+use database::{EpisodeKey, PodcastDb, PodcastKey, Progress};
 use download::Downloader;
-use page::{Page, Controls};
-use play::Player;
-use error_level::ErrorLevel;
-use database::{EpisodeKey, PodcastKey, PodcastDb, Progress};
 use download::FileType;
+use error_level::ErrorLevel;
+use page::{Controls, Page};
+use play::Player;
 
+use iced::{executor, Application, Column, Command, Element, Settings, Subscription};
 use std::collections::HashMap;
-use iced::{executor, Application, Command, Element, Column, Settings, Subscription};
 
 #[derive(Clone, Debug)]
 pub enum Message {
@@ -60,20 +60,27 @@ impl Application for App {
         let db = database::open().unwrap();
         let pod_db = PodcastDb::open(&db).unwrap();
         let startup = iced_wrapped::update_podcasts(pod_db.clone());
-        (App {
-            podcasts: page::Podcasts::from_db(pod_db.clone()),
-            episodes: page::Episodes::from_db(pod_db.clone()), 
-            current: Page::Podcasts,
-            player: Player::from_db(pod_db.clone()), 
-            downloader: Downloader::default(),
-            controls: Controls::default(),
-            pod_db,
-        }, startup)
+        (
+            App {
+                podcasts: page::Podcasts::from_db(pod_db.clone()),
+                episodes: page::Episodes::from_db(pod_db.clone()),
+                current: Page::Podcasts,
+                player: Player::from_db(pod_db.clone()),
+                downloader: Downloader::default(),
+                controls: Controls::default(),
+                pod_db,
+            },
+            startup,
+        )
     }
     fn title(&self) -> String {
         String::from("Podcasts")
     }
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(
+        &mut self,
+        message: Self::Message,
+        _clip: &mut iced::Clipboard,
+    ) -> Command<Self::Message> {
         match message {
             Message::Back => {
                 self.current.back();
@@ -95,10 +102,9 @@ impl Application for App {
             }
             Message::ToEpisodes(podcast_id) => {
                 let podcast = self.pod_db.get_podcast(podcast_id).unwrap();
-                Command::perform(
-                    download::scan_podcast_dir(podcast.title),
-                    move |set| Message::ToEpisodesFinish(set, podcast_id),
-                )
+                Command::perform(download::scan_podcast_dir(podcast.title), move |set| {
+                    Message::ToEpisodesFinish(set, podcast_id)
+                })
             }
             Message::ToEpisodesFinish(downloaded, podcast_id) => {
                 self.episodes.populate(podcast_id, downloaded);
@@ -109,7 +115,7 @@ impl Application for App {
                 use play::subscribe::Progress;
                 match p {
                     Progress::ToShortError => log::warn!("stream was to short to play audio"),
-                    Progress::StreamError(e) => log::error!("errored stream {}",e),
+                    Progress::StreamError(e) => log::error!("errored stream {}", e),
                     Progress::Started(rx) => self.player.rx = Some(rx),
                     Progress::Finished => (),
                     Progress::Advanced(p) => {
@@ -133,7 +139,7 @@ impl Application for App {
                         let podcast = self.episodes.podcast.as_ref().unwrap().clone();
                         Command::perform(
                             download::scan_podcast_dir(podcast),
-                            Message::DownloadFinished
+                            Message::DownloadFinished,
                         )
                     }
                     _ => Command::none(),
@@ -147,15 +153,17 @@ impl Application for App {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
                         let progress = Progress::Listening(pos);
-                        return iced_wrapped::update_episode_progress(&self.pod_db, info.id, progress);
+                        return iced_wrapped::update_episode_progress(
+                            &self.pod_db,
+                            info.id,
+                            progress,
+                        );
                     }
                 }
                 // also used to trigger a redraw
                 Command::none()
             }
-            Message::AddPodcast(url) => {
-                iced_wrapped::add_podcast(&self.pod_db, url)
-            }
+            Message::AddPodcast(url) => iced_wrapped::add_podcast(&self.pod_db, url),
             Message::PodcastsUpdated => {
                 if let Page::Episodes = self.current {
                     self.episodes.repopulate(HashMap::new());
@@ -175,12 +183,9 @@ impl Application for App {
                 Command::none()
             }
             Message::Download(key) => self.downloader.add(key, &mut self.pod_db),
-            Message::Remove(key, file_type) => todo!(),
+            Message::Remove(_key, _file_type) => todo!(),
             Message::PlayPause => self.player.play_pause(),
-            Message::SearchSubmit => self
-                .podcasts
-                .search
-                .do_search(true),
+            Message::SearchSubmit => self.podcasts.search.do_search(true),
             Message::SearchInputChanged(input) => self
                 .podcasts
                 .search
@@ -189,7 +194,7 @@ impl Application for App {
                 self.podcasts.list.update_feedres(r);
                 Command::none()
             }
-            Message::AddedPodcast(title,id) => {
+            Message::AddedPodcast(title, id) => {
                 self.podcasts.list.remove_feedres();
                 self.podcasts.search.reset();
                 self.podcasts.list.add(title, id);
@@ -204,14 +209,16 @@ impl Application for App {
 
         let mut subs = Vec::new();
         match &self.player.current {
-            Track::Stream(_,_,url) => {
+            Track::Stream(_, _, url) => {
                 let stream = play::subscribe::play(url.to_owned()).map(Message::StreamProgress);
-                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+                let time =
+                    iced::time::every(Duration::from_millis(1000 / 6)).map(Message::PlayBackTick);
                 subs.push(stream);
                 subs.push(time);
             }
-            Track::File(_,_) => {
-                let time = iced::time::every(Duration::from_millis(1000/6)).map(Message::PlayBackTick);
+            Track::File(_, _) => {
+                let time =
+                    iced::time::every(Duration::from_millis(1000 / 6)).map(Message::PlayBackTick);
                 subs.push(time);
             }
             _ => (),
@@ -229,15 +236,15 @@ impl Application for App {
         let column = column.push(content);
         let column = column.push(self.player.view());
         let column = column.push(self.controls.view());
-        
+
         iced::Container::new(column).into()
     }
     fn mode(&self) -> iced::window::Mode {
-        #[cfg(features="pinephone")]
+        #[cfg(features = "pinephone")]
         dbg!("fullliyyyyy");
-        #[cfg(features="pinephone")]
+        #[cfg(features = "pinephone")]
         return iced::window::Mode::Fullscreen;
-        #[cfg(not(features="pinephone"))]
+        #[cfg(not(features = "pinephone"))]
         return iced::window::Mode::Windowed;
     }
 }
@@ -252,13 +259,10 @@ pub fn main() -> iced::Result {
 
 fn build_settings() -> Settings<()> {
     Settings {
-        window: iced::window::Settings::default(),
-        flags: (),
-        default_font: None,
-        #[cfg(not(features="pinephone"))]
+        #[cfg(not(features = "pinephone"))]
         default_text_size: 20,
-        #[cfg(features="pinephone")]
+        #[cfg(features = "pinephone")]
         default_text_size: 1,
-        antialiasing: false,
+        ..Default::default()
     }
 }
