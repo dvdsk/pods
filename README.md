@@ -35,10 +35,14 @@ On Debian-based systems (this includes Ubuntu and Linux Mint among others) you c
 
 ```terminal
 sudo apt install \
-  libfreetype-dev \
+  gcc \
+  g++ \
+  cmake \
+  libx11-dev
   pkg-config \
   libasound2-dev \
-  libx11-dev
+  libfreetype-dev \
+  libexpat1-dev \
 ```
 
 ### Compile on the Phone 
