@@ -51,9 +51,9 @@ impl From<sled::IVec> for PodcastKey {
 }
 
 impl PodcastKey {
-    fn podcast_end(&self) -> Self {
-        self.increment()
-    }
+    // fn podcast_end(&self) -> Self {
+    //     self.increment()
+    // }
     fn increment(&self) -> Self {
         let mut hash = u64::from_be_bytes(self.0);
         hash += 1;
@@ -239,7 +239,9 @@ impl PodcastDb {
 
         let mut id = PodcastKey([0u8; 8]);
         while let Some((next_id, podcast)) = self.next_podcast(id)? {
-            add_podcast(self.clone(), podcast.url.clone()).await;
+            add_podcast(self.clone(), podcast.url.clone())
+                .await
+                .unwrap();
             id = next_id;
         }
         Ok(())

@@ -1,8 +1,8 @@
-mod iced_wrapped;
-mod page;
 mod database;
 mod download;
 mod feed;
+mod iced_wrapped;
+mod page;
 mod play;
 mod widgets;
 
@@ -76,7 +76,11 @@ impl Application for App {
     fn title(&self) -> String {
         String::from("Podcasts")
     }
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(
+        &mut self,
+        message: Self::Message,
+        _clip: &mut iced::Clipboard,
+    ) -> Command<Self::Message> {
         match message {
             Message::Back => self.current.back(),
             Message::Up => match &self.current {
@@ -127,10 +131,13 @@ impl Application for App {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
                         let progress = Progress::Listening(pos);
-                        return iced_wrapped::update_episode_progress(&self.pod_db, info.id, progress);
+                        return iced_wrapped::update_episode_progress(
+                            &self.pod_db,
+                            info.id,
+                            progress,
+                        );
                     }
                 }
-                // also used to trigger a redraw
             }
             Message::AddPodcast(url) => return iced_wrapped::add_podcast(&self.pod_db, url),
             Message::PodcastsUpdated => {
@@ -194,7 +201,6 @@ impl Application for App {
             .push(content)
             .push(self.player.view())
             .push(self.controls.view());
-
         iced::Container::new(column).into()
     }
     fn mode(&self) -> iced::window::Mode {
@@ -215,13 +221,10 @@ pub fn main() -> iced::Result {
 
 fn build_settings() -> Settings<()> {
     Settings {
-        window: iced::window::Settings::default(),
-        flags: (),
-        default_font: None,
         #[cfg(not(features = "pinephone"))]
         default_text_size: 20,
         #[cfg(features = "pinephone")]
         default_text_size: 1,
-        antialiasing: false,
+        ..Default::default()
     }
 }
