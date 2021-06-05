@@ -6,7 +6,7 @@ use iced::Command;
 
 pub fn update_podcasts(pod_db: PodcastDb) -> Command<Message> {
     async fn update(pod_db: PodcastDb) {
-        pod_db.update_podcasts().await.unwrap();
+        // pod_db.update_podcasts().await.unwrap(); //TODO FIXME
     }
 
     Command::perform(
