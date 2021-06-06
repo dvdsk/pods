@@ -82,7 +82,7 @@ impl Application for App {
     fn title(&self) -> String {
         String::from("Podcasts")
     }
-    fn update(&mut self, message: Self::Message) -> Command<Self::Message> {
+    fn update(&mut self, message: Self::Message, _clip: &mut iced::Clipboard) -> Command<Self::Message> {
         match message {
             Message::Back => self.current.back(),
             Message::Up => match &self.current {
@@ -225,13 +225,10 @@ pub fn main() -> iced::Result {
 
 fn build_settings() -> Settings<()> {
     Settings {
-        window: iced::window::Settings::default(),
-        flags: (),
-        default_font: None,
         #[cfg(not(features = "pinephone"))]
         default_text_size: 20,
         #[cfg(features = "pinephone")]
         default_text_size: 1,
-        antialiasing: false,
+        ..Default::default()
     }
 }
