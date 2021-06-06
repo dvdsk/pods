@@ -7,7 +7,7 @@ mod types;
 
 pub use error::Error;
 pub use podcasts::{EpisodeKey, PodcastDb, PodcastKey};
-pub use types::{Date, Episode, EpisodeExt, Podcast, Progress};
+pub use types::{Date, Duration, Episode, EpisodeExt, Podcast, Progress};
 
 pub fn open() -> Result<sled::Db> {
     let path = PathBuf::from("database");

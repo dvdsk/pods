@@ -1,5 +1,5 @@
 // use futures::Stream;
-use crate::database;
+use crate::database::{self, Duration};
 use crate::download::FileType;
 use crate::Message;
 use iced::{button, Button, Column, Command, Length, Row, Space, Text};
@@ -36,7 +36,7 @@ impl Track {
     }
     /// Duration in seconds
     pub fn duration(&self) -> f32 {
-        self.info().map(|i| i.duration).unwrap_or(0f32)
+        self.info().map(|i| i.duration.0).unwrap_or(0f32)
     }
 }
 
@@ -44,7 +44,7 @@ pub struct TrackInfo {
     pub id: database::EpisodeKey,
     pub title: String,
     pub paused: bool,
-    pub duration: f32,
+    pub duration: Duration,
 }
 
 #[derive(Default)]
@@ -199,7 +199,7 @@ impl Player {
             // the visualisation does not show beyond the safety bound
             Track::Stream(info, dl_pos_percent, _) => {
                 if *dl_pos_percent <= 100. {
-                    let dl_pos_secs = dl_pos_percent * (info.duration) / 100.;
+                    let dl_pos_secs = dl_pos_percent * (info.duration.0) / 100.;
                     let dl_pos_secs = dl_pos_secs * 0.9;
                     f32::min(target, dl_pos_secs)
                 } else {
@@ -207,7 +207,7 @@ impl Player {
                 }
             }
             // can not seek beyond the length of the audio file
-            Track::File(info, _) => f32::min(target, info.duration),
+            Track::File(info, _) => f32::min(target, info.duration.0),
         };
         self.offset += target - pos;
         self.sink.as_mut().unwrap().set_pos(target);
@@ -230,7 +230,7 @@ impl Player {
             Track::None => column,
             Track::Stream(info, download, _) => {
                 let download_progress_bar = iced::ProgressBar::new(0.0..=100.0, *download);
-                let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
+                let playback_bar = iced::ProgressBar::new(0.0..=info.duration.0, self.pos());
                 let controls = Self::view_controls(&mut self.controls, info);
                 column
                     .push(download_progress_bar)
@@ -238,7 +238,7 @@ impl Player {
                     .push(controls)
             }
             Track::File(info, _) => {
-                let playback_bar = iced::ProgressBar::new(0.0..=info.duration, self.pos());
+                let playback_bar = iced::ProgressBar::new(0.0..=info.duration.0, self.pos());
                 let controls = Self::view_controls(&mut self.controls, info);
                 column.push(playback_bar).push(controls)
             }

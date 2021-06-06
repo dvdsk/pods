@@ -41,11 +41,25 @@ impl Date {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub struct Duration(pub f32);
+impl std::fmt::Display for Duration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let seconds: u64 = self.0 as u64;
+        match seconds {
+            0..=59 => write!(f, "{}s",seconds),
+            60..=899 => write!(f, "{}m:{}s",seconds/60, seconds%60),
+            900..=3599 => write!(f, "{}m",seconds/60),
+            _ => write!(f, "{}h:{}m", seconds/60/60, seconds/60)
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Episode {
     pub title: String,
     /// the duration of the episode in seconds
-    pub duration: f32,
+    pub duration: Duration,
     pub progress: Progress,
     pub date: Date,
 }
@@ -65,7 +79,7 @@ impl From<&EpisodeExt> for Episode {
 pub struct EpisodeExt {
     pub stream_url: String,
     /// the duration of the episode in seconds
-    pub duration: f32,
+    pub duration: Duration,
     pub title: String,
     pub podcast: String,
     pub date: Date,

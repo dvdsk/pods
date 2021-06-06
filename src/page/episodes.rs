@@ -1,7 +1,7 @@
 use iced::Element;
 use iced::widget::scrollable::{self, Scrollable};
 
-use crate::database::{Date, PodcastKey, Progress};
+use crate::database::{PodcastKey, Progress};
 use crate::widgets::style;
 use crate::database::{Episode, PodcastDb, EpisodeKey};
 use crate::download::{hash, FileType};
@@ -27,7 +27,7 @@ impl CollapsedItem {
         Self {
             title: episode.title,
             age: episode.date.age_string(),
-            duration: String::from("35m"),
+            duration: episode.duration.to_string(),
             progress: episode.progress,
             file, // none if no file on disk
         }

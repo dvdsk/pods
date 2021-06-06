@@ -239,7 +239,7 @@ impl PodcastDb {
 
         let mut id = PodcastKey([0u8; 8]);
         while let Some((next_id, podcast)) = self.next_podcast(id)? {
-            add_podcast(self.clone(), podcast.url.clone()).await;
+            add_podcast(self.clone(), podcast.url.clone()).await.unwrap();
             id = next_id;
         }
         Ok(())

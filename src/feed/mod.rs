@@ -4,7 +4,7 @@ use url::Url;
 
 mod search;
 use crate::database;
-use crate::database::{Date, EpisodeExt, Podcast, PodcastKey};
+use crate::database::{Date, Duration, EpisodeExt, Podcast, PodcastKey};
 pub use search::{Search, SearchResult};
 
 pub fn valid_url(s: &str) -> bool {
@@ -120,7 +120,7 @@ fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, E
 
     Ok(EpisodeExt {
         stream_url,
-        duration,
+        duration: Duration(duration),
         title: title.to_owned(),
         podcast,
         date: Date::from_item(item),
