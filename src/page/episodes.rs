@@ -110,8 +110,10 @@ impl Episodes {
             // .take(2)
             .enumerate()
         {
+            let key = EpisodeKey::from_title(self.podcast_id.unwrap(), &item.title);
             let collapsed = item.view()
-                .on_title(crate::Message::ToEpisodesDetails(i+self.scrolled_down));
+                .on_title(crate::Message::ToEpisodesDetails(i+self.scrolled_down))
+                .on_plus(crate::Message::QueueEpisode(key));
             scrollable = if Some(i) == self.expanded {
                 let key = EpisodeKey::from_title(self.podcast_id.unwrap(), &item.title);
                 let description = self.db.get_episode_ext(key).unwrap().description;

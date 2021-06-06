@@ -1,11 +1,13 @@
 pub mod episodes;
-mod errorpage;
+pub mod home;
 pub mod podcasts;
+mod errorpage;
 
 use crate::Message;
-pub use episodes::Episodes;
 use iced::{button, Button, Element, Length, Row, Text};
+pub use episodes::Episodes;
 pub use podcasts::Podcasts;
+pub use home::Home;
 
 #[derive(Default)]
 pub struct Controls {
@@ -40,12 +42,14 @@ impl Controls {
 pub enum Page {
     Podcasts,
     Episodes,
+    Home,
 }
 
 impl Page {
     pub fn back(&mut self) {
         *self = match &self {
-            Self::Podcasts => Self::Podcasts,
+            Self::Home => panic!("back not an option from home"),
+            Self::Podcasts => Self::Home,
             Self::Episodes => Self::Podcasts,
         }
     }

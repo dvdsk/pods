@@ -1,8 +1,8 @@
-mod iced_wrapped;
-mod page;
 mod database;
 mod download;
 mod feed;
+mod iced_wrapped;
+mod page;
 mod play;
 pub mod widgets;
 
@@ -18,6 +18,7 @@ use std::collections::HashMap;
 
 #[derive(Clone, Debug)]
 pub enum Message {
+    QueueEpisode(EpisodeKey),
     ToEpisodes(PodcastKey),
     ToEpisodesDetails(usize),
     ToEpisodesFinish(HashMap<u64, FileType>, PodcastKey),
@@ -47,6 +48,7 @@ pub struct App {
     current: Page,
     podcasts: page::Podcasts,
     episodes: page::Episodes,
+    home: page::Home,
     downloader: Downloader,
     player: Player,
     controls: Controls, //Should only be needed on desktop platforms
@@ -63,30 +65,40 @@ impl Application for App {
         let db = database::open().unwrap();
         let pod_db = PodcastDb::open(&db).unwrap();
         let startup = iced_wrapped::update_podcasts(pod_db.clone());
-        (App {
-            podcasts: page::Podcasts::from_db(pod_db.clone()),
-            episodes: page::Episodes::from_db(pod_db.clone()), 
-            current: Page::Podcasts,
-            player: Player::from_db(pod_db.clone()), 
-            downloader: Downloader::default(),
-            controls: Controls::default(),
-            pod_db,
-            theme: widgets::style::Theme::Light,
-        }, startup)
+        (
+            App {
+                current: Page::Home,
+                podcasts: page::Podcasts::from_db(pod_db.clone()),
+                episodes: page::Episodes::from_db(pod_db.clone()),
+                home: page::Home::from_db(pod_db.clone()),
+                player: Player::from_db(pod_db.clone()),
+                downloader: Downloader::default(),
+                controls: Controls::default(),
+                pod_db,
+                theme: widgets::style::Theme::Light,
+            },
+            startup,
+        )
     }
     fn title(&self) -> String {
         String::from("Podcasts")
     }
-    fn update(&mut self, message: Self::Message, _clipboard: &mut iced::Clipboard) -> Command<Self::Message> {
+    fn update(
+        &mut self,
+        message: Self::Message,
+        _clipboard: &mut iced::Clipboard,
+    ) -> Command<Self::Message> {
         match message {
             Message::Back => self.current.back(),
             Message::Up => match &self.current {
                 Page::Podcasts => self.podcasts.up(),
                 Page::Episodes => self.episodes.up(),
+                Page::Home => panic!("controls should not appear on home page"),
             },
             Message::Down => match &self.current {
                 Page::Podcasts => self.podcasts.down(),
                 Page::Episodes => self.episodes.down(),
+                Page::Home => panic!("controls should not appear on home page"),
             },
             Message::ToEpisodes(podcast_id) => {
                 let podcast = self.pod_db.get_podcast(podcast_id).unwrap();
@@ -129,7 +141,11 @@ impl Application for App {
                 if let Some(pos) = self.player.should_store_pos() {
                     if let Some(info) = self.player.current.info() {
                         let progress = Progress::Listening(pos);
-                        return iced_wrapped::update_episode_progress(&self.pod_db, info.id, progress);
+                        return iced_wrapped::update_episode_progress(
+                            &self.pod_db,
+                            info.id,
+                            progress,
+                        );
                     }
                 }
                 // also used to trigger a redraw
@@ -140,6 +156,7 @@ impl Application for App {
                     self.episodes.repopulate(HashMap::new());
                 }
             }
+            Message::QueueEpisode(key) => self.home.queue.add(key),
             Message::Stream(key) => self.player.add_stream(key),
             Message::Play(key, file_type, pos) => self.player.add_file(key, file_type, pos),
             Message::Skip(f) => self.player.skip(f),
@@ -191,11 +208,16 @@ impl Application for App {
         let content = match self.current {
             Page::Podcasts => self.podcasts.view(),
             Page::Episodes => self.episodes.view(self.theme),
+            Page::Home => self.home.view(),
         };
         let column = Column::new()
             .push(content)
-            .push(self.player.view())
-            .push(self.controls.view());
+            .push(self.player.view());
+
+        let column = match self.current {
+            Page::Home => column,
+            _ => column.push(self.controls.view()),
+        };
 
         iced::Container::new(column).into()
     }
@@ -217,14 +239,10 @@ pub fn main() -> iced::Result {
 
 fn build_settings() -> Settings<()> {
     Settings {
-        window: iced::window::Settings::default(),
-        flags: (),
-        default_font: None,
         #[cfg(not(features = "pinephone"))]
         default_text_size: 20,
         #[cfg(features = "pinephone")]
         default_text_size: 1,
-        exit_on_close_request: true,
-        antialiasing: false,
+        ..Default::default()
     }
 }
