@@ -60,7 +60,7 @@ You can now copy the binary from: `target/release/pods`
 1. Install [Rust][rust] 
 2. Install Rust cross using: `cargo install cross`
 3. Clone this repo somewhere `cd` into it
-4. Run `./crosscomp.sh`
+4. Run `./crosscomp.sh --release`
 
 You can now copy the binary from: `target/aarch64-unknown-linux-gnu/release/pods`
 

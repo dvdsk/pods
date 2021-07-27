@@ -1,9 +1,11 @@
 [Desktop Entry]
 Name=Pods
-Exec=/home/mobian/bin/start_alarm.sh
-Path=/home/mobian/bin/
+# run using X11 see issue #33
+Exec=env WINIT_UNIX_BACKEND=x11 /home/manjaro/.local/bin/pods
+# working directory
+Path=/home/manjaro/.local/share/pods
 Type=Application
-Icon=/home/mobian/bin/alarm.png
+Icon=/home/manjaro/.local/share/icons/icon.png
 Comment=Subscribe, download and stream podcasts
 Keywords=Sound;Podcast;podcasts;
 Categories=Audio;
