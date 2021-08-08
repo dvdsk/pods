@@ -1,4 +1,7 @@
+
 # pods
+
+## warning: still pre-alpha/early development
 
 This is a podcast app in early development. It was created to fill the void of mobile linux podcast apps. Right now you can use it for very basic podcast listening. The following is working on [Mobian][mobian]:
 
