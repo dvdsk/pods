@@ -1,42 +1,14 @@
-[package]
-name = "pods"
-version = "0.1.0"
-authors = ["dskleingeld <11743287+dskleingeld@users.noreply.github.com>"]
-edition = "2018"
+[workspace]
+resolver = "2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[features]
-default = ["desktop"]
-desktop = []
-pinephone = ["iced/glow_OpenGL2ES"]
-
-# [profile.release]
-# debug = true
-
-[dependencies]
-# rodio = "0.13"
-rodio = { git = "https://github.com/dskleingeld/rodio.git" , branch = "SourceExt" }
-# using glow causes the app to use opengl instead of vulkan
-# seems to solve "Error: GraphicsAdapterNotFound"
-iced = { git= "https://github.com/dskleingeld/iced", features = ["glow", "tokio"] }
-iced_futures = { git="https://github.com/dskleingeld/iced" }
-iced_native = { git="https://github.com/dskleingeld/iced" } 
-sled = "0.34"
-rss = "1"
-reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
-tokio = { version = "1", features = ["full"] }
-bytes = "1" # keep at same minor version as reqwest
-eyre = "0.6"
-thiserror = "1"
-error_level = { git = "https://github.com/dskleingeld/error_level" }
-sha-1 = "0.9"
-regex = "1"
-arraydeque = "0.4"
-url = "2.2"
-bincode = "1.3"
-serde = { version = "1", features = ["derive"] }
-log = "0.4"
-log4rs = "0.13"
-directories = "3"
-itertools = "0.10"
-chrono = { version = "0.4", features = ["serde"] }
+members = [
+	"db",
+	"player",
+	"search",
+	"traits",
+	"gui",
+	"tui",
+	"index",
+	"panda",
+	"main",
+]
