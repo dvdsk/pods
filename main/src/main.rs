@@ -1,36 +1,65 @@
+use clap::{Parser, Subcommand};
+use state::State;
 use std::path::Path;
-use traits::{Ui, Db};
-use clap::Parser;
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
+use traits::ClientInterface;
+use traits::Config as _;
+use traits::State as _;
+
+use tokio::signal;
 
 #[derive(Debug, Clone, clap::ValueEnum)]
-enum UiType {
+pub enum UiChoice {
     Gui,
     Tui,
+    None,
 }
 
 #[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Args {
-    /// Ui to use
-    #[arg(short, long)]
-    ui: UiType,
+#[clap(long_about = "")]
+struct Cli {
+    #[clap(long, default_value_t: UiChoice::Tui)]
+    ui: UiChoice,
+    #[clap(group = "remote")]
+    connect_to: Option<u64>,
+    #[clap(requires = "remote")]
+    password: Option<String>,
+    server: Option<String>,
 }
 
+fn force_cli_arguments(config: &mut impl traits::Config, cli: &Cli) {
+    config.force_remote(todo!());
+    config.force_server(todo!());
+}
 
-fn main() {
-    let args = Args::parse();
+#[tokio::main]
+async fn main() {
+    let cli = Cli::parse();
+    let state = State::new();
+    force_cli_arguments(state.config_mut(), &cli);
 
-    let mut gui: Box<dyn Ui> = match args.ui {
-        UiType::Gui => Box::new(gui::new()),
-        UiType::Tui => Box::new(tui::new()),
+    let (ui_runtime, ui_interface) = match cli.ui {
+        UiChoice::Gui => todo!(),
+        UiChoice::Tui => todo!(),
+        UiChoice::None => (None, None),
     };
-    gui.run().unwrap();
-    let db = db::DerivedDb::open(Path::new("database.db"));
 
-    
+    let remote = state.config()
+        .remote()
+        .get_value()
+        .map(|remote| todo!("start remote listener"));
 
+    let interface = panda::Interface {
+        client: ui_interface,
+        remote: todo!(),
+    };
 
-    println!("Hello, world!");
+    thread::spawn(move || panda::run(interface));
 
-
+    match ui_runtime {
+        Some(ui) => ui.run().unwrap(),
+        None => signal::ctrl_c().await.unwrap(),
+    }
 }

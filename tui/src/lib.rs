@@ -6,7 +6,7 @@ use crossterm::terminal::{
 use std::error::Error;
 use std::io;
 use std::sync::mpsc;
-use traits::{AppUpdate, UserIntent};
+use presenter::{AppUpdate, UserIntent};
 
 use tui::backend::{Backend, CrosstermBackend};
 use tui::{Frame, Terminal};
@@ -21,8 +21,8 @@ impl App {
 
 fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
-    rx: mpsc::Receiver<AppUpdate>,
-    tx: mpsc::Sender<UserIntent>,
+    rx: &mut mpsc::Receiver<AppUpdate>,
+    tx: &mut mpsc::Sender<UserIntent>,
 ) -> std::io::Result<()> {
     use crossterm::event::{self, Event, KeyCode};
     loop {
@@ -66,7 +66,7 @@ pub fn new(rx: mpsc::Receiver<AppUpdate>, tx: mpsc::Sender<UserIntent>) -> Tui {
     Tui { rx, tx }
 }
 
-impl traits::Ui for Tui {
+impl presenter::Ui for Tui {
     fn run(&mut self) -> Result<(), Box<dyn Error>> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -75,7 +75,7 @@ impl traits::Ui for Tui {
         let mut terminal = Terminal::new(backend)?;
 
         let app = App::new();
-        let res = run_app(&mut terminal, self.rx, self.tx);
+        let res = run_app(&mut terminal, &mut self.rx, &mut self.tx);
 
         // restore terminal
         disable_raw_mode()?;

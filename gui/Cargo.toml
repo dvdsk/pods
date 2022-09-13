@@ -6,7 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-traits = { path = "../traits" }
+presenter = { path = "../presenter" }
 # iced = { version = "0.4", features = ["tokio"] }
 iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
 color-eyre = "0.6"

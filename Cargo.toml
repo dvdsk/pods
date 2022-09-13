@@ -2,10 +2,11 @@
 resolver = "2"
 
 members = [
-	"db",
+	"state",
 	"player",
 	"search",
 	"traits",
+	"presenter",
 	"gui",
 	"tui",
 	"index",
