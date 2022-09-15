@@ -62,8 +62,9 @@ pub struct Tui {
     tx: mpsc::Sender<UserIntent>,
 }
 
-pub fn new(rx: mpsc::Receiver<AppUpdate>, tx: mpsc::Sender<UserIntent>) -> Tui {
-    Tui { rx, tx }
+pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
+    let (tx, rx) = interface;
+    Box::new(Tui { rx, tx })
 }
 
 impl presenter::Ui for Tui {

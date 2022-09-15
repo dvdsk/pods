@@ -1,8 +1,8 @@
 use std::error::Error;
-use std::sync::{mpsc, Mutex, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 
 use iced::{executor, widget, Application, Subscription};
-use presenter::{AppUpdate, UserIntent};
+use traits::{AppUpdate, UserIntent};
 
 struct State {
     rx: Arc<Mutex<mpsc::Receiver<AppUpdate>>>,
@@ -81,11 +81,12 @@ pub struct IcedGui {
     tx: Option<mpsc::Sender<UserIntent>>,
 }
 
-pub fn new(rx: mpsc::Receiver<AppUpdate>, tx: mpsc::Sender<UserIntent>) -> IcedGui {
-    IcedGui {
+pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
+    let (tx, rx) = interface;
+    Box::new(IcedGui {
         rx: Some(rx),
         tx: Some(tx),
-    }
+    })
 }
 
 impl presenter::Ui for IcedGui {

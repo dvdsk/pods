@@ -8,6 +8,8 @@ edition = "2021"
 [dependencies]
 state= { path = "../state" }
 presenter= { path = "../presenter" }
+gui = { path = "../gui" }
+tui = { path = "../tui" }
 panda= { path = "../panda" }
 index= { path = "../index" }
 traits= { path = "../traits" }

@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 presenter = { path = "../presenter" }
+traits = { path = "../traits" }
 # iced = { version = "0.4", features = ["tokio"] }
 iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
 color-eyre = "0.6"

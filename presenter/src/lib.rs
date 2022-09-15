@@ -3,31 +3,32 @@ use std::sync::mpsc;
 
 pub use traits::{AppUpdate, UserIntent};
 
-pub trait Ui : Send {
-    fn run(&mut self) -> Result<(), Box<dyn Error>>; 
+
+pub trait Ui: Send {
+    fn run(&mut self) -> Result<(), Box<dyn Error>>;
 }
 
+/// converts app updates that contain various objects (DateTime
+/// floats/ints) to strings that are used by the guis
 pub struct Presenter {
-    ui: Box<dyn Ui>,
     update_tx: mpsc::Sender<AppUpdate>,
     intent_rx: mpsc::Receiver<UserIntent>,
 }
 
-pub fn new(ui: Box<dyn Ui>) -> Presenter {
+pub type Interface = (mpsc::Sender<UserIntent>, mpsc::Receiver<AppUpdate>);
+
+pub fn new(ui_fn: Box<dyn Fn(Interface) -> Box<dyn Ui>>) -> (Box<dyn Ui>, Presenter) {
     let (update_tx, update_rx) = mpsc::channel();
     let (intent_tx, intent_rx) = mpsc::channel();
+    let ui = ui_fn((intent_tx, update_rx));
 
-    Presenter {
+    (
         ui,
-        update_tx,
-        intent_rx,
-    }
-}
-
-impl Presenter {
-    pub fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        self.ui.run()
-    }
+        Presenter {
+            update_tx,
+            intent_rx,
+        },
+    )
 }
 
 impl traits::ClientInterface for Presenter {

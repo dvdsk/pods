@@ -1,8 +1,8 @@
 use traits::{AppUpdate, UserIntent, ClientInterface};
 
 pub struct Interface {
-    client: Option<Box<dyn ClientInterface>>,
-    remote: Option<()>, // TODO
+    pub client: Option<Box<dyn ClientInterface>>,
+    pub remote: Option<()>, // TODO
 }
 
 impl Interface {
