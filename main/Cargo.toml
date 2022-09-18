@@ -10,6 +10,7 @@ state= { path = "../state" }
 presenter= { path = "../presenter" }
 gui = { path = "../gui" }
 tui = { path = "../tui" }
+remote_ui = { path = "../remote_ui" }
 panda= { path = "../panda" }
 index= { path = "../index" }
 traits= { path = "../traits" }

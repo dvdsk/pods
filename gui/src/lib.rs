@@ -1,18 +1,20 @@
-use std::error::Error;
-use std::sync::{mpsc, Arc, Mutex};
+use async_trait::async_trait;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
+use color_eyre::eyre;
 use iced::{executor, widget, Application, Subscription};
-use traits::{AppUpdate, UserIntent};
+use presenter::{ActionDecoder, GuiUpdate, Presenter};
 
 struct State {
-    rx: Arc<Mutex<mpsc::Receiver<AppUpdate>>>,
-    tx: mpsc::Sender<UserIntent>,
+    rx: Arc<Mutex<Presenter>>,
+    tx: ActionDecoder,
     should_exit: bool,
 }
 
 #[derive(Debug)]
 pub enum Message {
-    App(AppUpdate),
+    Gui(GuiUpdate),
 }
 
 #[derive(Debug)]
@@ -24,7 +26,7 @@ impl Application for State {
     type Message = Message;
     type Executor = executor::Default;
     type Theme = iced::Theme;
-    type Flags = (mpsc::Receiver<AppUpdate>, mpsc::Sender<UserIntent>);
+    type Flags = (Presenter, ActionDecoder);
 
     fn new((rx, tx): Self::Flags) -> (State, Command) {
         (
@@ -47,7 +49,7 @@ impl Application for State {
 
     fn update(&mut self, message: Self::Message) -> Command {
         match dbg!(message) {
-            Message::App(AppUpdate::Exit) => self.should_exit = true,
+            Message::Gui(GuiUpdate::Exit) => self.should_exit = true,
         }
         Command::none()
     }
@@ -61,24 +63,23 @@ impl Application for State {
     }
 }
 
-fn update_sub(rx: Arc<Mutex<mpsc::Receiver<AppUpdate>>>) -> iced::Subscription<Message> {
+fn update_sub(rx: Arc<Mutex<Presenter>>) -> iced::Subscription<Message> {
     struct GetUpdates;
     let id = std::any::TypeId::of::<GetUpdates>();
     iced::subscription::unfold(id, rx, move |rx| async {
-        dbg!();
-        let update = rx
-            .try_lock()
-            .expect("locking should always succeed")
-            .recv()
-            .unwrap(); //.await;
-        let msg = Message::App(update);
+        let msg = {
+            let mut presenter = rx.try_lock().expect("locking should always succeed");
+            let update = presenter.update().await;
+            let msg = Message::Gui(update);
+            msg
+        };
         (Some(msg), rx)
     })
 }
 
 pub struct IcedGui {
-    rx: Option<mpsc::Receiver<AppUpdate>>,
-    tx: Option<mpsc::Sender<UserIntent>>,
+    rx: Option<Presenter>,
+    tx: Option<ActionDecoder>,
 }
 
 pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
@@ -89,10 +90,12 @@ pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
     })
 }
 
+#[async_trait]
 impl presenter::Ui for IcedGui {
-    fn run(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn run(&mut self) -> Result<(), eyre::Report> {
         let settings =
             iced::Settings::with_flags((self.rx.take().unwrap(), self.tx.take().unwrap()));
-        Ok(State::run(settings)?)
+        tokio::task::block_in_place(|| State::run(settings))?;
+        Ok(())
     }
 }

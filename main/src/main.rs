@@ -1,11 +1,9 @@
 use clap::Parser;
 use presenter::Interface;
 use presenter::Ui;
-use state::State;
-use std::thread;
-use traits::ClientInterface;
-use traits::Config as _;
+use state::TestState;
 use traits::State as _;
+use traits::Config as _;
 
 use tokio::signal;
 
@@ -19,7 +17,7 @@ pub enum UiArg {
 #[derive(Parser, Debug)]
 #[clap(long_about = "")]
 struct Cli {
-    #[arg(long, default_value("Tui"))]
+    #[arg(long, default_value("tui"))]
     ui: UiArg,
 
     #[arg(group = "remote")]
@@ -27,8 +25,11 @@ struct Cli {
     #[arg(requires = "remote")]
     password: Option<String>,
 
+    #[arg(long)]
     server: bool,
+    #[arg(long)]
     server_password: Option<String>,
+    #[arg(long)]
     server_port: Option<u16>,
 }
 
@@ -60,10 +61,10 @@ fn force_cli_arguments(config: &mut impl traits::Config, cli: &Cli) {
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
-    let mut state = State::new();
+    let mut state = TestState::new();
     force_cli_arguments(state.config_mut(), &cli);
 
-    let (ui, presenter) = match cli.ui {
+    let (ui, ui_client) = match cli.ui {
         UiArg::None => (None, None),
         choice @ UiArg::Tui | choice @ UiArg::Gui => {
             let ui_fn = match choice {
@@ -71,27 +72,21 @@ async fn main() {
                 UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(Interface) -> Box<dyn Ui>>,
                 UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(Interface) -> Box<dyn Ui>>,
             };
-            let (runtime, presenter) = presenter::new(ui_fn);
-            let presenter = Box::new(presenter) as Box<dyn ClientInterface>;
-            (Some(runtime), Some(presenter))
+            let (runtime, user_intent, app_updates) = presenter::new(ui_fn);
+            (Some(runtime), Some((user_intent, app_updates)))
         }
     };
 
-    let remote = state
+    let remote_config = state
         .config()
         .remote()
-        .get_value()
-        .map(|remote| todo!("start remote listener"));
+        .get_value();
 
-    let interface = panda::Interface {
-        client: presenter,
-        remote,
-    };
-
-    thread::spawn(move || panda::run(interface));
+    let remote = Box::new(remote_ui::new(remote_config));
+    tokio::task::spawn(panda::app(state, ui_client, remote));
 
     match ui {
-        Some(mut ui) => ui.run().unwrap(),
+        Some(mut ui) => ui.run().await.unwrap(),
         None => signal::ctrl_c().await.unwrap(),
     }
 }

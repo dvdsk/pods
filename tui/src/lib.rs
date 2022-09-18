@@ -1,36 +1,29 @@
+use async_trait::async_trait;
+use color_eyre::eyre;
+use color_eyre::eyre::WrapErr;
 use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use std::error::Error;
+use presenter::{ActionDecoder, AppUpdate, Presenter, UserAction, UserIntent};
 use std::io;
-use std::sync::mpsc;
-use presenter::{AppUpdate, UserIntent};
 
 use tui::backend::{Backend, CrosstermBackend};
 use tui::{Frame, Terminal};
 
-struct App {}
-
-impl App {
-    fn new() -> App {
-        App {}
-    }
-}
-
-fn run_app<B: Backend>(
+async fn run_app<B: Backend>(
     terminal: &mut Terminal<B>,
-    rx: &mut mpsc::Receiver<AppUpdate>,
-    tx: &mut mpsc::Sender<UserIntent>,
-) -> std::io::Result<()> {
+    rx: &mut Presenter,
+    tx: &mut ActionDecoder,
+) -> eyre::Result<()> {
     use crossterm::event::{self, Event, KeyCode};
     loop {
         terminal.draw(|f| ui(f))?;
 
         if let Event::Key(key) = event::read()? {
             match key.code {
-                KeyCode::Char('q') => tx.send(UserIntent::Exit).unwrap(),
+                KeyCode::Char(q) => tx.decode(UserAction::KeyPress(q)).await,
                 _ => (),
             }
         }
@@ -58,8 +51,8 @@ fn ui<B: Backend>(f: &mut Frame<B>) {
 }
 
 pub struct Tui {
-    rx: mpsc::Receiver<AppUpdate>,
-    tx: mpsc::Sender<UserIntent>,
+    rx: Presenter,
+    tx: ActionDecoder,
 }
 
 pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
@@ -67,25 +60,29 @@ pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
     Box::new(Tui { rx, tx })
 }
 
+#[async_trait]
 impl presenter::Ui for Tui {
-    fn run(&mut self) -> Result<(), Box<dyn Error>> {
-        enable_raw_mode()?;
+    async fn run(&mut self) -> Result<(), eyre::Report> {
+        enable_raw_mode().wrap_err("Could not enable raw terminal mode")?;
         let mut stdout = io::stdout();
-        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+        execute!(stdout, EnterAlternateScreen, EnableMouseCapture)
+            .wrap_err("Could not enable mouse capture")?;
         let backend = CrosstermBackend::new(stdout);
-        let mut terminal = Terminal::new(backend)?;
+        let mut terminal = Terminal::new(backend).wrap_err("Could not wrap terminal")?;
 
-        let app = App::new();
-        let res = run_app(&mut terminal, &mut self.rx, &mut self.tx);
+        let res = run_app(&mut terminal, &mut self.rx, &mut self.tx).await;
 
         // restore terminal
-        disable_raw_mode()?;
+        disable_raw_mode().wrap_err("Could not disable raw terminal")?;
         execute!(
             terminal.backend_mut(),
             LeaveAlternateScreen,
             DisableMouseCapture
-        )?;
-        terminal.show_cursor()?;
+        )
+        .wrap_err("Could not disable mouse capture and leave alternate screen")?;
+        terminal
+            .show_cursor()
+            .wrap_err("Could not re-enable cursor")?;
 
         if let Err(err) = res {
             println!("{:?}", err)

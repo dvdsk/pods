@@ -7,5 +7,7 @@ edition = "2021"
 
 [dependencies]
 presenter = { path = "../presenter" }
+async-trait = "0.1" 
 tui = "0.19"
+color-eyre = "0.6"
 crossterm = { version = "0.25", features = ["event-stream"] }

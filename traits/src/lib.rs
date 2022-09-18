@@ -1,8 +1,15 @@
+pub use async_trait::async_trait;
+use core::fmt;
+use tokio::sync::mpsc;
+
+#[derive(Debug, Clone)]
 pub enum UserIntent {
     Exit,
+    ConnectToRemote,
+    DisconnectRemote,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AppUpdate {
     Exit,
 }
@@ -13,6 +20,18 @@ pub struct Forcable<T: Sized> {
 }
 
 impl<T: Sized> Forcable<T> {
+    pub fn new(value: T) -> Self {
+        Self {
+            forced: false,
+            value,
+        }
+    }
+    pub fn new_forced(value: T) -> Self {
+        Self {
+            forced: true,
+            value,
+        }
+    }
     pub fn get_value(self) -> T {
         self.value
     }
@@ -22,7 +41,7 @@ impl<T: Sized> Forcable<T> {
 }
 
 pub trait State: Sized {
-    type Config;
+    type Config: Config;
     fn config_mut(&mut self) -> &mut Self::Config;
     fn config(&self) -> &Self::Config;
 }
@@ -44,8 +63,26 @@ pub trait Config: Sized {
     fn force_server(&mut self, val: Option<Server>);
 }
 
-pub trait ClientInterface : Send {
-    fn update(&mut self, msg: AppUpdate);
-    fn next_intent(&mut self) -> UserIntent;
+#[async_trait]
+pub trait IntentReciever: Send {
+    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Display>>;
 }
 
+#[async_trait]
+impl IntentReciever for mpsc::Receiver<UserIntent> {
+    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Display>> {
+        self.recv().await.ok_or(Box::new("Channel was closed"))
+    }
+}
+
+#[async_trait]
+pub trait Updater: Send {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Display>>;
+}
+
+pub trait RemoteUI: Send {
+    fn disable(&mut self);
+    fn enable(&mut self, config: Remote);
+    fn updater(&self) -> Box<dyn Updater>;
+    fn intent(&self) -> Box<dyn IntentReciever>;
+}

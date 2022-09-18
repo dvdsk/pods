@@ -6,12 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-state= { path = "../state" }
-gui= { path = "../gui" }
-tui= { path = "../tui" }
-index= { path = "../index" }
 traits= { path = "../traits" }
-search= { path = "../search" }
-player= { path = "../player" }
+tokio = { version = "1", features = ["sync", "net"] }
+async-trait = "0.1.57"
 
-clap = { version = "4.0.0-alpha.0", features = ["derive"], git = "https://github.com/clap-rs/clap" }

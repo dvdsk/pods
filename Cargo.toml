@@ -9,6 +9,7 @@ members = [
 	"presenter",
 	"gui",
 	"tui",
+	"remote_ui",
 	"index",
 	"panda",
 	"main",
