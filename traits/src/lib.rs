@@ -65,24 +65,36 @@ pub trait Config: Sized {
 
 #[async_trait]
 pub trait IntentReciever: Send {
-    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Display>>;
+    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Debug>>;
 }
 
 #[async_trait]
 impl IntentReciever for mpsc::Receiver<UserIntent> {
-    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Display>> {
+    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Debug>> {
         self.recv().await.ok_or(Box::new("Channel was closed"))
     }
 }
 
 #[async_trait]
 pub trait Updater: Send {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Display>>;
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>>;
 }
 
-pub trait RemoteUI: Send {
+#[async_trait]
+impl Updater for mpsc::Sender<AppUpdate> {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
+        self.send(msg)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn fmt::Debug>)
+    }
+}
+
+pub trait LocalUI: Send {
+    fn updater(&mut self) -> Box<dyn Updater>;
+    fn intent(&mut self) -> Box<dyn IntentReciever>;
+}
+
+pub trait RemoteUI: LocalUI {
     fn disable(&mut self);
     fn enable(&mut self, config: Remote);
-    fn updater(&self) -> Box<dyn Updater>;
-    fn intent(&self) -> Box<dyn IntentReciever>;
 }

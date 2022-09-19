@@ -16,7 +16,7 @@ pub struct Updater {
 
 #[async_trait]
 impl traits::Updater for Updater {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Display>> {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
         self.broadcast.send(msg).unwrap();
         Ok(())
     }
@@ -40,19 +40,23 @@ impl traits::RemoteUI for Interface {
     fn enable(&mut self, config: traits::Remote) {
         todo!()
     }
-    fn updater(&self) -> Box<dyn traits::Updater> {
+}
+
+#[async_trait]
+impl traits::LocalUI for Interface {
+    fn updater(&mut self) -> Box<dyn traits::Updater> {
         Box::new(Updater {
             broadcast: self.update.clone(),
         })
     }
-    fn intent(&self) -> Box<dyn traits::IntentReciever> {
+    fn intent(&mut self) -> Box<dyn traits::IntentReciever> {
         todo!()
     }
 }
 
 #[async_trait]
 impl traits::IntentReciever for Interface {
-    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Display>> {
+    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Debug>> {
         todo!()
     }
 }

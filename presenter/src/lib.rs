@@ -15,27 +15,42 @@ pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
 }
 
-pub type Interface = (ActionDecoder, Presenter);
+pub struct Interface {
+    tx: Option<mpsc::Sender<AppUpdate>>,
+    rx: Option<mpsc::Receiver<UserIntent>>,
+}
+
+impl traits::LocalUI for Interface {
+    fn updater(&mut self) -> Box<dyn traits::Updater> {
+        Box::new(self.tx.take().unwrap())
+    }
+
+    fn intent(&mut self) -> Box<dyn traits::IntentReciever> {
+        Box::new(self.rx.take().unwrap())
+    }
+}
+
+pub struct InternalPorts(pub ActionDecoder, pub Presenter);
 
 pub fn new(
-    ui_fn: Box<dyn Fn(Interface) -> Box<dyn Ui>>,
-) -> (
-    Box<dyn Ui>,
-    mpsc::Receiver<UserIntent>,
-    mpsc::Sender<AppUpdate>,
-) {
+    ui_fn: Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
+) -> (Box<dyn Ui>, Box<dyn traits::LocalUI>) {
     let (update_tx, update_rx) = mpsc::channel(32);
     let (intent_tx, intent_rx) = mpsc::channel(32);
     let decoder = ActionDecoder { intent_tx };
     let presenter = Presenter { update_rx };
-    let ui = ui_fn((decoder, presenter));
+    let ui = ui_fn(InternalPorts(decoder, presenter));
+    let interface = Box::new(Interface {
+        tx: Some(update_tx),
+        rx: Some(intent_rx),
+    });
 
-    (ui, intent_rx, update_tx)
+    (ui, interface)
 }
 
 #[derive(Debug)]
 pub enum GuiUpdate {
-    Exit
+    Exit,
 }
 
 impl Presenter {

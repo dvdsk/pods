@@ -1,5 +1,5 @@
 use clap::Parser;
-use presenter::Interface;
+use presenter::InternalPorts;
 use presenter::Ui;
 use state::TestState;
 use traits::State as _;
@@ -64,16 +64,16 @@ async fn main() {
     let mut state = TestState::new();
     force_cli_arguments(state.config_mut(), &cli);
 
-    let (ui, ui_client) = match cli.ui {
+    let (ui_runtime, ui_port) = match cli.ui {
         UiArg::None => (None, None),
         choice @ UiArg::Tui | choice @ UiArg::Gui => {
             let ui_fn = match choice {
                 UiArg::None => unreachable!(),
-                UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(Interface) -> Box<dyn Ui>>,
-                UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(Interface) -> Box<dyn Ui>>,
+                UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
+                UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
             };
-            let (runtime, user_intent, app_updates) = presenter::new(ui_fn);
-            (Some(runtime), Some((user_intent, app_updates)))
+            let (runtime, interface) = presenter::new(ui_fn);
+            (Some(runtime), Some(interface))
         }
     };
 
@@ -83,9 +83,9 @@ async fn main() {
         .get_value();
 
     let remote = Box::new(remote_ui::new(remote_config));
-    tokio::task::spawn(panda::app(state, ui_client, remote));
+    tokio::task::spawn(panda::app(state, ui_port, remote));
 
-    match ui {
+    match ui_runtime {
         Some(mut ui) => ui.run().await.unwrap(),
         None => signal::ctrl_c().await.unwrap(),
     }

@@ -82,8 +82,8 @@ pub struct IcedGui {
     tx: Option<ActionDecoder>,
 }
 
-pub fn new(interface: presenter::Interface) -> Box<dyn presenter::Ui> {
-    let (tx, rx) = interface;
+pub fn new(interface: presenter::InternalPorts) -> Box<dyn presenter::Ui> {
+    let presenter::InternalPorts(tx, rx) = interface;
     Box::new(IcedGui {
         rx: Some(rx),
         tx: Some(tx),

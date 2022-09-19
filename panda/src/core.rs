@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use traits::{AppUpdate, UserIntent};
 
-use crate::{InterfaceClient, Reason};
+use crate::Reason;
 
 #[async_trait]
 pub trait Interface: Send {
@@ -27,9 +27,9 @@ pub(super) async fn run(interface: &mut dyn Interface) -> Reason {
 }
 
 /// returns true when we should exit
-pub(super) async fn run_remote(local: &mut InterfaceClient, server: traits::Server) -> Reason {
-    let (rx, tx) = local;
-    match rx.recv().await.unwrap() {
+pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::Server) -> Reason {
+    let mut rx = local.intent();
+    match rx.next_intent().await.unwrap() {
         UserIntent::Exit => Reason::Exit,
         UserIntent::ConnectToRemote => unreachable!(),
         UserIntent::DisconnectRemote => Reason::ConnectChange,
