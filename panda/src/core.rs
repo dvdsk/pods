@@ -28,7 +28,7 @@ pub(super) async fn run(interface: &mut dyn Interface) -> Reason {
 
 /// returns true when we should exit
 pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::Server) -> Reason {
-    let mut rx = local.intent();
+    let (tx, rx) = local.ports();
     match rx.next_intent().await.unwrap() {
         UserIntent::Exit => Reason::Exit,
         UserIntent::ConnectToRemote => unreachable!(),

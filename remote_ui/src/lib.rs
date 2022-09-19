@@ -10,18 +10,6 @@ pub struct Interface {
     intent: mpsc::Receiver<UserIntent>,
 }
 
-pub struct Updater {
-    broadcast: broadcast::Sender<AppUpdate>,
-}
-
-#[async_trait]
-impl traits::Updater for Updater {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
-        self.broadcast.send(msg).unwrap();
-        Ok(())
-    }
-}
-
 impl Drop for Interface {
     fn drop(&mut self) {
         if let Some(ref mut task) = self.listener {
@@ -44,13 +32,8 @@ impl traits::RemoteUI for Interface {
 
 #[async_trait]
 impl traits::LocalUI for Interface {
-    fn updater(&mut self) -> Box<dyn traits::Updater> {
-        Box::new(Updater {
-            broadcast: self.update.clone(),
-        })
-    }
-    fn intent(&mut self) -> Box<dyn traits::IntentReciever> {
-        todo!()
+    fn ports(&mut self) -> (&mut dyn traits::Updater, &mut dyn traits::IntentReciever) {
+        (&mut self.update, &mut self.intent)
     }
 }
 

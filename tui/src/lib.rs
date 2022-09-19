@@ -6,7 +6,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use presenter::{ActionDecoder, AppUpdate, Presenter, UserAction, UserIntent};
+use presenter::{ActionDecoder, Presenter, UserAction};
 use std::io;
 
 use tui::backend::{Backend, CrosstermBackend};

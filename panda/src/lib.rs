@@ -4,8 +4,10 @@ use traits::{AppUpdate, UserIntent};
 mod core;
 
 pub struct Interface<'a> {
-    pub local: &'a mut Option<Box<dyn traits::LocalUI>>,
-    pub remote: &'a mut Box<dyn traits::RemoteUI>,
+    pub local_rx: Option<&'a mut dyn traits::IntentReciever>,
+    pub local_tx: Option<&'a mut dyn traits::Updater>,
+    pub remote_rx: &'a mut dyn traits::IntentReciever,
+    pub remote_tx: &'a mut dyn traits::Updater,
 }
 
 #[async_trait]
@@ -25,9 +27,19 @@ impl<'a> Interface<'a> {
         local_ui: &'a mut Option<Box<dyn traits::LocalUI>>,
         remote: &'a mut Box<dyn traits::RemoteUI>,
     ) -> Interface<'a> {
+        let (local_tx, local_rx) = match local_ui {
+            Some(local) => {
+                let (tx, rx) = local.ports();
+                (Some(tx), Some(rx))
+            },
+            None => (None, None),
+        };
+        let (remote_tx, remote_rx) = remote.ports();
         Self {
-            local: local_ui,
-            remote,
+            local_rx,
+            local_tx,
+            remote_rx,
+            remote_tx,
         }
     }
 }

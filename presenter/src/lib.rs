@@ -21,12 +21,16 @@ pub struct Interface {
 }
 
 impl traits::LocalUI for Interface {
-    fn updater(&mut self) -> Box<dyn traits::Updater> {
-        Box::new(self.tx.take().unwrap())
-    }
-
-    fn intent(&mut self) -> Box<dyn traits::IntentReciever> {
-        Box::new(self.rx.take().unwrap())
+    fn ports(
+        &mut self,
+    ) -> (
+        &mut dyn traits::Updater,
+        &mut dyn traits::IntentReciever,
+    ) {
+        (
+            self.tx.as_mut().take().unwrap(),
+            self.rx.as_mut().take().unwrap(),
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 pub use async_trait::async_trait;
 use core::fmt;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 #[derive(Debug, Clone)]
 pub enum UserIntent {
@@ -89,9 +89,17 @@ impl Updater for mpsc::Sender<AppUpdate> {
     }
 }
 
+#[async_trait]
+impl Updater for broadcast::Sender<AppUpdate> {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
+        self.send(msg)
+            .map(|_| ())
+            .map_err(|e| Box::new(e) as Box<dyn fmt::Debug>)
+    }
+}
+
 pub trait LocalUI: Send {
-    fn updater(&mut self) -> Box<dyn Updater>;
-    fn intent(&mut self) -> Box<dyn IntentReciever>;
+    fn ports(&mut self) -> (&mut dyn Updater, &mut dyn IntentReciever);
 }
 
 pub trait RemoteUI: LocalUI {
