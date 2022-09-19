@@ -3,13 +3,13 @@ use traits::{AppUpdate, UserIntent};
 
 mod core;
 
-pub struct Interface<'a, 'b> {
-    pub local: &'a mut Option<&'b mut dyn traits::LocalUI>,
+pub struct Interface<'a> {
+    pub local: &'a mut Option<Box<dyn traits::LocalUI>>,
     pub remote: &'a mut Box<dyn traits::RemoteUI>,
 }
 
 #[async_trait]
-impl<'a, 'b> core::Interface for Interface<'a, 'b> {
+impl<'a> core::Interface for Interface<'a> {
     /// if client and remote are None block until that changes
     async fn next_intent(&mut self) -> UserIntent {
         todo!()
@@ -20,11 +20,11 @@ impl<'a, 'b> core::Interface for Interface<'a, 'b> {
     }
 }
 
-impl<'a, 'b: 'a> Interface<'a, 'b> {
+impl<'a> Interface<'a> {
     fn new(
-        local_ui: &'a mut Option<&'b mut dyn traits::LocalUI>,
+        local_ui: &'a mut Option<Box<dyn traits::LocalUI>>,
         remote: &'a mut Box<dyn traits::RemoteUI>,
-    ) -> Interface<'a, 'b> {
+    ) -> Interface<'a> {
         Self {
             local: local_ui,
             remote,
@@ -37,27 +37,12 @@ enum Reason {
     ConnectChange,
 }
 
-trait OptionBoxAsMut {
-    fn inner_as_mut(&mut self) -> Option<&mut dyn traits::LocalUI>;
-}
-
-impl OptionBoxAsMut for Option<Box<dyn traits::LocalUI>> {
-    fn inner_as_mut(&mut self) -> Option<&mut dyn traits::LocalUI> {
-        match self {
-            Some(b) => Some(b.as_mut()),
-            None => None,
-        }
-    }
-}
-
 pub async fn app(
     state: impl traits::State,
     mut local_ui: Option<Box<dyn traits::LocalUI>>,
     mut remote: Box<dyn traits::RemoteUI>,
 ) {
     use traits::Config as _;
-
-    let mut local_ui = local_ui.inner_as_mut();
 
     // only allow starting of remote if
     // we are not connecting to a remote
@@ -73,10 +58,12 @@ pub async fn app(
     loop {
         let server = state.config().server().get_value();
         match (server, local_ui.as_mut()) {
-            (Some(server), Some(local_ui)) => match core::run_remote(*local_ui, server).await {
-                Reason::Exit => break,
-                Reason::ConnectChange => continue,
-            },
+            (Some(server), Some(local_ui)) => {
+                match core::run_remote(local_ui.as_mut(), server).await {
+                    Reason::Exit => break,
+                    Reason::ConnectChange => continue,
+                }
+            }
             _ => (),
         }
 
