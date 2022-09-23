@@ -1,25 +1,20 @@
-use async_trait::async_trait;
 use traits::{AppUpdate, UserIntent};
 
 use crate::Reason;
 
-#[async_trait]
-pub trait Interface: Send {
-    async fn next_intent(&mut self) -> UserIntent;
-    async fn update(&mut self, update: AppUpdate);
-}
-
 /// returns when local ui intents to switch to remote
-pub(super) async fn run(interface: &mut dyn Interface) -> Reason {
+pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
+    let (tx, rx, remote) = interface.ports();
     loop {
         // get reciever for all the clients
 
         // join on reciever?
-        match interface.next_intent().await {
+        match rx.next_intent().await.unwrap() {
             UserIntent::DisconnectRemote => unreachable!(),
             UserIntent::ConnectToRemote => return Reason::ConnectChange,
+            UserIntent::RefuseRemoteClients => remote.disable(),
             UserIntent::Exit => {
-                interface.update(AppUpdate::Exit).await;
+                tx.update(AppUpdate::Exit).await.unwrap();
                 return Reason::Exit;
             }
         }
@@ -32,6 +27,7 @@ pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::
     match rx.next_intent().await.unwrap() {
         UserIntent::Exit => Reason::Exit,
         UserIntent::ConnectToRemote => unreachable!(),
+        UserIntent::RefuseRemoteClients => unreachable!(),
         UserIntent::DisconnectRemote => Reason::ConnectChange,
     }
 }

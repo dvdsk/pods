@@ -1,5 +1,6 @@
 pub use async_trait::async_trait;
-use core::fmt;
+pub use color_eyre::eyre;
+use eyre::WrapErr;
 use tokio::sync::{broadcast, mpsc};
 
 #[derive(Debug, Clone)]
@@ -7,6 +8,7 @@ pub enum UserIntent {
     Exit,
     ConnectToRemote,
     DisconnectRemote,
+    RefuseRemoteClients,
 }
 
 #[derive(Debug, Clone)]
@@ -65,36 +67,36 @@ pub trait Config: Sized {
 
 #[async_trait]
 pub trait IntentReciever: Send {
-    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Debug>>;
+    async fn next_intent(&mut self) -> Result<UserIntent, eyre::Report>;
 }
 
 #[async_trait]
 impl IntentReciever for mpsc::Receiver<UserIntent> {
-    async fn next_intent(&mut self) -> Result<UserIntent, Box<dyn fmt::Debug>> {
-        self.recv().await.ok_or(Box::new("Channel was closed"))
+    async fn next_intent(&mut self) -> Result<UserIntent, eyre::Report> {
+        self.recv().await.ok_or(eyre::eyre!("channel was closed"))
     }
 }
 
 #[async_trait]
 pub trait Updater: Send {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>>;
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report>;
 }
 
 #[async_trait]
 impl Updater for mpsc::Sender<AppUpdate> {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
         self.send(msg)
             .await
-            .map_err(|e| Box::new(e) as Box<dyn fmt::Debug>)
+            .wrap_err("Could not send update")
     }
 }
 
 #[async_trait]
 impl Updater for broadcast::Sender<AppUpdate> {
-    async fn update(&mut self, msg: AppUpdate) -> Result<(), Box<dyn fmt::Debug>> {
+    async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
         self.send(msg)
             .map(|_| ())
-            .map_err(|e| Box::new(e) as Box<dyn fmt::Debug>)
+            .wrap_err("Could not send update")
     }
 }
 
@@ -102,7 +104,18 @@ pub trait LocalUI: Send {
     fn ports(&mut self) -> (&mut dyn Updater, &mut dyn IntentReciever);
 }
 
-pub trait RemoteUI: LocalUI {
+pub trait RemoteController: Send {
     fn disable(&mut self);
     fn enable(&mut self, config: Remote);
+}
+
+pub trait RemoteUI: Send {
+    fn ports(
+        &mut self,
+    ) -> (
+        &mut dyn Updater,
+        &mut dyn IntentReciever,
+        &mut dyn RemoteController,
+    );
+    fn controller(&mut self) -> &mut dyn RemoteController;
 }

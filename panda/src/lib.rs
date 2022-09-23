@@ -1,48 +1,7 @@
 use async_trait::async_trait;
-use traits::{AppUpdate, UserIntent};
 
 mod core;
-
-pub struct Interface<'a> {
-    pub local_rx: Option<&'a mut dyn traits::IntentReciever>,
-    pub local_tx: Option<&'a mut dyn traits::Updater>,
-    pub remote_rx: &'a mut dyn traits::IntentReciever,
-    pub remote_tx: &'a mut dyn traits::Updater,
-}
-
-#[async_trait]
-impl<'a> core::Interface for Interface<'a> {
-    /// if client and remote are None block until that changes
-    async fn next_intent(&mut self) -> UserIntent {
-        todo!()
-    }
-
-    async fn update(&mut self, update: AppUpdate) {
-        todo!()
-    }
-}
-
-impl<'a> Interface<'a> {
-    fn new(
-        local_ui: &'a mut Option<Box<dyn traits::LocalUI>>,
-        remote: &'a mut Box<dyn traits::RemoteUI>,
-    ) -> Interface<'a> {
-        let (local_tx, local_rx) = match local_ui {
-            Some(local) => {
-                let (tx, rx) = local.ports();
-                (Some(tx), Some(rx))
-            },
-            None => (None, None),
-        };
-        let (remote_tx, remote_rx) = remote.ports();
-        Self {
-            local_rx,
-            local_tx,
-            remote_rx,
-            remote_tx,
-        }
-    }
-}
+mod interface;
 
 enum Reason {
     Exit,
@@ -62,8 +21,8 @@ pub async fn app(
     if server.is_none() {
         let remote_config = state.config().remote().get_value();
         match remote_config {
-            Some(config) => remote.enable(config),
-            None => remote.disable(),
+            Some(config) => remote.controller().enable(config),
+            None => remote.controller().disable(),
         }
     }
 
@@ -79,10 +38,18 @@ pub async fn app(
             _ => (),
         }
 
-        let mut interface = Interface::new(&mut local_ui, &mut remote);
-        match core::run(&mut interface).await {
-            Reason::Exit => break,
-            Reason::ConnectChange => continue,
+        match local_ui {
+            None => match core::run(remote.as_mut()).await {
+                Reason::Exit => break,
+                Reason::ConnectChange => unreachable!(),
+            },
+            Some(ref mut local_ui) => {
+                let mut interface = interface::Unified::new(local_ui, &mut remote);
+                match core::run(&mut interface).await {
+                    Reason::Exit => break,
+                    Reason::ConnectChange => continue,
+                }
+            }
         }
     }
 }
