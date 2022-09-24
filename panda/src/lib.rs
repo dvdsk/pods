@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 mod core;
 mod interface;
 
@@ -14,17 +12,6 @@ pub async fn app(
     mut remote: Box<dyn traits::RemoteUI>,
 ) {
     use traits::Config as _;
-
-    // only allow starting of remote if
-    // we are not connecting to a remote
-    let server = state.config().server().get_value();
-    if server.is_none() {
-        let remote_config = state.config().remote().get_value();
-        match remote_config {
-            Some(config) => remote.controller().enable(config),
-            None => remote.controller().disable(),
-        }
-    }
 
     loop {
         let server = state.config().server().get_value();

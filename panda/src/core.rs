@@ -12,7 +12,7 @@ pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
         match rx.next_intent().await.unwrap() {
             UserIntent::DisconnectRemote => unreachable!(),
             UserIntent::ConnectToRemote => return Reason::ConnectChange,
-            UserIntent::RefuseRemoteClients => remote.disable(),
+            UserIntent::RefuseRemoteClients => remote.disable().await,
             UserIntent::Exit => {
                 tx.update(AppUpdate::Exit).await.unwrap();
                 return Reason::Exit;

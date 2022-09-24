@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 traits = { path = "../traits" }
 tokio = { version = "1", features = ["sync", "net"] }
+futures = "0.3"

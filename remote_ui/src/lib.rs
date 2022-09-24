@@ -2,19 +2,23 @@ use tokio::sync::{broadcast, mpsc};
 use tokio::task;
 use traits::{async_trait, AppUpdate, UserIntent};
 
-pub struct Listener(pub Option<task::JoinHandle<()>>);
+#[derive(Debug)]
+struct RemoteController {
+    config: Option<traits::Server>,
+    sender: mpsc::Sender<Option<traits::Server>>,
+}
 
+#[derive(Debug)]
 pub struct Interface {
-    listener: Listener,
+    listener: task::JoinHandle<()>,
+    controller: RemoteController,
     update: broadcast::Sender<AppUpdate>,
     intent: mpsc::Receiver<UserIntent>,
 }
 
-impl Drop for Listener {
+impl Drop for Interface {
     fn drop(&mut self) {
-        if let Some(ref mut task) = self.0 {
-            task.abort()
-        }
+        self.listener.abort()
     }
 }
 
@@ -27,21 +31,20 @@ impl traits::RemoteUI for Interface {
         &mut dyn traits::IntentReciever,
         &mut dyn traits::RemoteController,
     ) {
-        (&mut self.update, &mut self.intent, &mut self.listener)
+        (&mut self.update, &mut self.intent, &mut self.controller)
     }
     fn controller(&mut self) -> &mut dyn traits::RemoteController {
-        &mut self.listener
+        &mut self.controller
     }
 }
 
 #[async_trait]
-impl traits::RemoteController for Listener {
-    fn disable(&mut self) {
-        if let Some(task) = self.0.take() {
-            task.abort()
-        }
+impl traits::RemoteController for RemoteController {
+    async fn disable(&mut self) {
+        self.config = None;
+        self.sender.send(self.config.clone()).await.unwrap();
     }
-    fn enable(&mut self, config: traits::Remote) {
+    async fn enable(&mut self, config: traits::Remote) {
         todo!()
     }
 }
@@ -54,24 +57,30 @@ impl traits::LocalUI for Interface {
 }
 
 async fn listen(
-    config: traits::Remote,
+    mut config_rx: mpsc::Receiver<Option<traits::Server>>,
     intent_tx: mpsc::Sender<UserIntent>,
     update_rx: broadcast::Receiver<AppUpdate>,
 ) {
-    todo!()
+    while let Some(change) = config_rx.recv().await {
+        match change {
+            Some(config) => todo!("do something with new config: {config:?}"),
+            None => todo!("can not disable listen as thats not yet implemented"),
+        }
+    }
 }
 
-pub fn new(init_remote: Option<traits::Remote>) -> Interface {
+pub fn new(init_remote: Option<traits::Server>) -> Interface {
     let (update, update_rx) = broadcast::channel(4);
     let (intent_tx, intent) = mpsc::channel(4);
-    let listener = Listener(init_remote.map(|config| {
-        let listen = listen(config, intent_tx, update_rx);
-        task::spawn(listen)
-    }));
+    let (config_tx, config_rx) = mpsc::channel(1);
+    let listen = listen(config_rx, intent_tx, update_rx);
+    let listener = task::spawn(listen);
+    let controller = RemoteController { sender: config_tx, config: init_remote};
 
     Interface {
         intent,
         update,
         listener,
+        controller,
     }
 }

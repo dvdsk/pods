@@ -1,13 +1,16 @@
 use traits::eyre;
+use eyre::WrapErr;
 
 use async_trait::async_trait;
 
+#[derive(Debug)]
 pub struct Unified<'a> {
     updater: Updater<'a>,
     intent: IntentReciever<'a>,
     remote_controller: &'a mut dyn traits::RemoteController,
 }
 
+#[derive(Debug)]
 pub struct Updater<'a> {
     remote_tx: &'a mut dyn traits::Updater,
     local_tx: &'a mut dyn traits::Updater,
@@ -23,6 +26,7 @@ impl<'a> traits::Updater for Updater<'a> {
     }
 }
 
+#[derive(Debug)]
 pub struct IntentReciever<'a> {
     remote_rx: &'a mut dyn traits::IntentReciever,
     local_rx: &'a mut dyn traits::IntentReciever,
@@ -34,8 +38,8 @@ impl<'a> traits::IntentReciever for IntentReciever<'a> {
         let reveive_local = self.local_rx.next_intent();
         let reveive_remote = self.remote_rx.next_intent();
         tokio::select!(
-            res = reveive_remote => res,
-            res = reveive_local => res,
+            res = reveive_remote => res.wrap_err("while awaiting remote intent"),
+            res = reveive_local => res.wrap_err("while awaiting local intent"),
         )
     }
 }

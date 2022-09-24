@@ -2,8 +2,8 @@ use clap::Parser;
 use presenter::InternalPorts;
 use presenter::Ui;
 use state::TestState;
-use traits::State as _;
 use traits::Config as _;
+use traits::State as _;
 
 use tokio::signal;
 
@@ -58,8 +58,34 @@ fn force_cli_arguments(config: &mut impl traits::Config, cli: &Cli) {
     config.force_server(server);
 }
 
+// fn filter(kind: color_eyre::ErrorKind) -> bool {
+//     match kind {
+//         color_eyre::ErrorKind::NonRecoverable(payload) => {
+//             let payload = payload
+//                 .downcast_ref::<String>()
+//                 .map(String::as_str)
+//                 .or_else(|| payload.downcast_ref::<&str>().cloned())
+//                 .unwrap_or("<non string panic payload>");
+//
+//             !payload.contains("\u{1b}") // workaround for bug where crash was reported twice
+//         }
+//         color_eyre::ErrorKind::Recoverable(error) => !error.is::<std::fmt::Error>(),
+//     }
+// }
+
+fn set_error_hook() {
+    color_eyre::config::HookBuilder::default()
+        // .issue_filter(filter) // TODO
+        // .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
+        // .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
+        // .capture_span_trace_by_default(true)
+        .install()
+        .expect("could not set up error reporting");
+}
+
 #[tokio::main]
 async fn main() {
+    set_error_hook();
     let cli = Cli::parse();
     let mut state = TestState::new();
     force_cli_arguments(state.config_mut(), &cli);
@@ -77,12 +103,9 @@ async fn main() {
         }
     };
 
-    let remote_config = state
-        .config()
-        .remote()
-        .get_value();
+    let server_config = state.config().server().get_value();
 
-    let remote = Box::new(remote_ui::new(remote_config));
+    let remote = Box::new(remote_ui::new(server_config));
     tokio::task::spawn(panda::app(state, ui_port, remote));
 
     match ui_runtime {

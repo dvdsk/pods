@@ -15,6 +15,7 @@ pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
 }
 
+#[derive(Debug)]
 pub struct Interface {
     tx: Option<mpsc::Sender<AppUpdate>>,
     rx: Option<mpsc::Receiver<UserIntent>>,

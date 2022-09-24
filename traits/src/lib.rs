@@ -1,3 +1,5 @@
+use core::fmt;
+
 pub use async_trait::async_trait;
 pub use color_eyre::eyre;
 use eyre::WrapErr;
@@ -48,11 +50,15 @@ pub trait State: Sized {
     fn config(&self) -> &Self::Config;
 }
 
+/// settings with which to connect to panda server
+#[derive(Debug)]
 pub struct Remote {
     pub id: u64,
     pub password: Option<String>,
 }
 
+/// options for panda server
+#[derive(Debug, Clone)]
 pub struct Server {
     pub port: Option<u16>,
     pub password: Option<String>,
@@ -66,7 +72,7 @@ pub trait Config: Sized {
 }
 
 #[async_trait]
-pub trait IntentReciever: Send {
+pub trait IntentReciever: Send + fmt::Debug {
     async fn next_intent(&mut self) -> Result<UserIntent, eyre::Report>;
 }
 
@@ -78,25 +84,21 @@ impl IntentReciever for mpsc::Receiver<UserIntent> {
 }
 
 #[async_trait]
-pub trait Updater: Send {
+pub trait Updater: Send + fmt::Debug {
     async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report>;
 }
 
 #[async_trait]
 impl Updater for mpsc::Sender<AppUpdate> {
     async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
-        self.send(msg)
-            .await
-            .wrap_err("Could not send update")
+        self.send(msg).await.wrap_err("Could not send update")
     }
 }
 
 #[async_trait]
 impl Updater for broadcast::Sender<AppUpdate> {
     async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
-        self.send(msg)
-            .map(|_| ())
-            .wrap_err("Could not send update")
+        self.send(msg).map(|_| ()).wrap_err("Could not send update")
     }
 }
 
@@ -104,12 +106,13 @@ pub trait LocalUI: Send {
     fn ports(&mut self) -> (&mut dyn Updater, &mut dyn IntentReciever);
 }
 
-pub trait RemoteController: Send {
-    fn disable(&mut self);
-    fn enable(&mut self, config: Remote);
+#[async_trait]
+pub trait RemoteController: Send + fmt::Debug {
+    async fn disable(&mut self);
+    async fn enable(&mut self, config: Remote);
 }
 
-pub trait RemoteUI: Send {
+pub trait RemoteUI: Send + fmt::Debug {
     fn ports(
         &mut self,
     ) -> (
