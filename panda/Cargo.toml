@@ -3,10 +3,14 @@ name = "panda"
 version = "0.1.0"
 edition = "2021"
 
+# [lib]
+# crate-type = ["dylib"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 traits= { path = "../traits" }
 tokio = { version = "1", features = ["sync", "net"] }
 async-trait = "0.1.57"
+tracing = "0.1"
 

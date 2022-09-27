@@ -3,12 +3,17 @@ name = "presenter"
 version = "0.1.0"
 edition = "2021"
 
+# [lib]
+# crate-type = ["dylib"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 traits = { path = "../traits" }
 async-trait = "0.1" 
 tokio = { version = "1", features = ["sync"] }
+futures = "0.3"
+tracing = "0.1"
 
 clap = { version = "4.0.0-alpha.0", features = ["derive"], git = "https://github.com/clap-rs/clap" }
 color-eyre = "0.6"

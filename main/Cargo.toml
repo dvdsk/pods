@@ -20,4 +20,7 @@ player= { path = "../player" }
 
 clap = { version = "4.0.0-alpha.0", features = ["derive"], git = "https://github.com/clap-rs/clap" }
 tokio = { version = "1.21", features = ["macros", "signal"] }
-color-eyre = { version = "0.6.2", features = ["issue-url"] }
+color-eyre = { version = "^0.6.2", features = ["issue-url"] }
+tracing-error = "0.2.0"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1.36"

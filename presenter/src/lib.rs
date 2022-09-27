@@ -22,12 +22,7 @@ pub struct Interface {
 }
 
 impl traits::LocalUI for Interface {
-    fn ports(
-        &mut self,
-    ) -> (
-        &mut dyn traits::Updater,
-        &mut dyn traits::IntentReciever,
-    ) {
+    fn ports(&mut self) -> (&mut dyn traits::Updater, &mut dyn traits::IntentReciever) {
         (
             self.tx.as_mut().take().unwrap(),
             self.rx.as_mut().take().unwrap(),
@@ -70,6 +65,7 @@ impl Presenter {
 #[derive(Debug)]
 pub enum UserAction {
     KeyPress(char),
+    WindowClosed,
 }
 
 pub struct ActionDecoder {
@@ -80,7 +76,11 @@ impl ActionDecoder {
     pub async fn decode(&mut self, action: UserAction) {
         let intent = match action {
             UserAction::KeyPress(k) if k == 'q' => UserIntent::Exit,
-            UserAction::KeyPress(k) => return,
+            UserAction::KeyPress(k) => {
+                tracing::warn!("unhandled key: {k:?}");
+                return;
+            }
+            UserAction::WindowClosed => UserIntent::Exit,
         };
 
         self.intent_tx.send(intent).await.unwrap();

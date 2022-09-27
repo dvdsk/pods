@@ -7,6 +7,8 @@ use traits::State as _;
 
 use tokio::signal;
 
+mod errors;
+
 #[derive(Debug, Clone, clap::ValueEnum)]
 pub enum UiArg {
     Gui,
@@ -58,34 +60,11 @@ fn force_cli_arguments(config: &mut impl traits::Config, cli: &Cli) {
     config.force_server(server);
 }
 
-// fn filter(kind: color_eyre::ErrorKind) -> bool {
-//     match kind {
-//         color_eyre::ErrorKind::NonRecoverable(payload) => {
-//             let payload = payload
-//                 .downcast_ref::<String>()
-//                 .map(String::as_str)
-//                 .or_else(|| payload.downcast_ref::<&str>().cloned())
-//                 .unwrap_or("<non string panic payload>");
-//
-//             !payload.contains("\u{1b}") // workaround for bug where crash was reported twice
-//         }
-//         color_eyre::ErrorKind::Recoverable(error) => !error.is::<std::fmt::Error>(),
-//     }
-// }
-
-fn set_error_hook() {
-    color_eyre::config::HookBuilder::default()
-        // .issue_filter(filter) // TODO
-        // .issue_url(concat!(env!("CARGO_PKG_REPOSITORY"), "/issues/new"))
-        // .add_issue_metadata("version", env!("CARGO_PKG_VERSION"))
-        // .capture_span_trace_by_default(true)
-        .install()
-        .expect("could not set up error reporting");
-}
-
 #[tokio::main]
 async fn main() {
-    set_error_hook();
+    errors::set_error_hook();
+    errors::install_tracing();
+
     let cli = Cli::parse();
     let mut state = TestState::new();
     force_cli_arguments(state.config_mut(), &cli);

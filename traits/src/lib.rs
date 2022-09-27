@@ -73,13 +73,13 @@ pub trait Config: Sized {
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
-    async fn next_intent(&mut self) -> Result<UserIntent, eyre::Report>;
+    async fn next_intent(&mut self) -> Option<UserIntent>;
 }
 
 #[async_trait]
 impl IntentReciever for mpsc::Receiver<UserIntent> {
-    async fn next_intent(&mut self) -> Result<UserIntent, eyre::Report> {
-        self.recv().await.ok_or(eyre::eyre!("channel was closed"))
+    async fn next_intent(&mut self) -> Option<UserIntent> {
+        self.recv().await
     }
 }
 
@@ -98,7 +98,7 @@ impl Updater for mpsc::Sender<AppUpdate> {
 #[async_trait]
 impl Updater for broadcast::Sender<AppUpdate> {
     async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
-        self.send(msg).map(|_| ()).wrap_err("Could not send update")
+        self.send(msg).map(|_| ()).wrap_err("Could not broadcast update")
     }
 }
 

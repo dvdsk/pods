@@ -1,11 +1,15 @@
+use tracing::instrument;
+
 mod core;
 mod interface;
 
+#[derive(Debug)]
 enum Reason {
     Exit,
     ConnectChange,
 }
 
+#[instrument(skip_all)]
 pub async fn app(
     state: impl traits::State,
     mut local_ui: Option<Box<dyn traits::LocalUI>>,

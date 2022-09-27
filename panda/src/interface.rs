@@ -1,6 +1,4 @@
 use traits::eyre;
-use eyre::WrapErr;
-
 use async_trait::async_trait;
 
 #[derive(Debug)]
@@ -34,12 +32,12 @@ pub struct IntentReciever<'a> {
 
 #[async_trait]
 impl<'a> traits::IntentReciever for IntentReciever<'a> {
-    async fn next_intent(&mut self) -> Result<traits::UserIntent, eyre::Report> {
+    async fn next_intent(&mut self) -> Option<traits::UserIntent> {
         let reveive_local = self.local_rx.next_intent();
         let reveive_remote = self.remote_rx.next_intent();
         tokio::select!(
-            res = reveive_remote => res.wrap_err("while awaiting remote intent"),
-            res = reveive_local => res.wrap_err("while awaiting local intent"),
+            res = reveive_remote => res,
+            res = reveive_local => res,
         )
     }
 }

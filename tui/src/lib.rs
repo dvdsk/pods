@@ -1,12 +1,14 @@
 use async_trait::async_trait;
+use futures::{FutureExt, StreamExt, TryStreamExt};
+
 use color_eyre::eyre;
 use color_eyre::eyre::WrapErr;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use presenter::{ActionDecoder, Presenter, UserAction};
+use presenter::{ActionDecoder, GuiUpdate, Presenter, UserAction};
 use std::io;
 
 use tui::backend::{Backend, CrosstermBackend};
@@ -17,17 +19,43 @@ async fn run_app<B: Backend>(
     rx: &mut Presenter,
     tx: &mut ActionDecoder,
 ) -> eyre::Result<()> {
-    use crossterm::event::{self, Event, KeyCode};
-    loop {
-        terminal.draw(|f| ui(f))?;
+    use crossterm::event::EventStream;
+    let mut events = EventStream::new().fuse();
 
-        if let Event::Key(key) = event::read()? {
-            match key.code {
-                KeyCode::Char(q) => tx.decode(UserAction::KeyPress(q)).await,
-                _ => (),
+    terminal.draw(|f| ui(f))?;
+    loop {
+        let exit = futures::select! {
+            update = rx.update().fuse() => handle_update(update),
+            event = events.try_next() => {
+                let event = event.expect("Error in TUI input").expect("TUI stopped sending input");
+                handle_tui_event(event, tx).await?;
+                false
             }
+        };
+
+        if exit {
+            return Ok(());
         }
+
+        terminal.draw(|f| ui(f))?;
     }
+}
+
+fn handle_update(update: GuiUpdate) -> bool {
+    match update {
+        GuiUpdate::Exit => true,
+    }
+}
+
+async fn handle_tui_event(event: Event, tx: &mut ActionDecoder) -> eyre::Result<()> {
+    match event {
+        Event::Key(key) => match key.code {
+            KeyCode::Char(q) => tx.decode(UserAction::KeyPress(q)).await,
+            _ => (),
+        },
+        _ => (),
+    }
+    Ok(())
 }
 
 fn ui<B: Backend>(f: &mut Frame<B>) {

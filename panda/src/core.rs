@@ -1,20 +1,25 @@
 use traits::{AppUpdate, UserIntent};
+use tracing::instrument;
 
 use crate::Reason;
 
 /// returns when local ui intents to switch to remote
+#[instrument(skip_all, ret)]
 pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
     let (tx, rx, remote) = interface.ports();
     loop {
-        // get reciever for all the clients
 
-        // join on reciever?
-        match rx.next_intent().await.unwrap() {
+        let intent = match rx.next_intent().await {
+            Some(val) => val,
+            None => return Reason::Exit,
+        };
+
+        match intent {
             UserIntent::DisconnectRemote => unreachable!(),
             UserIntent::ConnectToRemote => return Reason::ConnectChange,
             UserIntent::RefuseRemoteClients => remote.disable().await,
             UserIntent::Exit => {
-                tx.update(AppUpdate::Exit).await.unwrap();
+                let _ignore = tx.update(AppUpdate::Exit).await;
                 return Reason::Exit;
             }
         }
@@ -22,6 +27,7 @@ pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
 }
 
 /// returns true when we should exit
+#[instrument(skip_all, ret)]
 pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::Server) -> Reason {
     let (tx, rx) = local.ports();
     match rx.next_intent().await.unwrap() {
