@@ -112,18 +112,17 @@ impl Search {
     }
 }
 
-#[test]
-fn test_podcast_index() {
-    use tokio::runtime::Runtime;
-
+#[tokio::test]
+async fn test_podcast_index() {
     let mut searcher = Search::default();
-    // Create the runtime
-    Runtime::new().unwrap().block_on(async {
-        let res = searcher.search("Soft Skills Engineering", true).await.unwrap();
-        assert_eq!(res[0].title, "Soft Skills Engineering");
-        assert_eq!(
-            res[0].url,
-            "http://feeds.feedburner.com/SoftSkillsEngineering"
-        );
-    });
+    let res = searcher
+        .search("Soft Skills Engineering", true)
+        .await
+        .unwrap();
+    dbg!(&res);
+    assert_eq!(res[0].title, "Soft Skills Engineering");
+    assert_eq!(
+        res[0].url,
+        "https://softskills.audio/feed.xml"
+    );
 }

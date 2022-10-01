@@ -114,16 +114,11 @@ impl Search {
     }
 }
 
-#[test]
-fn find_99pi() {
-    use tokio::runtime::Runtime;
-
+#[tokio::test]
+async fn find_99pi() {
     let mut searcher = Search::default();
-    // Create the runtime
-    Runtime::new().unwrap().block_on(async {
-        let res = searcher
-            .search("Soft Skills Engineering".to_owned(), false)
-            .await;
-        assert_eq!(res[0].title, "Soft Skills Engineering");
-    });
+    let res = searcher
+        .search("Soft Skills Engineering".to_owned(), false)
+        .await;
+    assert_eq!(res[0].title, "Soft Skills Engineering");
 }
