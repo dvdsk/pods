@@ -11,6 +11,7 @@ pub enum UserIntent {
     ConnectToRemote,
     DisconnectRemote,
     RefuseRemoteClients,
+    FullSearch(String),
 }
 
 #[derive(Debug, Clone)]

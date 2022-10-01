@@ -5,6 +5,7 @@ members = [
 	"state",
 	"player",
 	"search",
+	"feed",
 	"traits",
 	"presenter",
 	"gui",

@@ -1,5 +1,5 @@
-use traits::{AppUpdate, UserIntent};
 use tracing::instrument;
+use traits::{AppUpdate, UserIntent};
 
 use crate::Reason;
 
@@ -8,7 +8,6 @@ use crate::Reason;
 pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
     let (tx, rx, remote) = interface.ports();
     loop {
-
         let intent = match rx.next_intent().await {
             Some(val) => val,
             None => return Reason::Exit,
@@ -22,6 +21,7 @@ pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
                 let _ignore = tx.update(AppUpdate::Exit).await;
                 return Reason::Exit;
             }
+            UserIntent::FullSearch(s) => todo!(),
         }
     }
 }
@@ -35,5 +35,6 @@ pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::
         UserIntent::ConnectToRemote => unreachable!(),
         UserIntent::RefuseRemoteClients => unreachable!(),
         UserIntent::DisconnectRemote => Reason::ConnectChange,
+        UserIntent::FullSearch(s) => todo!(),
     }
 }

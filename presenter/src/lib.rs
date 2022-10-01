@@ -66,6 +66,7 @@ impl Presenter {
 pub enum UserAction {
     KeyPress(char),
     WindowClosed,
+    SearchEnter(String),
 }
 
 pub struct ActionDecoder {
@@ -81,6 +82,7 @@ impl ActionDecoder {
                 return;
             }
             UserAction::WindowClosed => UserIntent::Exit,
+            UserAction::SearchEnter(term) => UserIntent::FullSearch(term),
         };
 
         self.intent_tx.send(intent).await.unwrap();
