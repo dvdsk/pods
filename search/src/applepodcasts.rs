@@ -1,4 +1,7 @@
-use super::{ApiBudget, Error, SearchResult, APP_USER_AGENT};
+use crate::budget::ApiBudget;
+use traits::SearchResult;
+use super::{Error, APP_USER_AGENT};
+use async_trait::async_trait;
 use regex::Regex;
 
 #[derive(Clone)]
@@ -7,6 +10,28 @@ pub struct Search {
     title: Regex,
     url: Regex,
     budget: ApiBudget,
+}
+
+#[async_trait]
+impl crate::SearchBackend for Search {
+    async fn search(
+        &mut self,
+        search_term: &str,
+        ignore_budget: bool,
+    ) -> Result<Vec<SearchResult>, Error> {
+        if self.budget.left() <= 2 && !ignore_budget {
+            return Err(Error::OutOfCalls);
+        }
+
+        self.budget.register_call();
+        let text = self.request(search_term).await;
+
+        if let Err(Error::CouldNotConnect(_)) = &text {
+            self.budget.update(-1);
+        }
+        let results = self.to_results(&text?);
+        Ok(results)
+    }
 }
 
 impl Default for Search {
@@ -66,25 +91,6 @@ impl Search {
             .map_err(Error::NoText)?;
         Ok(text)
     }
-
-    pub async fn search(
-        &mut self,
-        search_term: &str,
-        ignore_budget: bool,
-    ) -> Result<Vec<SearchResult>, Error> {
-        if self.budget.left() <= 2 && !ignore_budget {
-            return Err(Error::OutOfCalls);
-        }
-
-        self.budget.register_call();
-        let text = self.request(search_term).await;
-
-        if let Err(Error::CouldNotConnect(_)) = &text {
-            self.budget.update(-1);
-        }
-        let results = self.to_results(&text?);
-        Ok(results)
-    }
 }
 
 #[tokio::test]
@@ -92,8 +98,5 @@ async fn test_apple_podcasts() {
     let mut searcher = Search::default();
     let res = searcher.search("Soft Skills", true).await.unwrap();
     assert_eq!(res[0].title, "Soft Skills Engineering");
-    assert_eq!(
-        res[0].url,
-        "https://softskills.audio/feed.xml"
-    );
+    assert_eq!(res[0].url, "https://softskills.audio/feed.xml");
 }

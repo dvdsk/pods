@@ -1,4 +1,8 @@
-use super::{ApiBudget, Error, SearchResult, APIKEY, APISECRET, APP_USER_AGENT};
+use crate::budget::ApiBudget;
+use crate::{APIKEY, APISECRET, APP_USER_AGENT, Error};
+
+use traits::SearchResult;
+
 use regex::Regex;
 use sha1::digest::Update;
 

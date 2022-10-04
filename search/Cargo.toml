@@ -9,6 +9,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+traits = { path = "../traits" }
+
 arraydeque = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 thiserror = "1"
@@ -16,3 +18,6 @@ tracing = "0.1"
 tokio = { version = "1", features = ["macros"] }
 regex = "1.6.0"
 sha1 = "0.10.5"
+async-trait = "0.1.57"
+futures = "0.3.24"
+itertools = "0.10.5"

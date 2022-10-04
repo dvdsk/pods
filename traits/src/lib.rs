@@ -99,7 +99,9 @@ impl Updater for mpsc::Sender<AppUpdate> {
 #[async_trait]
 impl Updater for broadcast::Sender<AppUpdate> {
     async fn update(&mut self, msg: AppUpdate) -> Result<(), eyre::Report> {
-        self.send(msg).map(|_| ()).wrap_err("Could not broadcast update")
+        self.send(msg)
+            .map(|_| ())
+            .wrap_err("Could not broadcast update")
     }
 }
 
@@ -122,4 +124,33 @@ pub trait RemoteUI: Send + fmt::Debug {
         &mut dyn RemoteController,
     );
     fn controller(&mut self) -> &mut dyn RemoteController;
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct SearchResult {
+    pub title: String,
+    pub url: String,
+}
+
+// /// Joined result type for returning 
+// #[must_use]
+// pub struct MixedResult<T, E: fmt::Debug> {
+//     ok: Vec<T>,
+//     err: Vec<E>,
+// }
+//
+// impl<T, E: fmt::Debug> MixedResult<T, E> {
+//     pub fn unwrap(self) -> Vec<T> {
+//         if !self.err.is_empty() {
+//             panic!("{:?}", self.err)
+//         }
+//
+//         self.ok
+//     }
+// }
+
+#[async_trait]
+pub trait IndexSearcher {
+    #[must_use]
+    async fn search(&mut self, term: &str) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error>>);
 }
