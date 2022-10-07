@@ -17,16 +17,22 @@ pub struct Presenter {
 
 #[derive(Debug)]
 pub struct Interface {
-    tx: Option<mpsc::Sender<AppUpdate>>,
-    rx: Option<mpsc::Receiver<UserIntent>>,
+    tx: mpsc::Sender<AppUpdate>,
+    rx: traits::LocalIntentReciever,
+}
+
+impl Interface {
+    fn new(tx: mpsc::Sender<AppUpdate>, rx: mpsc::Receiver<UserIntent>) -> Self {
+        Interface {
+            rx: traits::LocalIntentReciever::new(rx, tx.clone()),
+            tx,
+        }
+    }
 }
 
 impl traits::LocalUI for Interface {
     fn ports(&mut self) -> (&mut dyn traits::Updater, &mut dyn traits::IntentReciever) {
-        (
-            self.tx.as_mut().take().unwrap(),
-            self.rx.as_mut().take().unwrap(),
-        )
+        (&mut self.tx, &mut self.rx)
     }
 }
 
@@ -40,10 +46,7 @@ pub fn new(
     let decoder = ActionDecoder { intent_tx };
     let presenter = Presenter { update_rx };
     let ui = ui_fn(InternalPorts(decoder, presenter));
-    let interface = Box::new(Interface {
-        tx: Some(update_tx),
-        rx: Some(intent_rx),
-    });
+    let interface = Box::new(Interface::new(update_tx, intent_rx));
 
     (ui, interface)
 }
@@ -55,7 +58,11 @@ pub enum GuiUpdate {
 
 impl Presenter {
     pub async fn update(&mut self) -> GuiUpdate {
-        let app_update = self.update_rx.recv().await.unwrap();
+        let app_update = self
+            .update_rx
+            .recv()
+            .await
+            .expect("Interface should not drop before gui closes");
         match app_update {
             AppUpdate::Exit => GuiUpdate::Exit,
         }

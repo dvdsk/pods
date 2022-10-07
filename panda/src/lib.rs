@@ -18,6 +18,7 @@ pub async fn app(
     use traits::Config as _;
 
     loop {
+        dbg!();
         let server = state.config().server().get_value();
         match (server, local_ui.as_mut()) {
             (Some(server), Some(local_ui)) => {

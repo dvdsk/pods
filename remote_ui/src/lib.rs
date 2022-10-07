@@ -13,12 +13,24 @@ pub struct Interface {
     listener: task::JoinHandle<()>,
     controller: RemoteController,
     update: broadcast::Sender<AppUpdate>,
-    intent: mpsc::Receiver<UserIntent>,
+    intent: IntentReciever,
 }
 
 impl Drop for Interface {
     fn drop(&mut self) {
         self.listener.abort()
+    }
+}
+
+#[derive(Debug)]
+struct IntentReciever {
+    rx: mpsc::Receiver<UserIntent>,
+}
+
+#[async_trait]
+impl traits::IntentReciever for IntentReciever {
+    async fn next_intent(&mut self) -> Option<UserIntent> {
+        self.rx.recv().await
     }
 }
 
@@ -71,11 +83,15 @@ async fn listen(
 
 pub fn new(init_remote: Option<traits::Server>) -> Interface {
     let (update, update_rx) = broadcast::channel(4);
-    let (intent_tx, intent) = mpsc::channel(4);
+    let (intent_tx, intent_rx) = mpsc::channel(4);
     let (config_tx, config_rx) = mpsc::channel(1);
+    let intent = IntentReciever { rx: intent_rx };
     let listen = listen(config_rx, intent_tx, update_rx);
     let listener = task::spawn(listen);
-    let controller = RemoteController { sender: config_tx, config: init_remote};
+    let controller = RemoteController {
+        sender: config_tx,
+        config: init_remote,
+    };
 
     Interface {
         intent,

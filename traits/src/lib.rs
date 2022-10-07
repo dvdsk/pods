@@ -74,14 +74,8 @@ pub trait Config: Sized {
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
+    // async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)>;
     async fn next_intent(&mut self) -> Option<UserIntent>;
-}
-
-#[async_trait]
-impl IntentReciever for mpsc::Receiver<UserIntent> {
-    async fn next_intent(&mut self) -> Option<UserIntent> {
-        self.recv().await
-    }
 }
 
 #[async_trait]
@@ -132,7 +126,7 @@ pub struct SearchResult {
     pub url: String,
 }
 
-// /// Joined result type for returning 
+// /// Joined result type for returning
 // #[must_use]
 // pub struct MixedResult<T, E: fmt::Debug> {
 //     ok: Vec<T>,
@@ -152,5 +146,30 @@ pub struct SearchResult {
 #[async_trait]
 pub trait IndexSearcher {
     #[must_use]
-    async fn search(&mut self, term: &str) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error>>);
+    async fn search(
+        &mut self,
+        term: &str,
+    ) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error>>);
+}
+
+#[derive(Debug)]
+pub struct LocalIntentReciever {
+    rx: mpsc::Receiver<UserIntent>,
+    tx: mpsc::Sender<AppUpdate>,
+}
+
+impl LocalIntentReciever {
+    pub fn new(
+        rx: tokio::sync::mpsc::Receiver<UserIntent>,
+        tx: tokio::sync::mpsc::Sender<AppUpdate>,
+    ) -> Self {
+        Self { rx, tx }
+    }
+}
+
+#[async_trait]
+impl IntentReciever for LocalIntentReciever {
+    async fn next_intent(&mut self) -> Option<UserIntent> {
+        self.rx.recv().await
+    }
 }
