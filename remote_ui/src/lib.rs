@@ -25,12 +25,14 @@ impl Drop for Interface {
 #[derive(Debug)]
 struct IntentReciever {
     rx: mpsc::Receiver<UserIntent>,
+    tx: broadcast::Sender<AppUpdate>,
 }
 
 #[async_trait]
 impl traits::IntentReciever for IntentReciever {
-    async fn next_intent(&mut self) -> Option<UserIntent> {
-        self.rx.recv().await
+    async fn next_intent(&mut self) -> Option<(traits::UserIntent, &mut dyn traits::Updater)> {
+        let intent = self.rx.recv().await?;
+        Some((intent, &mut self.tx))
     }
 }
 
@@ -85,7 +87,7 @@ pub fn new(init_remote: Option<traits::Server>) -> Interface {
     let (update, update_rx) = broadcast::channel(4);
     let (intent_tx, intent_rx) = mpsc::channel(4);
     let (config_tx, config_rx) = mpsc::channel(1);
-    let intent = IntentReciever { rx: intent_rx };
+    let intent = IntentReciever { rx: intent_rx, tx: update.clone() };
     let listen = listen(config_rx, intent_tx, update_rx);
     let listener = task::spawn(listen);
     let controller = RemoteController {

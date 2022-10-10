@@ -74,8 +74,8 @@ pub trait Config: Sized {
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
-    // async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)>;
-    async fn next_intent(&mut self) -> Option<UserIntent>;
+    async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)>;
+    // async fn next_intent(&mut self) -> Option<UserIntent>;
 }
 
 #[async_trait]
@@ -169,7 +169,9 @@ impl LocalIntentReciever {
 
 #[async_trait]
 impl IntentReciever for LocalIntentReciever {
-    async fn next_intent(&mut self) -> Option<UserIntent> {
-        self.rx.recv().await
+    async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)> {
+        let intent = self.rx.recv().await?;
+        let updater = &mut self.tx as &mut dyn Updater;
+        Some((intent, updater))
     }
 }
