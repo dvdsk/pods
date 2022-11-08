@@ -3,20 +3,29 @@ use core::fmt;
 pub use async_trait::async_trait;
 pub use color_eyre::eyre;
 use eyre::WrapErr;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, oneshot};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum UserIntent {
     Exit,
     ConnectToRemote,
     DisconnectRemote,
     RefuseRemoteClients,
-    FullSearch(String),
+    FullSearch {
+        query: String,
+        awnser: oneshot::Sender<Vec<SearchResult>>,
+    },
 }
 
 #[derive(Debug, Clone)]
 pub enum AppUpdate {
     Exit,
+}
+
+#[derive(Debug)]
+pub enum ReqUpdate {
+    Search(oneshot::Receiver<Vec<SearchResult>>),
+    CancelSearch,
 }
 
 pub struct Forcable<T: Sized> {
@@ -144,12 +153,15 @@ pub struct SearchResult {
 // }
 
 #[async_trait]
-pub trait IndexSearcher {
+pub trait IndexSearcher: Send {
     #[must_use]
     async fn search(
         &mut self,
         term: &str,
-    ) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error>>);
+    ) -> (
+        Vec<SearchResult>,
+        Result<(), Box<dyn std::error::Error + Send>>,
+    );
 }
 
 #[derive(Debug)]

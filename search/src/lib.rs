@@ -1,3 +1,5 @@
+use core::fmt;
+
 use async_trait::async_trait;
 use traits::IndexSearcher;
 
@@ -5,17 +7,28 @@ mod apikey;
 pub use apikey::{APIKEY, APISECRET};
 
 mod applepodcasts;
-mod podcastindex;
 pub(crate) mod budget;
 mod combiner;
+mod podcastindex;
 
 #[async_trait]
-pub trait SearchBackend {
+pub trait SearchBackend: fmt::Debug {
     async fn search(
         &mut self,
         search_term: &str,
         ignore_budget: bool,
     ) -> Result<Vec<traits::SearchResult>, Error>;
+}
+
+pub fn new() -> combiner::Searcher {
+    combiner::Searcher {
+        backends: vec![
+            Box::new(applepodcasts::Search::default()),
+            Box::new(podcastindex::Search::default()),
+
+        ]
+    }
+
 }
 
 // Name user agent after app
@@ -32,7 +45,6 @@ pub enum Error {
     #[error("no more api calls left for now")]
     OutOfCalls,
 }
-
 
 #[tokio::test]
 async fn find_99pi() {

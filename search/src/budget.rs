@@ -3,7 +3,7 @@ use std::time::Duration;
 use std::time::Instant;
 
 //TODO const generic for initial api budget when that stabilizes
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ApiBudget {
     max_per_min: u8,
     current_per_min: u8,

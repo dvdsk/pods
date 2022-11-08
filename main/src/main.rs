@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use clap::Parser;
 use presenter::InternalPorts;
 use presenter::Ui;
 use state::TestState;
+use tokio::sync::Mutex;
 use traits::Config as _;
 use traits::State as _;
 
@@ -85,7 +88,10 @@ async fn main() {
     let server_config = state.config().server().get_value();
 
     let remote = Box::new(remote_ui::new(server_config));
-    tokio::task::spawn(panda::app(state, ui_port, remote));
+    let searcher = Arc::new(Mutex::new(
+        Box::new(search::new()) as Box<dyn traits::IndexSearcher>
+    ));
+    tokio::task::spawn(panda::app(state, ui_port, remote, searcher));
 
     match ui_runtime {
         Some(mut ui) => ui.run().await.unwrap(),

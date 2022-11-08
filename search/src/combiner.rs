@@ -5,8 +5,9 @@ use crate::SearchBackend;
 use async_trait::async_trait;
 use traits::{IndexSearcher, SearchResult};
 
+#[derive(Debug)]
 pub struct Searcher {
-    backends: Vec<Box<dyn SearchBackend + Send>>,
+    pub backends: Vec<Box<dyn SearchBackend + Send>>,
 }
 
 #[derive(Debug)]
@@ -37,7 +38,7 @@ impl IndexSearcher for Searcher {
     async fn search(
         &mut self,
         search_term: &str,
-    ) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error>>) {
+    ) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error + Send>>) {
         use futures::stream::futures_unordered::FuturesUnordered;
         use futures::StreamExt;
         use itertools::Itertools;
@@ -69,7 +70,7 @@ impl IndexSearcher for Searcher {
             true => Ok(()),
             false => {
                 let err = Box::new(Error { entries: err });
-                let err = err as Box<dyn std::error::Error>;
+                let err = err as Box<dyn std::error::Error + Send>;
                 Err(err)
             }
         };

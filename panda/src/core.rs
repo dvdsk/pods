@@ -1,12 +1,33 @@
+use std::sync::Arc;
+
+use tokio::sync::Mutex;
+use tokio::task::JoinSet;
 use tracing::instrument;
-use traits::{AppUpdate, UserIntent};
+use traits::{AppUpdate, IndexSearcher, SearchResult, UserIntent};
 
 use crate::Reason;
 
+async fn search(
+    searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
+    query: String,
+) -> (
+    Vec<SearchResult>,
+    Result<(), Box<dyn std::error::Error + Send>>,
+) {
+    let mut searcher = searcher.lock().await;
+    let val = searcher.search(&query).await;
+    val
+}
+
 /// returns when local ui intents to switch to remote
 #[instrument(skip_all, ret)]
-pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
+pub(super) async fn run(
+    interface: &mut dyn traits::RemoteUI,
+    searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
+) -> Reason {
+    let mut tasks = JoinSet::new();
     let (tx, rx, remote) = interface.ports();
+
     loop {
         let (intent, updater) = match rx.next_intent().await {
             Some(val) => val,
@@ -21,7 +42,10 @@ pub(super) async fn run(interface: &mut dyn traits::RemoteUI) -> Reason {
                 let _ignore = tx.update(AppUpdate::Exit).await;
                 return Reason::Exit;
             }
-            UserIntent::FullSearch(s) => todo!(),
+            UserIntent::FullSearch { query, awnser } => {
+                let search = search(searcher.clone(), query);
+                tasks.spawn(search);
+            }
         }
     }
 }
@@ -41,7 +65,7 @@ pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::
             UserIntent::ConnectToRemote => unreachable!(),
             UserIntent::RefuseRemoteClients => unreachable!(),
             UserIntent::DisconnectRemote => return Reason::ConnectChange,
-            UserIntent::FullSearch(s) => todo!(),
+            UserIntent::FullSearch { query, awnser } => todo!(),
         }
     }
 }

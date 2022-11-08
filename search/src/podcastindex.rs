@@ -1,12 +1,13 @@
 use crate::budget::ApiBudget;
-use crate::{APIKEY, APISECRET, APP_USER_AGENT, Error};
+use crate::{Error, APIKEY, APISECRET, APP_USER_AGENT};
 
+use async_trait::async_trait;
 use traits::SearchResult;
 
 use regex::Regex;
 use sha1::digest::Update;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Search {
     client: reqwest::Client,
     title_url: Regex,
@@ -26,50 +27,9 @@ impl Default for Search {
     }
 }
 
-impl Search {
-    fn to_results(&self, text: &str) -> Vec<SearchResult> {
-        let mut results = Vec::new();
-        for cap in self.title_url.captures_iter(text) {
-            results.push(SearchResult {
-                title: cap
-                    .get(1)
-                    .expect("malformed search result")
-                    .as_str()
-                    .to_owned(),
-                url: cap
-                    .get(2)
-                    .expect("malformed search result")
-                    .as_str()
-                    .to_owned()
-                    .replace(r#"\/"#, r#"/"#),
-            });
-        }
-        results
-    }
-
-    async fn request(
-        &mut self,
-        headers: reqwest::header::HeaderMap,
-        search_term: &str,
-    ) -> Result<String, Error> {
-        let text = self
-            .client
-            .get("https://api.podcastindex.org/api/1.0/search/byterm")
-            .headers(headers)
-            .timeout(std::time::Duration::from_millis(1000))
-            .query(&[("q", search_term)])
-            .send()
-            .await
-            .map_err(Error::CouldNotConnect)?
-            .error_for_status()
-            .map_err(Error::HttpError)?
-            .text()
-            .await
-            .map_err(Error::NoText)?;
-        Ok(text)
-    }
-
-    pub async fn search(
+#[async_trait]
+impl crate::SearchBackend for Search {
+    async fn search(
         &mut self,
         search_term: &str,
         ignore_budget: bool,
@@ -116,6 +76,50 @@ impl Search {
     }
 }
 
+impl Search {
+    fn to_results(&self, text: &str) -> Vec<SearchResult> {
+        let mut results = Vec::new();
+        for cap in self.title_url.captures_iter(text) {
+            results.push(SearchResult {
+                title: cap
+                    .get(1)
+                    .expect("malformed search result")
+                    .as_str()
+                    .to_owned(),
+                url: cap
+                    .get(2)
+                    .expect("malformed search result")
+                    .as_str()
+                    .to_owned()
+                    .replace(r#"\/"#, r#"/"#),
+            });
+        }
+        results
+    }
+
+    async fn request(
+        &mut self,
+        headers: reqwest::header::HeaderMap,
+        search_term: &str,
+    ) -> Result<String, Error> {
+        let text = self
+            .client
+            .get("https://api.podcastindex.org/api/1.0/search/byterm")
+            .headers(headers)
+            .timeout(std::time::Duration::from_millis(1000))
+            .query(&[("q", search_term)])
+            .send()
+            .await
+            .map_err(Error::CouldNotConnect)?
+            .error_for_status()
+            .map_err(Error::HttpError)?
+            .text()
+            .await
+            .map_err(Error::NoText)?;
+        Ok(text)
+    }
+}
+
 #[tokio::test]
 async fn test_podcast_index() {
     let mut searcher = Search::default();
@@ -125,8 +129,5 @@ async fn test_podcast_index() {
         .unwrap();
     dbg!(&res);
     assert_eq!(res[0].title, "Soft Skills Engineering");
-    assert_eq!(
-        res[0].url,
-        "https://softskills.audio/feed.xml"
-    );
+    assert_eq!(res[0].url, "https://softskills.audio/feed.xml");
 }

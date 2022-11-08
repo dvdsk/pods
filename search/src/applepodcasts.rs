@@ -4,7 +4,7 @@ use super::{Error, APP_USER_AGENT};
 use async_trait::async_trait;
 use regex::Regex;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Search {
     client: reqwest::Client,
     title: Regex,

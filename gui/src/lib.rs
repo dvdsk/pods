@@ -50,6 +50,7 @@ impl Application for State {
     fn update(&mut self, message: Self::Message) -> Command {
         match dbg!(message) {
             Message::Gui(GuiUpdate::Exit) => self.should_exit = true,
+            Message::Gui(GuiUpdate::SearchResult(_)) => todo!(),
         }
         Command::none()
     }

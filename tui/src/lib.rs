@@ -62,6 +62,7 @@ async fn run_app<B: Backend>(
 fn handle_update(update: GuiUpdate) -> bool {
     match update {
         GuiUpdate::Exit => true,
+        _ => false,
     }
 }
 
