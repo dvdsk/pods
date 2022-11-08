@@ -3,7 +3,9 @@ use futures::{FutureExt, StreamExt, TryStreamExt};
 
 use color_eyre::eyre;
 use color_eyre::eyre::WrapErr;
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, KeyCode};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyModifiers,
+};
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -24,7 +26,7 @@ struct App {
     search: Search,
 }
 
-#[derive(Default, Clone, Copy)]
+#[derive(Debug, Default, Clone, Copy)]
 enum State {
     #[default]
     Normal,
@@ -67,24 +69,35 @@ fn handle_update(update: GuiUpdate) -> bool {
 }
 
 async fn handle_tui_event(event: Event, tx: &mut ActionDecoder, app: &mut App) -> eyre::Result<()> {
-    let key = match event {
-        Event::Key(key) => key,
-        _ => return Ok(()),
+    if let Event::Key(KeyEvent {
+        code: KeyCode::Char('c'),
+        modifiers: KeyModifiers::CONTROL,
+        ..
+    }) = event
+    {
+        tx.decode(UserAction::WindowClosed).await;
+    }
+
+    let Event::Key(key) = event else {
+        return Ok(())
     };
 
-    let App { state, search } = app; 
+    let App { state, search } = app;
     // TODO: when async closures stablize make this into a chain using or_else(|| ....
-    // update).or_else(|| ...) etc etc <dvdsk noreply@davidsk.dev> 
-    if let Some(new_state) = search.update(*state, key, event, tx).await {
-        *state = new_state;
-        return Ok(())
-    }
-    if let Some(new_state) = App::update(*state, key, tx).await {
-        *state = new_state;
-        return Ok(())
+    // update).or_else(|| ...) etc etc <dvdsk noreply@davidsk.dev>
+    'block: {
+        if let Some(new_state) = search.update(*state, key, event, tx).await {
+            *state = new_state;
+            break 'block;
+        }
+        if let Some(new_state) = App::update(*state, key, tx).await {
+            *state = new_state;
+            break 'block;
+        }
+        tracing::warn!("unhandled key: {key:?}");
     }
 
-    tracing::warn!("unhandled key: {key:?}");
+    tracing::info!("state: {state:?}");
 
     Ok(())
 }
@@ -160,7 +173,7 @@ impl App {
         match key.code {
             KeyCode::Char(q) => {
                 tx.decode(UserAction::KeyPress(q)).await;
-                return Some(state)
+                return Some(state);
             }
             _ => (),
         }

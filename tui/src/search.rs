@@ -37,24 +37,25 @@ impl Search {
     ) -> Option<super::State> {
         use tui_input::backend::crossterm as input_backend;
 
-        match key.code {
-            KeyCode::Enter => {
+        match (key.code, state) {
+            (KeyCode::Char('/'), State::Normal) => Some(State::EditingSearch),
+            (_, State::Normal) => None,
+            (KeyCode::Enter, State::EditingSearch) => {
                 tx.decode(UserAction::SearchEnter(self.input.value().to_owned()))
                     .await;
                 self.searching = true;
-                return Some(State::Normal);
+                Some(State::Normal)
             }
-            KeyCode::Esc => {
+            (KeyCode::Esc, State::EditingSearch) => {
                 self.input.reset();
-                return Some(State::Normal);
+                Some(State::Normal)
             }
-            _ => {
+            (_, State::EditingSearch) => {
                 if let Some(req) = input_backend::to_input_request(key_event) {
                     self.input.handle(req);
                 }
+                Some(State::EditingSearch)
             }
         }
-
-        Some(State::EditingSearch)
     }
 }
