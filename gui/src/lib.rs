@@ -1,19 +1,47 @@
+mod home;
+mod menu;
+
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use color_eyre::eyre;
-use iced::{executor, widget, Application, Subscription};
+use iced::{executor,  Application, Subscription};
 use presenter::{ActionDecoder, GuiUpdate, Presenter};
 
+#[derive(Default, Clone, Debug)]
+pub enum Page {
+    #[default]
+    Home,
+    Podcasts,
+    Search,
+    Settings,
+    Downloads,
+    Playlists,
+}
+#[derive(Default)]
+struct Layout {
+    page: Page,
+    in_menu: bool // default is false
+}
+impl Layout {
+    fn to(&mut self, page: Page) {
+        self.page = page;
+        self.in_menu = false;
+    }
+}
 struct State {
+    layout: Layout,
     rx: Arc<Mutex<Presenter>>,
     tx: ActionDecoder,
     should_exit: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Message {
+    ToPage(Page),
+    OpenMenu,
+    CloseMenu ,
     Gui(GuiUpdate),
 }
 
@@ -21,7 +49,6 @@ pub enum Message {
 enum Event {}
 
 type Command = iced::Command<Message>;
-
 impl Application for State {
     type Message = Message;
     type Executor = executor::Default;
@@ -31,6 +58,7 @@ impl Application for State {
     fn new((rx, tx): Self::Flags) -> (State, Command) {
         (
             State {
+                layout: Layout::default(),
                 rx: Arc::new(Mutex::new(rx)),
                 tx,
                 should_exit: false,
@@ -44,19 +72,34 @@ impl Application for State {
     }
 
     fn should_exit(&self) -> bool {
-        dbg!(self.should_exit)
+        self.should_exit
     }
 
     fn update(&mut self, message: Self::Message) -> Command {
         match dbg!(message) {
             Message::Gui(GuiUpdate::Exit) => self.should_exit = true,
             Message::Gui(GuiUpdate::SearchResult(_)) => todo!(),
+            Message::ToPage(page) => self.layout.to( page),
+            Message::CloseMenu => self.layout.in_menu = false,
+            Message::OpenMenu => self.layout.in_menu = true,
         }
         Command::none()
     }
 
     fn view(&self) -> iced::Element<Message> {
-        widget::text("Hello world").into()
+        let column = menu::view_bar(self.layout.in_menu);
+        if self.layout.in_menu {
+            return menu::view(column).into();
+        }
+        match self.layout.page
+        {
+            Page::Home => home::view(column),
+            Page::Podcasts => todo!(),
+            Page::Search => todo!(),
+            Page::Settings => todo!(),
+            Page::Downloads => todo!(),
+            Page::Playlists => todo!(),
+        }.into()
     }
 
     fn subscription(&self) -> Subscription<Self::Message> {

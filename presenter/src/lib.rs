@@ -7,6 +7,7 @@ use tokio::sync::{mpsc, oneshot};
 use traits::ReqUpdate;
 pub use traits::{AppUpdate, UserIntent};
 
+
 #[async_trait]
 pub trait Ui: Send {
     async fn run(&mut self) -> Result<(), eyre::Report>;
@@ -58,7 +59,7 @@ pub fn new(
     (ui, interface)
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum GuiUpdate {
     Exit,
     SearchResult(Vec<traits::SearchResult>),
