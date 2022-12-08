@@ -1,3 +1,4 @@
+use crate::icon;
 use crate::Message;
 use crate::Page;
 use iced::{
@@ -8,14 +9,7 @@ use iced::{
 pub fn button(text: &'static str, event: Message) -> widget::Button<'static, Message> {
     let text = widget::Text::new(text)
         .width(Length::Fill)
-        .horizontal_alignment(Horizontal::Center)
-        .vertical_alignment(Vertical::Center);
-    widget::button(text).on_press(event).width(Length::Fill)
-}
-
-pub fn icon(text: &'static str, event: Message) -> widget::Button<'static, Message> {
-    let text = widget::Text::new(text)
-        .width(Length::Fill)
+        .height(Length::Fill)
         .horizontal_alignment(Horizontal::Center)
         .vertical_alignment(Vertical::Center);
     widget::button(text).on_press(event).width(Length::Fill)
@@ -23,8 +17,12 @@ pub fn icon(text: &'static str, event: Message) -> widget::Button<'static, Messa
 
 pub fn view_bar(in_menu: bool) -> widget::Column<'static, Message> {
     let button = match in_menu {
-        true => icon("X", Message::CloseMenu),
-        false => icon("M", Message::OpenMenu),
+        true => widget::button(icon::close_menu())
+            .on_press(Message::CloseMenu)
+            .width(Length::Fill),
+        false => widget::button(icon::open_menu())
+            .on_press(Message::OpenMenu)
+            .width(Length::Fill),
     };
     let row = widget::Row::new().push(button);
     widget::Column::new().push(row)

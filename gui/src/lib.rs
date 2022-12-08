@@ -1,5 +1,6 @@
 mod home;
 mod menu;
+mod icon;
 
 use async_trait::async_trait;
 use std::sync::Arc;
