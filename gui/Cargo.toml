@@ -13,6 +13,6 @@ presenter = { path = "../presenter" }
 async-trait = "0.1" 
 traits = { path = "../traits" }
 # iced = { version = "0.4", features = ["tokio"] }
-iced = { git = "https://github.com/iced-rs/iced", features = ["tokio"] }
+iced = { version = "0.7.0", features = ["tokio"] }
 tokio = { version = "1", features = ["sync"] }
 color-eyre = "0.6"
