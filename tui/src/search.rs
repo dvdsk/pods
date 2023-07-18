@@ -1,5 +1,5 @@
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use presenter::{ActionDecoder, UserAction};
+use presenter::ActionDecoder;
 use tui::layout::Alignment;
 use tui::style::{Color, Style};
 use tui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -41,8 +41,7 @@ impl Search {
             (KeyCode::Char('/'), State::Normal) => Some(State::EditingSearch),
             (_, State::Normal) => None,
             (KeyCode::Enter, State::EditingSearch) => {
-                tx.decode(UserAction::SearchEnter(self.input.value().to_owned()))
-                    .await;
+                tx.search_enter(self.input.value().to_owned());
                 self.searching = true;
                 Some(State::Normal)
             }

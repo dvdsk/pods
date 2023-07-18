@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use clap::Parser;
+use data::Data;
 use presenter::InternalPorts;
 use presenter::Ui;
-use state::TestState;
 use tokio::sync::Mutex;
-use traits::Config as _;
-use traits::State as _;
+use traits::DataRStore;
+use traits::Settings as _;
+// use traits::State as _;
 
 use tokio::signal;
 
@@ -38,7 +39,7 @@ struct Cli {
     server_port: Option<u16>,
 }
 
-fn force_cli_arguments(config: &mut impl traits::Config, cli: &Cli) {
+fn force_cli_arguments(config: &mut impl traits::Settings, cli: &Cli) {
     use traits::Remote;
     use traits::Server;
 
@@ -69,8 +70,8 @@ async fn main() {
     errors::install_tracing();
 
     let cli = Cli::parse();
-    let mut state = TestState::new();
-    force_cli_arguments(state.config_mut(), &cli);
+    let mut state = Data::new();
+    force_cli_arguments(state.settings_mut(), &cli);
 
     let (ui_runtime, ui_port) = match cli.ui {
         UiArg::None => (None, None),
@@ -85,13 +86,14 @@ async fn main() {
         }
     };
 
-    let server_config = state.config().server().get_value();
+    let server_config = state.settings().server().get_value();
 
+    let data = Box::new(state) as Box<dyn traits::DataStore>;
     let remote = Box::new(remote_ui::new(server_config));
     let searcher = Arc::new(Mutex::new(
         Box::new(search::new()) as Box<dyn traits::IndexSearcher>
     ));
-    tokio::task::spawn(panda::app(state, ui_port, remote, searcher));
+    tokio::task::spawn(panda::app(data, ui_port, remote, searcher));
 
     match ui_runtime {
         Some(mut ui) => ui.run().await.unwrap(),

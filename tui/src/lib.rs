@@ -10,7 +10,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
-use presenter::{ActionDecoder, GuiUpdate, Presenter, UserAction};
+use presenter::{ActionDecoder, GuiUpdate, Presenter};
 use std::io;
 
 use tui::backend::{Backend, CrosstermBackend};
@@ -75,7 +75,7 @@ async fn handle_tui_event(event: Event, tx: &mut ActionDecoder, app: &mut App) -
         ..
     }) = event
     {
-        tx.decode(UserAction::WindowClosed).await;
+        tx.window_closed();
     }
 
     let Event::Key(key) = event else {
@@ -172,7 +172,7 @@ impl App {
     ) -> Option<State> {
         match key.code {
             KeyCode::Char(q) => {
-                tx.decode(UserAction::KeyPress(q)).await;
+                tx.key_press(q);
                 return Some(state);
             }
             _ => (),

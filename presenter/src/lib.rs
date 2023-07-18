@@ -4,9 +4,9 @@ use async_trait::async_trait;
 use color_eyre::eyre;
 use tokio::sync::{mpsc, oneshot};
 
+use traits::DataUpdate;
 use traits::ReqUpdate;
 pub use traits::{AppUpdate, UserIntent};
-
 
 #[async_trait]
 pub trait Ui: Send {
@@ -44,13 +44,18 @@ pub fn new(
     let (update_tx, update_rx) = mpsc::channel(32);
     let (intent_tx, intent_rx) = mpsc::channel(32);
     let (presenter_tx, presenter_rx) = mpsc::channel(4);
+    let (data_tx, data_rx) = mpsc::channel(32);
+
     let decoder = ActionDecoder {
         intent_tx,
         presenter_tx,
+        data_tx,
+        // datastore: Data,
     };
     let presenter = Presenter {
         update_rx,
         presenter_rx,
+        data_rx,
         search: Search(None),
     };
     let ui = ui_fn(InternalPorts(decoder, presenter));
@@ -63,11 +68,13 @@ pub fn new(
 pub enum GuiUpdate {
     Exit,
     SearchResult(Vec<traits::SearchResult>),
+    Data(DataUpdate),
 }
 
 pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
     presenter_rx: mpsc::Receiver<ReqUpdate>,
+    data_rx: mpsc::Receiver<DataUpdate>,
     search: Search,
 }
 
@@ -98,6 +105,7 @@ impl Presenter {
             App(AppUpdate),
             Req(ReqUpdate),
             Search(Vec<traits::SearchResult>),
+            Data(DataUpdate),
         }
 
         loop {
@@ -105,6 +113,7 @@ impl Presenter {
                 update_rx,
                 presenter_rx,
                 search,
+                data_rx,
             } = self;
 
             let res = {
@@ -117,56 +126,59 @@ impl Presenter {
                     .map(|msg| msg.expect("ActionDecoder should not drop before Presenter"))
                     .map(Res::Req);
                 let do_search = search.wait().map(Res::Search);
+                let get_data = data_rx
+                    .recv()
+                    .map(|msg| msg.expect("data rx should not be dropped before presenter"))
+                    .map(Res::Data);
 
-                (next_update, next_req, do_search).race().await
+                (next_update, next_req, do_search, get_data).race().await
             };
             match res {
                 Res::App(AppUpdate::Exit) => return GuiUpdate::Exit,
                 Res::Req(ReqUpdate::CancelSearch) => search.cancel(),
                 Res::Req(ReqUpdate::Search(comms)) => search.start(comms),
                 Res::Search(list) => return GuiUpdate::SearchResult(list),
+                Res::Data(update) => return GuiUpdate::Data(update),
             }
         }
     }
 }
 
-#[derive(Debug)]
-pub enum UserAction {
-    KeyPress(char),
-    WindowClosed,
-    SearchEnter(String),
-    SearchLeave,
-}
-
 pub struct ActionDecoder {
+    data_tx: mpsc::Sender<DataUpdate>,
     intent_tx: mpsc::Sender<UserIntent>,
     /// used to send search request rx to Updater
     presenter_tx: mpsc::Sender<ReqUpdate>,
 }
 
+// to do replace with functions instead of user action enum
 impl ActionDecoder {
-    pub async fn decode(&mut self, action: UserAction) {
-        let intent = match action {
-            UserAction::KeyPress(k) if k == 'q' => UserIntent::Exit,
-            UserAction::KeyPress(k) => {
-                tracing::warn!("unhandled key: {k:?}");
-                return;
-            }
-            UserAction::WindowClosed => UserIntent::Exit,
-            UserAction::SearchEnter(query) => {
-                let (tx, rx) = oneshot::channel();
-                self.presenter_tx.send(ReqUpdate::Search(rx)).await.unwrap();
-                UserIntent::FullSearch { query, awnser: tx }
-            }
-            UserAction::SearchLeave => {
-                self.presenter_tx
-                    .send(ReqUpdate::CancelSearch)
-                    .await
-                    .unwrap();
-                return;
-            }
-        };
+    pub fn key_press(&mut self, k: char) {
+        if k == 'q' {
+            self.intent_tx.try_send(UserIntent::Exit).unwrap();
+            return;
+        }
 
-        self.intent_tx.send(intent).await.unwrap();
+        tracing::warn!("unhandled key: {k:?}");
+    }
+
+    pub fn window_closed(&mut self) {
+        self.intent_tx.try_send(UserIntent::Exit).unwrap();
+    }
+
+    pub fn search_enter(&mut self, query: String) {
+        let (tx, rx) = oneshot::channel();
+        self.presenter_tx.try_send(ReqUpdate::Search(rx)).unwrap();
+        let intent = UserIntent::FullSearch { query, awnser: tx };
+
+        self.intent_tx.try_send(intent).unwrap();
+    }
+    pub fn searchleave(&mut self) {
+        self.presenter_tx.try_send(ReqUpdate::CancelSearch).unwrap();
+        return;
+    }
+    pub fn view_podcasts(&mut self) {
+        // self.datastore.sub_podcasts();
+        return;
     }
 }

@@ -1,85 +1,15 @@
+mod datastore;
+mod entities;
+
+pub use datastore::*;
+pub use entities::*;
+
 use core::fmt;
 
 pub use async_trait::async_trait;
 pub use color_eyre::eyre;
 use eyre::WrapErr;
-use tokio::sync::{broadcast, mpsc, oneshot};
-
-#[derive(Debug)]
-pub enum UserIntent {
-    Exit,
-    ConnectToRemote,
-    DisconnectRemote,
-    RefuseRemoteClients,
-    FullSearch {
-        query: String,
-        awnser: oneshot::Sender<Vec<SearchResult>>,
-    },
-}
-
-#[derive(Debug, Clone)]
-pub enum AppUpdate {
-    Exit,
-}
-
-#[derive(Debug)]
-pub enum ReqUpdate {
-    Search(oneshot::Receiver<Vec<SearchResult>>),
-    CancelSearch,
-}
-
-pub struct Forcable<T: Sized> {
-    forced: bool,
-    value: T,
-}
-
-impl<T: Sized> Forcable<T> {
-    pub fn new(value: T) -> Self {
-        Self {
-            forced: false,
-            value,
-        }
-    }
-    pub fn new_forced(value: T) -> Self {
-        Self {
-            forced: true,
-            value,
-        }
-    }
-    pub fn get_value(self) -> T {
-        self.value
-    }
-    pub fn is_forced(&self) -> bool {
-        self.forced
-    }
-}
-
-pub trait State: Sized {
-    type Config: Config;
-    fn config_mut(&mut self) -> &mut Self::Config;
-    fn config(&self) -> &Self::Config;
-}
-
-/// settings with which to connect to panda server
-#[derive(Debug)]
-pub struct Remote {
-    pub id: u64,
-    pub password: Option<String>,
-}
-
-/// options for panda server
-#[derive(Debug, Clone)]
-pub struct Server {
-    pub port: Option<u16>,
-    pub password: Option<String>,
-}
-
-pub trait Config: Sized {
-    fn remote(&self) -> Forcable<Option<Remote>>;
-    fn server(&self) -> Forcable<Option<Server>>;
-    fn force_remote(&mut self, val: Option<Remote>);
-    fn force_server(&mut self, val: Option<Server>);
-}
+use tokio::sync::{broadcast, mpsc};
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
@@ -128,29 +58,6 @@ pub trait RemoteUI: Send + fmt::Debug {
     );
     fn controller(&mut self) -> &mut dyn RemoteController;
 }
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct SearchResult {
-    pub title: String,
-    pub url: String,
-}
-
-// /// Joined result type for returning
-// #[must_use]
-// pub struct MixedResult<T, E: fmt::Debug> {
-//     ok: Vec<T>,
-//     err: Vec<E>,
-// }
-//
-// impl<T, E: fmt::Debug> MixedResult<T, E> {
-//     pub fn unwrap(self) -> Vec<T> {
-//         if !self.err.is_empty() {
-//             panic!("{:?}", self.err)
-//         }
-//
-//         self.ok
-//     }
-// }
 
 #[async_trait]
 pub trait IndexSearcher: Send {

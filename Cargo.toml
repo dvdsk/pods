@@ -2,7 +2,7 @@
 resolver = "2"
 
 members = [
-	"state",
+	"data",
 	"player",
 	"search",
 	"feed",

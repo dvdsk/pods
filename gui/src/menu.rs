@@ -30,6 +30,7 @@ pub fn view_bar(in_menu: bool) -> widget::Column<'static, Message> {
 
 pub fn view(column: widget::Column<'static, Message>) -> widget::Column<'static, Message> {
     column
+        .push(button("home", Message::ToPage(Page::Home)))
         .push(button("search", Message::ToPage(Page::Search)))
         .push(button("settings", Message::ToPage(Page::Settings)))
         .push(button("downloads", Message::ToPage(Page::Downloads)))

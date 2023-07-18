@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tracing::instrument;
+use traits::DataStore;
 
 mod core;
 mod interface;
@@ -14,15 +15,13 @@ enum Reason {
 
 #[instrument(skip_all)]
 pub async fn app(
-    state: impl traits::State,
+    state: Box<dyn DataStore>,
     mut local_ui: Option<Box<dyn traits::LocalUI>>,
     mut remote: Box<dyn traits::RemoteUI>,
     searcher: Arc<Mutex<Box<dyn traits::IndexSearcher>>>,
 ) {
-    use traits::Config as _;
-
     loop {
-        let server = state.config().server().get_value();
+        let server = state.settings().server().get_value();
         match (server, local_ui.as_mut()) {
             (Some(server), Some(local_ui)) => {
                 match core::run_remote(local_ui.as_mut(), server).await {

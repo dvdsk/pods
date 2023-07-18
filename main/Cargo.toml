@@ -7,7 +7,7 @@ repository = "https://github.com/dvdsk/pods/"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-state= { path = "../state" }
+data= { path = "../data" }
 presenter= { path = "../presenter" }
 gui = { path = "../gui" }
 tui = { path = "../tui" }
