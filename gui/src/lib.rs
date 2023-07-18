@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use color_eyre::eyre;
-use iced::{executor, Application, Subscription};
+use iced::{executor, window, Application, Subscription};
 use presenter::{ActionDecoder, GuiUpdate, Presenter};
 
 #[derive(Default, Clone, Debug)]
@@ -37,7 +37,6 @@ struct State {
     layout: Layout,
     rx: Arc<Mutex<Presenter>>,
     tx: ActionDecoder,
-    should_exit: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -65,7 +64,6 @@ impl Application for State {
                 podcasts: podcasts::Podcasts::default(),
                 rx: Arc::new(Mutex::new(rx)),
                 tx,
-                should_exit: false,
             },
             Command::none(),
         )
@@ -75,13 +73,9 @@ impl Application for State {
         String::from("Panda Podcast")
     }
 
-    fn should_exit(&self) -> bool {
-        self.should_exit
-    }
-
     fn update(&mut self, message: Self::Message) -> Command {
         match dbg!(message) {
-            Message::Gui(GuiUpdate::Exit) => self.should_exit = true,
+            Message::Gui(GuiUpdate::Exit) => return window::close(),
             Message::Gui(GuiUpdate::SearchResult(_)) => todo!(),
             Message::Gui(GuiUpdate::Data(_)) => todo!(),
             Message::ToPage(Page::Podcasts) => podcasts::load(&mut self.tx),
