@@ -5,9 +5,8 @@ use data::Data;
 use presenter::InternalPorts;
 use presenter::Ui;
 use tokio::sync::Mutex;
-use traits::DataRStore;
+use traits::DataStore;
 use traits::Settings as _;
-// use traits::State as _;
 
 use tokio::signal;
 
@@ -70,8 +69,9 @@ async fn main() {
     errors::install_tracing();
 
     let cli = Cli::parse();
-    let mut state = Data::new();
-    force_cli_arguments(state.settings_mut(), &cli);
+    let mut data = Data::new();
+    force_cli_arguments(data.settings_mut(), &cli);
+    let server_config = data.settings_mut().server().get_value();
 
     let (ui_runtime, ui_port) = match cli.ui {
         UiArg::None => (None, None),
@@ -81,18 +81,18 @@ async fn main() {
                 UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
                 UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
             };
-            let (runtime, interface) = presenter::new(ui_fn);
+            let data = Box::new(data.reader());
+            let (runtime, interface) = presenter::new(data, ui_fn);
             (Some(runtime), Some(interface))
         }
     };
 
-    let server_config = state.settings().server().get_value();
-
-    let data = Box::new(state) as Box<dyn traits::DataStore>;
     let remote = Box::new(remote_ui::new(server_config));
     let searcher = Arc::new(Mutex::new(
         Box::new(search::new()) as Box<dyn traits::IndexSearcher>
     ));
+
+    let data = Box::new(data) as Box<dyn DataStore>;
     tokio::task::spawn(panda::app(data, ui_port, remote, searcher));
 
     match ui_runtime {

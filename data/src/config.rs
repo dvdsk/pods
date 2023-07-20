@@ -1,6 +1,7 @@
 use tracing::debug;
 use traits::Forcable;
 
+#[derive(Debug)]
 pub struct Settings {}
 
 impl traits::Settings for Settings {

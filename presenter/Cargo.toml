@@ -19,3 +19,4 @@ tracing = "0.1"
 clap = { version = "4.0.0-alpha.0", features = ["derive"], git = "https://github.com/clap-rs/clap" }
 color-eyre = "0.6"
 futures-concurrency = { git = "https://github.com/yoshuawuyts/futures-concurrency" }
+futures-core = "0.3.28"

@@ -1,9 +1,12 @@
 use std::future;
+use std::pin::Pin;
 
 use async_trait::async_trait;
 use color_eyre::eyre;
+use futures_core::stream::Stream;
 use tokio::sync::{mpsc, oneshot};
 
+use traits::DataRStore;
 use traits::DataUpdate;
 use traits::ReqUpdate;
 pub use traits::{AppUpdate, UserIntent};
@@ -39,25 +42,26 @@ impl traits::LocalUI for Interface {
 pub struct InternalPorts(pub ActionDecoder, pub Presenter);
 
 pub fn new(
+    datastore: Box<dyn DataRStore>,
     ui_fn: Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
 ) -> (Box<dyn Ui>, Box<dyn traits::LocalUI>) {
     let (update_tx, update_rx) = mpsc::channel(32);
     let (intent_tx, intent_rx) = mpsc::channel(32);
     let (presenter_tx, presenter_rx) = mpsc::channel(4);
-    let (data_tx, data_rx) = mpsc::channel(32);
+
+    let presenter = Presenter {
+        update_rx,
+        presenter_rx,
+        data_updates: Box::into_pin(datastore.updates()),
+        search: Search(None),
+    };
 
     let decoder = ActionDecoder {
         intent_tx,
         presenter_tx,
-        data_tx,
-        // datastore: Data,
+        datastore,
     };
-    let presenter = Presenter {
-        update_rx,
-        presenter_rx,
-        data_rx,
-        search: Search(None),
-    };
+
     let ui = ui_fn(InternalPorts(decoder, presenter));
     let interface = Box::new(Interface::new(update_tx, intent_rx));
 
@@ -74,7 +78,7 @@ pub enum GuiUpdate {
 pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
     presenter_rx: mpsc::Receiver<ReqUpdate>,
-    data_rx: mpsc::Receiver<DataUpdate>,
+    data_updates: Pin<Box<dyn Stream<Item = DataUpdate> + Send>>,
     search: Search,
 }
 
@@ -99,6 +103,7 @@ impl Search {
 impl Presenter {
     pub async fn update(&mut self) -> GuiUpdate {
         use futures::FutureExt;
+        use futures::StreamExt;
         use futures_concurrency::future::Race;
 
         enum Res {
@@ -113,7 +118,7 @@ impl Presenter {
                 update_rx,
                 presenter_rx,
                 search,
-                data_rx,
+                data_updates,
             } = self;
 
             let res = {
@@ -126,10 +131,7 @@ impl Presenter {
                     .map(|msg| msg.expect("ActionDecoder should not drop before Presenter"))
                     .map(Res::Req);
                 let do_search = search.wait().map(Res::Search);
-                let get_data = data_rx
-                    .recv()
-                    .map(|msg| msg.expect("data rx should not be dropped before presenter"))
-                    .map(Res::Data);
+                let get_data = data_updates.next().map(Option::unwrap).map(Res::Data);
 
                 (next_update, next_req, do_search, get_data).race().await
             };
@@ -145,10 +147,10 @@ impl Presenter {
 }
 
 pub struct ActionDecoder {
-    data_tx: mpsc::Sender<DataUpdate>,
     intent_tx: mpsc::Sender<UserIntent>,
     /// used to send search request rx to Updater
     presenter_tx: mpsc::Sender<ReqUpdate>,
+    datastore: Box<dyn DataRStore>,
 }
 
 // to do replace with functions instead of user action enum
@@ -178,7 +180,7 @@ impl ActionDecoder {
         return;
     }
     pub fn view_podcasts(&mut self) {
-        // self.datastore.sub_podcasts();
+        self.datastore.sub_podcasts();
         return;
     }
 }

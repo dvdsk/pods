@@ -1,3 +1,5 @@
+use futures_core::stream::Stream;
+
 mod config;
 pub use config::*;
 
@@ -5,7 +7,8 @@ use crate::Remote;
 use crate::Server;
 
 #[derive(Debug, Clone)]
-pub enum DataUpdate {}
+pub enum DataUpdate {
+}
 
 pub enum DataKey {}
 pub trait DataSub {}
@@ -18,15 +21,15 @@ pub trait Settings {
 }
 
 pub trait DataRStore: Send {
-    fn get_podcasts(&self) -> Box<dyn DataSub>;
+    fn updates(&self) -> Box<dyn Stream<Item=DataUpdate> + Send>;
+    /// Get updates until the subscription is dropped
+    fn sub_podcasts(&self) -> Box<dyn DataSub>;
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {
     fn update_podcasts(&mut self);
     fn sub_podcasts(&mut self);
 }
-
-pub trait DataRWStore: DataRStore + DataWStore {}
 
 pub trait LocalOrRemoteStore {
     // This should block until the switch is completed
@@ -35,4 +38,4 @@ pub trait LocalOrRemoteStore {
     fn set_local(&mut self);
 }
 
-pub trait DataStore: DataRWStore + LocalOrRemoteStore {}
+pub trait DataStore: DataRStore + DataWStore + LocalOrRemoteStore {}
