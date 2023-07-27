@@ -22,6 +22,7 @@ pub trait SearchBackend: fmt::Debug {
 
 pub fn new() -> combiner::Searcher {
     combiner::Searcher {
+        started: std::time::Instant::now(),
         backends: vec![
             Box::new(applepodcasts::Search::default()),
             Box::new(podcastindex::Search::default()),

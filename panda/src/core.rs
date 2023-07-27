@@ -3,21 +3,11 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tracing::instrument;
-use traits::{AppUpdate, IndexSearcher, SearchResult, UserIntent};
+use traits::{AppUpdate, IndexSearcher, UserIntent};
 
 use crate::Reason;
 
-async fn search(
-    searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
-    query: String,
-) -> (
-    Vec<SearchResult>,
-    Result<(), Box<dyn std::error::Error + Send>>,
-) {
-    let mut searcher = searcher.lock().await;
-    let val = searcher.search(&query).await;
-    val
-}
+mod task;
 
 /// returns when local ui intents to switch to remote
 #[instrument(skip_all, ret)]
@@ -25,11 +15,13 @@ pub(super) async fn run(
     interface: &mut dyn traits::RemoteUI,
     searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
 ) -> Reason {
-    let mut tasks = JoinSet::new();
-    let (tx, rx, remote) = interface.ports();
+    let mut tasks = task::Tasks::new(searcher);
+    let (_, rx, remote) = interface.ports();
 
     loop {
-        let (intent, updater) = match rx.next_intent().await {
+        // Note different intents can be from different users
+        // if we are running as a server
+        let (intent, tx) = match rx.next_intent().await {
             Some(val) => val,
             None => return Reason::Exit,
         };
@@ -42,10 +34,7 @@ pub(super) async fn run(
                 let _ignore = tx.update(AppUpdate::Exit).await;
                 return Reason::Exit;
             }
-            UserIntent::FullSearch { query, awnser } => {
-                let search = search(searcher.clone(), query);
-                tasks.spawn(search);
-            }
+            UserIntent::FullSearch { query, awnser: tx } => tasks.search(query, tx),
         }
     }
 }

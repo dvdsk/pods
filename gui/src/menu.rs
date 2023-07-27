@@ -6,7 +6,12 @@ use iced::{
     widget, Length,
 };
 
-pub fn button(text: &'static str, event: Message) -> widget::Button<'static, Message> {
+use std::borrow::Cow;
+
+pub fn button(
+    text: impl Into<Cow<'static, str>>,
+    event: Message,
+) -> widget::Button<'static, Message> {
     let text = widget::Text::new(text)
         .width(Length::Fill)
         .height(Length::Fill)
@@ -31,8 +36,9 @@ pub fn view_bar(in_menu: bool) -> widget::Column<'static, Message> {
 pub fn view(column: widget::Column<'static, Message>) -> widget::Column<'static, Message> {
     column
         .push(button("home", Message::ToPage(Page::Home)))
-        .push(button("search", Message::ToPage(Page::Search)))
+        .push(button("search", Message::ToPage(Page::AddPodcast)))
         .push(button("settings", Message::ToPage(Page::Settings)))
         .push(button("downloads", Message::ToPage(Page::Downloads)))
         .push(button("playlists", Message::ToPage(Page::Playlists)))
 }
+

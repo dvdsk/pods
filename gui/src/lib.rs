@@ -6,6 +6,7 @@ mod podcasts;
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use traits::DataUpdateVariant;
 
 use color_eyre::eyre;
 use iced::{executor, window, Application, Subscription};
@@ -16,27 +17,46 @@ pub enum Page {
     #[default]
     Home,
     Podcasts,
-    Search,
+    Podcast(traits::PodcastId),
+    AddPodcast,
     Settings,
     Downloads,
     Playlists,
 }
+
 #[derive(Default)]
 struct Layout {
     page: Page,
     in_menu: bool, // default is false
 }
+
 impl Layout {
     fn to(&mut self, page: Page) {
         self.page = page;
         self.in_menu = false;
     }
 }
+
+struct Loading {
+    pub needed_data: DataUpdateVariant,
+    pub page: Page,
+}
+
 struct State {
     podcasts: podcasts::Podcasts,
+    search: podcasts::add::Search,
     layout: Layout,
+    loading: Option<Loading>,
     rx: Arc<Mutex<Presenter>>,
     tx: ActionDecoder,
+}
+impl State {
+    fn handle_data(&mut self, data: traits::DataUpdate) {
+        use traits::DataUpdate::*;
+        match data {
+            Podcasts { podcasts } => self.podcasts = podcasts,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -45,6 +65,8 @@ pub enum Message {
     OpenMenu,
     CloseMenu,
     Gui(GuiUpdate),
+    SearchUpdate(String),
+    SearchDetails(podcasts::add::ResultIdx),
 }
 
 #[derive(Debug)]
@@ -61,9 +83,11 @@ impl Application for State {
         (
             State {
                 layout: Layout::default(),
+                loading: None,
                 podcasts: podcasts::Podcasts::default(),
                 rx: Arc::new(Mutex::new(rx)),
                 tx,
+                search: podcasts::add::Search::default(),
             },
             Command::none(),
         )
@@ -76,9 +100,24 @@ impl Application for State {
     fn update(&mut self, message: Self::Message) -> Command {
         match dbg!(message) {
             Message::Gui(GuiUpdate::Exit) => return window::close(),
-            Message::Gui(GuiUpdate::SearchResult(_)) => todo!(),
-            Message::Gui(GuiUpdate::Data(_)) => todo!(),
-            Message::ToPage(Page::Podcasts) => podcasts::load(&mut self.tx),
+            Message::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
+            Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
+            Message::Gui(GuiUpdate::Data(data)) => {
+                let mut ready_to_load = None;
+                if let Some(loading) = self.loading.take() {
+                    if loading.needed_data == data {
+                        ready_to_load = Some(loading.page);
+                    }
+                }
+
+                self.handle_data(data);
+                if let Some(page) = ready_to_load {
+                    self.layout.page = page
+                }
+            }
+            Message::SearchUpdate(query) => podcasts::add::update_query(self, query),
+            Message::SearchDetails(idx) => self.search.open_details(idx),
+            Message::ToPage(Page::Podcasts) => podcasts::load(self),
             Message::ToPage(page) => self.layout.to(page),
             Message::CloseMenu => self.layout.in_menu = false,
             Message::OpenMenu => self.layout.in_menu = true,
@@ -94,10 +133,11 @@ impl Application for State {
         match self.layout.page {
             Page::Home => home::view(column),
             Page::Podcasts => podcasts::view(column, &self.podcasts),
-            Page::Search => todo!(),
+            Page::AddPodcast => self.search.view(column),
             Page::Settings => todo!(),
             Page::Downloads => todo!(),
             Page::Playlists => todo!(),
+            Page::Podcast(_) => todo!(),
         }
         .into()
     }

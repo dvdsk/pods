@@ -1,4 +1,5 @@
 use std::fmt;
+use std::time::Duration;
 use tracing::instrument;
 
 use crate::SearchBackend;
@@ -7,6 +8,7 @@ use traits::{IndexSearcher, SearchResult};
 
 #[derive(Debug)]
 pub struct Searcher {
+    pub(crate) started: std::time::Instant,
     pub backends: Vec<Box<dyn SearchBackend + Send>>,
 }
 
@@ -38,11 +40,22 @@ impl IndexSearcher for Searcher {
     async fn search(
         &mut self,
         search_term: &str,
-    ) -> (Vec<SearchResult>, Result<(), Box<dyn std::error::Error + Send>>) {
+    ) -> (
+        Vec<SearchResult>,
+        Result<(), Box<dyn std::error::Error + Send>>,
+    ) {
         use futures::stream::futures_unordered::FuturesUnordered;
         use futures::StreamExt;
         use itertools::Itertools;
         tracing::debug!("performing search for: {}", &search_term);
+
+        if search_term.len() == 1 {
+            self.started = std::time::Instant::now();
+        }
+        let search_started_recently = self.started.elapsed() < Duration::from_secs(6);
+        if search_term.len() < 4 && search_started_recently {
+            return (Vec::new(), Result::Ok(()));
+        }
 
         let ignore_budget = false;
         let results: FuturesUnordered<_> = self

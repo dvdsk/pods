@@ -6,8 +6,25 @@ pub use config::*;
 use crate::Remote;
 use crate::Server;
 
+pub enum DataUpdateVariant {
+    Podcast,
+}
+
 #[derive(Debug, Clone)]
 pub enum DataUpdate {
+    Podcasts {
+        podcasts: Vec<crate::Podcast>,
+    },
+}
+
+impl std::cmp::PartialEq<DataUpdate> for DataUpdateVariant {
+    fn eq(&self, other: &DataUpdate) -> bool {
+        use DataUpdate::*;
+
+        match (self, other) {
+            (Self::Podcast, Podcasts { .. }) => true,
+        }
+    }
 }
 
 pub enum DataKey {}
@@ -21,7 +38,7 @@ pub trait Settings {
 }
 
 pub trait DataRStore: Send {
-    fn updates(&self) -> Box<dyn Stream<Item=DataUpdate> + Send>;
+    fn updates(&mut self) -> Box<dyn Stream<Item = DataUpdate> + Send>;
     /// Get updates until the subscription is dropped
     fn sub_podcasts(&self) -> Box<dyn DataSub>;
     fn settings(&self) -> &dyn Settings;

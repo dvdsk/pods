@@ -1,15 +1,18 @@
-use std::future;
 use std::pin::Pin;
 
 use async_trait::async_trait;
 use color_eyre::eyre;
+use futures::StreamExt;
 use futures_core::stream::Stream;
 use tokio::sync::{mpsc, oneshot};
 
+use tracing::instrument;
 use traits::DataRStore;
 use traits::DataUpdate;
 use traits::ReqUpdate;
 pub use traits::{AppUpdate, UserIntent};
+
+mod tasks;
 
 #[async_trait]
 pub trait Ui: Send {
@@ -42,7 +45,7 @@ impl traits::LocalUI for Interface {
 pub struct InternalPorts(pub ActionDecoder, pub Presenter);
 
 pub fn new(
-    datastore: Box<dyn DataRStore>,
+    mut datastore: Box<dyn DataRStore>,
     ui_fn: Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
 ) -> (Box<dyn Ui>, Box<dyn traits::LocalUI>) {
     let (update_tx, update_rx) = mpsc::channel(32);
@@ -53,7 +56,7 @@ pub fn new(
         update_rx,
         presenter_rx,
         data_updates: Box::into_pin(datastore.updates()),
-        search: Search(None),
+        tasks: tasks::Tasks::new(),
     };
 
     let decoder = ActionDecoder {
@@ -73,43 +76,24 @@ pub enum GuiUpdate {
     Exit,
     SearchResult(Vec<traits::SearchResult>),
     Data(DataUpdate),
+    Error(String),
 }
 
 pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
     presenter_rx: mpsc::Receiver<ReqUpdate>,
     data_updates: Pin<Box<dyn Stream<Item = DataUpdate> + Send>>,
-    search: Search,
-}
-
-struct Search(Option<oneshot::Receiver<Vec<traits::SearchResult>>>);
-
-impl Search {
-    async fn wait(&mut self) -> Vec<traits::SearchResult> {
-        match self.0.as_mut() {
-            Some(s) => s.await.expect("Search crashed"),
-            None => future::pending().await,
-        }
-    }
-    fn cancel(&mut self) {
-        self.0 = None
-    }
-
-    fn start(&mut self, search: oneshot::Receiver<Vec<traits::SearchResult>>) {
-        self.0 = Some(search)
-    }
+    tasks: tasks::Tasks,
 }
 
 impl Presenter {
     pub async fn update(&mut self) -> GuiUpdate {
         use futures::FutureExt;
-        use futures::StreamExt;
         use futures_concurrency::future::Race;
 
         enum Res {
             App(AppUpdate),
             Req(ReqUpdate),
-            Search(Vec<traits::SearchResult>),
             Data(DataUpdate),
         }
 
@@ -117,7 +101,7 @@ impl Presenter {
             let Self {
                 update_rx,
                 presenter_rx,
-                search,
+                tasks,
                 data_updates,
             } = self;
 
@@ -130,16 +114,19 @@ impl Presenter {
                     .recv()
                     .map(|msg| msg.expect("ActionDecoder should not drop before Presenter"))
                     .map(Res::Req);
-                let do_search = search.wait().map(Res::Search);
-                let get_data = data_updates.next().map(Option::unwrap).map(Res::Data);
+                let task_retval = tasks.next_retval().map(Res::App);
+                let get_data = data_updates
+                    .next()
+                    .map(|msg| msg.expect("Data Updates should not drop before Presenter"))
+                    .map(Res::Data);
 
-                (next_update, next_req, do_search, get_data).race().await
+                (next_update, next_req, task_retval, get_data).race().await
             };
             match res {
                 Res::App(AppUpdate::Exit) => return GuiUpdate::Exit,
-                Res::Req(ReqUpdate::CancelSearch) => search.cancel(),
-                Res::Req(ReqUpdate::Search(comms)) => search.start(comms),
-                Res::Search(list) => return GuiUpdate::SearchResult(list),
+                Res::App(AppUpdate::Error(e)) => return GuiUpdate::Error(e),
+                Res::App(AppUpdate::SearchResults(list)) => return GuiUpdate::SearchResult(list),
+                Res::Req(ReqUpdate::Search(comms)) => tasks.add(comms),
                 Res::Data(update) => return GuiUpdate::Data(update),
             }
         }
@@ -168,16 +155,23 @@ impl ActionDecoder {
         self.intent_tx.try_send(UserIntent::Exit).unwrap();
     }
 
+    #[instrument(skip(self))]
     pub fn search_enter(&mut self, query: String) {
-        let (tx, rx) = oneshot::channel();
-        self.presenter_tx.try_send(ReqUpdate::Search(rx)).unwrap();
-        let intent = UserIntent::FullSearch { query, awnser: tx };
+        let (retval_tx, retval_rx) = oneshot::channel();
+        self.presenter_tx
+            .try_send(ReqUpdate::Search(retval_rx))
+            .unwrap();
+        let intent = UserIntent::FullSearch {
+            query,
+            awnser: retval_tx,
+        };
 
         self.intent_tx.try_send(intent).unwrap();
     }
     pub fn searchleave(&mut self) {
-        self.presenter_tx.try_send(ReqUpdate::CancelSearch).unwrap();
-        return;
+        // self.presenter_tx.try_send(ReqUpdate::CancelSearch).unwrap();
+        // return;
+        todo!();
     }
     pub fn view_podcasts(&mut self) {
         self.datastore.sub_podcasts();
