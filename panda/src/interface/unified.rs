@@ -32,7 +32,7 @@ pub struct IntentReciever<'a> {
 
 #[async_trait]
 impl<'a> traits::IntentReciever for IntentReciever<'a> {
-    async fn next_intent(&mut self) -> Option<(traits::UserIntent, &mut dyn traits::Updater)> {
+    async fn next_intent(&mut self) -> Option<(traits::UserIntent, Box<dyn traits::Updater>)> {
         let reveive_local = self.local_rx.next_intent();
         let reveive_remote = self.remote_rx.next_intent();
         tokio::select!(

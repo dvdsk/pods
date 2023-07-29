@@ -21,7 +21,7 @@ pub(super) async fn run(
     loop {
         // Note different intents can be from different users
         // if we are running as a server
-        let (intent, tx) = match rx.next_intent().await {
+        let (intent, mut tx) = match rx.next_intent().await {
             Some(val) => val,
             None => return Reason::Exit,
         };

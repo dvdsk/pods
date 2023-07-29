@@ -13,7 +13,7 @@ use tokio::sync::{broadcast, mpsc};
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
-    async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)>;
+    async fn next_intent(&mut self) -> Option<(UserIntent, Box<dyn Updater>)>;
     // async fn next_intent(&mut self) -> Option<UserIntent>;
 }
 
@@ -88,9 +88,9 @@ impl LocalIntentReciever {
 
 #[async_trait]
 impl IntentReciever for LocalIntentReciever {
-    async fn next_intent(&mut self) -> Option<(UserIntent, &mut dyn Updater)> {
+    async fn next_intent(&mut self) -> Option<(UserIntent, Box<dyn Updater>)> {
         let intent = self.rx.recv().await?;
-        let updater = &mut self.tx as &mut dyn Updater;
+        let updater = Box::new(self.tx.clone()) as Box<dyn Updater>;
         Some((intent, updater))
     }
 }
