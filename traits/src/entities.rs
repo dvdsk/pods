@@ -16,10 +16,7 @@ pub enum UserIntent {
     ConnectToRemote,
     DisconnectRemote,
     RefuseRemoteClients,
-    FullSearch {
-        query: String,
-        awnser: ReturnTx,
-    },
+    FullSearch { query: String },
     AddPodcast(SearchResult),
 }
 
@@ -59,4 +56,3 @@ pub struct Podcast {
     pub name: String,
     pub id: PodcastId,
 }
-

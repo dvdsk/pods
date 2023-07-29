@@ -34,8 +34,8 @@ pub(super) async fn run(
                 let _ignore = tx.update(AppUpdate::Exit).await;
                 return Reason::Exit;
             }
-            UserIntent::FullSearch { query, awnser: tx } => tasks.search(query, tx),
-            UserIntent::AddPodcast(podcast) => db.add_podcast(podcast),
+            UserIntent::FullSearch { query } => tasks.search(query, tx),
+            UserIntent::AddPodcast(podcast) => tasks.add_podcast(podcast, tx),
         }
     }
 }

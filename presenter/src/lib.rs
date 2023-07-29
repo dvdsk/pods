@@ -51,18 +51,14 @@ pub fn new(
 ) -> (Box<dyn Ui>, Box<dyn traits::LocalUI>) {
     let (update_tx, update_rx) = mpsc::channel(32);
     let (intent_tx, intent_rx) = mpsc::channel(32);
-    let (presenter_tx, presenter_rx) = mpsc::channel(4);
 
     let presenter = Presenter {
         update_rx,
-        presenter_rx,
         data_updates: Box::into_pin(datastore.updates()),
-        tasks: tasks::Tasks::new(),
     };
 
     let decoder = ActionDecoder {
         intent_tx,
-        presenter_tx,
         datastore,
     };
 
@@ -82,9 +78,7 @@ pub enum GuiUpdate {
 
 pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
-    presenter_rx: mpsc::Receiver<ReqUpdate>,
     data_updates: Pin<Box<dyn Stream<Item = DataUpdate> + Send>>,
-    tasks: tasks::Tasks,
 }
 
 impl Presenter {
@@ -94,15 +88,12 @@ impl Presenter {
 
         enum Res {
             App(AppUpdate),
-            Req(ReqUpdate),
             Data(DataUpdate),
         }
 
         loop {
             let Self {
                 update_rx,
-                presenter_rx,
-                tasks,
                 data_updates,
             } = self;
 
@@ -111,23 +102,17 @@ impl Presenter {
                     .recv()
                     .map(|msg| msg.expect("Interface should not drop before gui closes"))
                     .map(Res::App);
-                let next_req = presenter_rx
-                    .recv()
-                    .map(|msg| msg.expect("ActionDecoder should not drop before Presenter"))
-                    .map(Res::Req);
-                let task_retval = tasks.next_retval().map(Res::App);
                 let get_data = data_updates
                     .next()
                     .map(|msg| msg.expect("Data Updates should not drop before Presenter"))
                     .map(Res::Data);
 
-                (next_update, next_req, task_retval, get_data).race().await
+                (next_update, get_data).race().await
             };
             match res {
                 Res::App(AppUpdate::Exit) => return GuiUpdate::Exit,
                 Res::App(AppUpdate::Error(e)) => return GuiUpdate::Error(e),
                 Res::App(AppUpdate::SearchResults(list)) => return GuiUpdate::SearchResult(list),
-                Res::Req(ReqUpdate::Search(comms)) => tasks.add(comms),
                 Res::Data(update) => return GuiUpdate::Data(update),
             }
         }
@@ -137,7 +122,6 @@ impl Presenter {
 pub struct ActionDecoder {
     intent_tx: mpsc::Sender<UserIntent>,
     /// used to send search request rx to Updater
-    presenter_tx: mpsc::Sender<ReqUpdate>,
     datastore: Box<dyn DataRStore>,
 }
 
@@ -158,15 +142,7 @@ impl ActionDecoder {
 
     #[instrument(skip(self))]
     pub fn search_enter(&mut self, query: String) {
-        let (retval_tx, retval_rx) = oneshot::channel();
-        self.presenter_tx
-            .try_send(ReqUpdate::Search(retval_rx))
-            .unwrap();
-        let intent = UserIntent::FullSearch {
-            query,
-            awnser: retval_tx,
-        };
-
+        let intent = UserIntent::FullSearch { query };
         self.intent_tx.try_send(intent).unwrap();
     }
     pub fn searchleave(&mut self) {
