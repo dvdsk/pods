@@ -37,6 +37,7 @@ impl Layout {
     }
 }
 
+#[derive(Debug)]
 struct Loading {
     pub needed_data: DataUpdateVariant,
     pub page: Page,
@@ -67,6 +68,8 @@ pub enum Message {
     Gui(GuiUpdate),
     SearchUpdate(String),
     SearchDetails(podcasts::add::ResultIdx),
+    AddPodcast(podcasts::add::ResultIdx),
+    SearchDetailsClose,
 }
 
 #[derive(Debug)]
@@ -103,20 +106,23 @@ impl Application for State {
             Message::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
             Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
             Message::Gui(GuiUpdate::Data(data)) => {
+                /* TODO: can we move this to presenter? <dvdsk noreply@davidsk.dev> */
                 let mut ready_to_load = None;
-                if let Some(loading) = self.loading.take() {
+                if let Some(loading) = &self.loading {
                     if loading.needed_data == data {
-                        ready_to_load = Some(loading.page);
+                        ready_to_load = Some(self.loading.take().unwrap().page);
                     }
                 }
 
                 self.handle_data(data);
                 if let Some(page) = ready_to_load {
-                    self.layout.page = page
+                    self.layout.to(page);
                 }
             }
-            Message::SearchUpdate(query) => podcasts::add::update_query(self, query),
+            Message::SearchUpdate(query) => self.search.update_query(query, &mut self.tx),
             Message::SearchDetails(idx) => self.search.open_details(idx),
+            Message::SearchDetailsClose => self.search.close_details(),
+            Message::AddPodcast(idx) => self.search.add_podcast(idx, &mut self.tx),
             Message::ToPage(Page::Podcasts) => podcasts::load(self),
             Message::ToPage(page) => self.layout.to(page),
             Message::CloseMenu => self.layout.in_menu = false,

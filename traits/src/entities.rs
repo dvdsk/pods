@@ -20,6 +20,7 @@ pub enum UserIntent {
         query: String,
         awnser: ReturnTx,
     },
+    AddPodcast(SearchResult),
 }
 
 pub type ReturnTx = oneshot::Sender<AppUpdate>;

@@ -3,9 +3,12 @@ use futures_core::stream::Stream;
 mod config;
 pub use config::*;
 
+use crate::Podcast;
 use crate::Remote;
+use crate::SearchResult;
 use crate::Server;
 
+#[derive(Debug)]
 pub enum DataUpdateVariant {
     Podcast,
 }
@@ -45,6 +48,8 @@ pub trait DataRStore: Send {
 }
 pub trait DataWStore: Send {
     fn update_podcasts(&mut self);
+    /// Add a new podcast to the database.
+    fn add_podcast(&mut self, podcast: SearchResult);
     fn sub_podcasts(&mut self);
 }
 

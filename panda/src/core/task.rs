@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use traits::AppUpdate;
 use traits::IndexSearcher;
@@ -16,6 +15,8 @@ pub struct Tasks {
 
 impl Tasks {
     pub(super) fn new(searcher: Arc<Mutex<Box<dyn IndexSearcher>>>) -> Self {
+        /* TODO: move searcher to presenter, as there should be one per 
+         * user not per running panda server/backend <dvdsk noreply@davidsk.dev> */
         Self {
             set: JoinSet::new(),
             searcher,

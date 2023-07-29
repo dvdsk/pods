@@ -86,6 +86,10 @@ impl traits::DataWStore for DataWriter {
     fn sub_podcasts(&mut self) {
         todo!()
     }
+
+    fn add_podcast(&mut self, podcast: traits::SearchResult) {
+        todo!()
+    }
 }
 
 impl traits::LocalOrRemoteStore for DataWriter {
@@ -118,6 +122,10 @@ impl traits::DataWStore for Data {
     }
 
     fn sub_podcasts(&mut self) {
+        todo!()
+    }
+
+    fn add_podcast(&mut self, podcast: traits::SearchResult) {
         todo!()
     }
 }

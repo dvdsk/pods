@@ -10,6 +10,7 @@ use tracing::instrument;
 use traits::DataRStore;
 use traits::DataUpdate;
 use traits::ReqUpdate;
+use traits::SearchResult;
 pub use traits::{AppUpdate, UserIntent};
 
 mod tasks;
@@ -175,6 +176,13 @@ impl ActionDecoder {
     }
     pub fn view_podcasts(&mut self) {
         self.datastore.sub_podcasts();
+        return;
+    }
+
+    pub fn add_podcast(&self, podcast: SearchResult) {
+        self.intent_tx
+            .try_send(UserIntent::AddPodcast(podcast))
+            .unwrap();
         return;
     }
 }

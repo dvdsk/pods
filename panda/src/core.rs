@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tokio::task::JoinSet;
 use tracing::instrument;
-use traits::{AppUpdate, IndexSearcher, UserIntent};
+use traits::{AppUpdate, DataStore, IndexSearcher, UserIntent};
 
 use crate::Reason;
 
@@ -14,6 +13,7 @@ mod task;
 pub(super) async fn run(
     interface: &mut dyn traits::RemoteUI,
     searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
+    db: &mut dyn DataStore,
 ) -> Reason {
     let mut tasks = task::Tasks::new(searcher);
     let (_, rx, remote) = interface.ports();
@@ -35,13 +35,18 @@ pub(super) async fn run(
                 return Reason::Exit;
             }
             UserIntent::FullSearch { query, awnser: tx } => tasks.search(query, tx),
+            UserIntent::AddPodcast(podcast) => db.add_podcast(podcast),
         }
     }
 }
 
 /// returns true when we should exit
 #[instrument(skip_all, ret)]
-pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::Server) -> Reason {
+pub(super) async fn run_remote(
+    local: &mut dyn traits::LocalUI,
+    server: traits::Server,
+    db: &mut dyn DataStore,
+) -> Reason {
     let (tx, rx) = local.ports();
     loop {
         let (intent, updater) = match rx.next_intent().await {
@@ -54,7 +59,8 @@ pub(super) async fn run_remote(local: &mut dyn traits::LocalUI, server: traits::
             UserIntent::ConnectToRemote => unreachable!(),
             UserIntent::RefuseRemoteClients => unreachable!(),
             UserIntent::DisconnectRemote => return Reason::ConnectChange,
-            UserIntent::FullSearch { query, awnser } => todo!(),
+            UserIntent::FullSearch { .. } => todo!(),
+            UserIntent::AddPodcast(_) => todo!(),
         }
     }
 }
