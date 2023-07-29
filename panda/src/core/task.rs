@@ -30,7 +30,10 @@ impl Tasks {
     }
 
     pub(crate) fn add_podcast(&self, podcast: traits::SearchResult, tx: Box<dyn Updater>) {
-        todo!()
+        // add podcast to db
+        // fetch episodes via index
+        // ^ done on startup normally so if this fails things will still restore
+        // add episodes to db
     }
 }
 

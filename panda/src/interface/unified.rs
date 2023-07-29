@@ -1,5 +1,5 @@
-use traits::eyre;
 use async_trait::async_trait;
+use traits::eyre;
 
 #[derive(Debug)]
 pub struct Unified<'a> {
@@ -72,11 +72,7 @@ impl<'a> traits::RemoteUI for Unified<'a> {
         &mut dyn traits::IntentReciever,
         &mut dyn traits::RemoteController,
     ) {
-        (
-            &mut self.updater,
-            &mut self.intent,
-            self.remote_controller,
-        )
+        (&mut self.updater, &mut self.intent, self.remote_controller)
     }
 
     fn controller(&mut self) -> &mut dyn traits::RemoteController {

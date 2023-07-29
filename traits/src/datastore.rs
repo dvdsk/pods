@@ -15,9 +15,7 @@ pub enum DataUpdateVariant {
 
 #[derive(Debug, Clone)]
 pub enum DataUpdate {
-    Podcasts {
-        podcasts: Vec<crate::Podcast>,
-    },
+    Podcasts { podcasts: Vec<crate::Podcast> },
 }
 
 impl std::cmp::PartialEq<DataUpdate> for DataUpdateVariant {
@@ -40,6 +38,7 @@ pub trait Settings {
     fn force_server(&mut self, val: Option<Server>);
 }
 
+// TODO register an update channel instead of returning it
 pub trait DataRStore: Send {
     fn updates(&mut self) -> Box<dyn Stream<Item = DataUpdate> + Send>;
     /// Get updates until the subscription is dropped
@@ -60,4 +59,8 @@ pub trait LocalOrRemoteStore {
     fn set_local(&mut self);
 }
 
-pub trait DataStore: DataRStore + DataWStore + LocalOrRemoteStore {}
+pub trait DataStore: DataRStore + DataWStore + LocalOrRemoteStore {
+    fn cloned(&mut self) -> Self
+    where
+        Self: Sized;
+}

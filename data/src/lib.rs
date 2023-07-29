@@ -140,4 +140,11 @@ impl traits::LocalOrRemoteStore for Data {
     }
 }
 
-impl traits::DataStore for Data {}
+impl traits::DataStore for Data {
+    fn cloned(&mut self) -> Self
+    where
+        Self: Sized,
+    {
+        todo!()
+    }
+}
