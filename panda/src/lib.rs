@@ -18,10 +18,11 @@ pub async fn app(
     mut state: Box<dyn DataStore>,
     mut local_ui: Option<Box<dyn traits::LocalUI>>,
     mut remote: Box<dyn traits::RemoteUI>,
-    searcher: Arc<Mutex<Box<dyn traits::IndexSearcher>>>,
+    searcher: Arc<Mutex<dyn traits::IndexSearcher>>,
+    feed: Box<dyn traits::Feed>,
 ) {
     loop {
-        let server = state.settings().server().get_value();
+        let server = state.reader().settings().server().get_value();
         if let Some((server, local_ui)) = server.zip(local_ui.as_mut()) {
             match core::run_remote(local_ui.as_mut(), server, state.as_mut()).await {
                 Reason::Exit => break,
@@ -30,13 +31,29 @@ pub async fn app(
         }
 
         match local_ui {
-            None => match core::run(remote.as_mut(), searcher.clone(), state.as_mut()).await {
-                Reason::Exit => break,
-                Reason::ConnectChange => unreachable!(),
-            },
+            None => {
+                match core::run(
+                    remote.as_mut(),
+                    searcher.clone(),
+                    state.as_mut(),
+                    feed.box_clone(),
+                )
+                .await
+                {
+                    Reason::Exit => break,
+                    Reason::ConnectChange => unreachable!(),
+                }
+            }
             Some(ref mut local_ui) => {
                 let mut interface = interface::Unified::new(local_ui, &mut remote);
-                match core::run(&mut interface, searcher.clone(), state.as_mut()).await {
+                match core::run(
+                    &mut interface,
+                    searcher.clone(),
+                    state.as_mut(),
+                    feed.box_clone(),
+                )
+                .await
+                {
                     Reason::Exit => break,
                     Reason::ConnectChange => continue,
                 }

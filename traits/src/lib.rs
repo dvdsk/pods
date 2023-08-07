@@ -1,6 +1,7 @@
 mod datastore;
 mod entities;
 
+use color_eyre::Result;
 pub use datastore::*;
 pub use entities::*;
 
@@ -69,6 +70,16 @@ pub trait IndexSearcher: Send {
         Vec<SearchResult>,
         Result<(), Box<dyn std::error::Error + Send>>,
     );
+}
+
+// #[async_trait]
+// pub trait FeedIndexer: Send {
+// }
+
+#[async_trait]
+pub trait Feed: Send + Sync {
+    async fn index(&self, podcast: &Podcast) -> Vec<Episode>;
+    fn box_clone(&self) -> Box<dyn Feed>;
 }
 
 #[derive(Debug)]

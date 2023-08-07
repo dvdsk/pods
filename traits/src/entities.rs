@@ -1,8 +1,8 @@
 pub use async_trait::async_trait;
+use serde::{Serialize, Deserialize};
 pub use color_eyre::eyre;
 use tokio::sync::oneshot;
 
-use crate::Updater;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SearchResult {
@@ -51,8 +51,13 @@ pub struct Server {
 
 pub type PodcastId = usize;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Podcast {
     pub name: String,
     pub id: PodcastId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Episode {
+    pub name: String,
 }

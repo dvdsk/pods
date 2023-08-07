@@ -81,19 +81,17 @@ async fn main() {
                 UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
                 UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
             };
-            let data = Box::new(data.reader());
-            let (runtime, interface) = presenter::new(data, ui_fn);
+            let (runtime, interface) = presenter::new(data.reader(), ui_fn);
             (Some(runtime), Some(interface))
         }
     };
 
     let remote = Box::new(remote_ui::new(server_config));
-    let searcher = Arc::new(Mutex::new(
-        Box::new(search::new()) as Box<dyn traits::IndexSearcher>
-    ));
+    let searcher = Arc::new(Mutex::new(search::new()));
 
     let data = Box::new(data) as Box<dyn DataStore>;
-    tokio::task::spawn(panda::app(data, ui_port, remote, searcher));
+    let feed = Box::new(feed::Feed::new());
+    tokio::task::spawn(panda::app(data, ui_port, remote, searcher, feed));
 
     match ui_runtime {
         Some(mut ui) => ui.run().await.unwrap(),

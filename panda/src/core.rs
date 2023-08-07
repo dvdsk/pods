@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tracing::instrument;
-use traits::{AppUpdate, DataStore, IndexSearcher, UserIntent};
+use tracing::{instrument, debug};
+use traits::{AppUpdate, DataStore, IndexSearcher, UserIntent, Feed};
 
 use crate::Reason;
 
@@ -12,10 +12,13 @@ mod task;
 #[instrument(skip_all, ret)]
 pub(super) async fn run(
     interface: &mut dyn traits::RemoteUI,
-    searcher: Arc<Mutex<Box<dyn IndexSearcher>>>,
+    searcher: Arc<Mutex<dyn IndexSearcher>>,
     db: &mut dyn DataStore,
+    feed: Box<dyn Feed>,
 ) -> Reason {
-    let mut tasks = task::Tasks::new(searcher);
+    db.set_local();
+    let mut tasks = task::Tasks::new(searcher, db.writer(), db.reader());
+    tasks.maintain_feed(feed);
     let (_, rx, remote) = interface.ports();
 
     loop {
@@ -26,6 +29,8 @@ pub(super) async fn run(
             None => return Reason::Exit,
         };
 
+        dbg!();
+        debug!("got intent: {intent:?}");
         match intent {
             UserIntent::DisconnectRemote => unreachable!(),
             UserIntent::ConnectToRemote => return Reason::ConnectChange,
@@ -47,6 +52,7 @@ pub(super) async fn run_remote(
     server: traits::Server,
     db: &mut dyn DataStore,
 ) -> Reason {
+    db.set_remote();
     let (tx, rx) = local.ports();
     loop {
         let (intent, updater) = match rx.next_intent().await {

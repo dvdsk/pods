@@ -56,6 +56,7 @@ impl State {
         use traits::DataUpdate::*;
         match data {
             Podcasts { podcasts } => self.podcasts = podcasts,
+            Placeholder => panic!("Placeholder should never be used"),
         }
     }
 }
@@ -122,7 +123,13 @@ impl Application for State {
             Message::SearchUpdate(query) => self.search.update_query(query, &mut self.tx),
             Message::SearchDetails(idx) => self.search.open_details(idx),
             Message::SearchDetailsClose => self.search.close_details(),
-            Message::AddPodcast(idx) => self.search.add_podcast(idx, &mut self.tx),
+            Message::AddPodcast(idx) => {
+                self.search.add_podcast(idx, &mut self.tx);
+                self.loading = Some(Loading {
+                    needed_data: DataUpdateVariant::Podcast,
+                    page: Page::Podcasts,
+                });
+            }
             Message::ToPage(Page::Podcasts) => podcasts::load(self),
             Message::ToPage(page) => self.layout.to(page),
             Message::CloseMenu => self.layout.in_menu = false,

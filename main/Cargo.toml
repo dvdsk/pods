@@ -14,6 +14,7 @@ tui = { path = "../tui" }
 remote_ui = { path = "../remote_ui" }
 panda= { path = "../panda" }
 index= { path = "../index" }
+feed= { path = "../feed" }
 traits= { path = "../traits" }
 search= { path = "../search" }
 player= { path = "../player" }

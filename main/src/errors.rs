@@ -32,6 +32,7 @@ pub fn install_tracing() {
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("info"))
         .unwrap()
+        .add_directive("panda=debug".parse().unwrap())
         .add_directive("wgpu_core=warn".parse().unwrap())
         .add_directive("wgpu_hal=error".parse().unwrap())
         .add_directive("iced_wgpu=warn".parse().unwrap())

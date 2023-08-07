@@ -1,15 +1,11 @@
-use std::pin::Pin;
-
 use async_trait::async_trait;
 use color_eyre::eyre;
-use futures::StreamExt;
-use futures_core::stream::Stream;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 
 use tracing::instrument;
 use traits::DataRStore;
+use traits::DataSub;
 use traits::DataUpdate;
-use traits::ReqUpdate;
 use traits::SearchResult;
 pub use traits::{AppUpdate, UserIntent};
 
@@ -51,15 +47,16 @@ pub fn new(
 ) -> (Box<dyn Ui>, Box<dyn traits::LocalUI>) {
     let (update_tx, update_rx) = mpsc::channel(32);
     let (intent_tx, intent_rx) = mpsc::channel(32);
+    let (data_tx, data_rx) = mpsc::channel(32);
 
-    let presenter = Presenter {
-        update_rx,
-        data_updates: Box::into_pin(datastore.updates()),
-    };
+    let registration = datastore.register(Box::new(data_tx));
+    let presenter = Presenter { update_rx, data_rx };
 
     let decoder = ActionDecoder {
         intent_tx,
         datastore,
+        registration,
+        subs: Subs::default(),
     };
 
     let ui = ui_fn(InternalPorts(decoder, presenter));
@@ -78,7 +75,7 @@ pub enum GuiUpdate {
 
 pub struct Presenter {
     update_rx: mpsc::Receiver<AppUpdate>,
-    data_updates: Pin<Box<dyn Stream<Item = DataUpdate> + Send>>,
+    data_rx: mpsc::Receiver<DataUpdate>,
 }
 
 impl Presenter {
@@ -94,7 +91,7 @@ impl Presenter {
         loop {
             let Self {
                 update_rx,
-                data_updates,
+                data_rx: data_updates,
             } = self;
 
             let res = {
@@ -103,7 +100,7 @@ impl Presenter {
                     .map(|msg| msg.expect("Interface should not drop before gui closes"))
                     .map(Res::App);
                 let get_data = data_updates
-                    .next()
+                    .recv()
                     .map(|msg| msg.expect("Data Updates should not drop before Presenter"))
                     .map(Res::Data);
 
@@ -119,10 +116,17 @@ impl Presenter {
     }
 }
 
+#[derive(Default)]
+struct Subs {
+    podcast: Option<Box<dyn DataSub>>,
+}
+
 pub struct ActionDecoder {
     intent_tx: mpsc::Sender<UserIntent>,
     /// used to send search request rx to Updater
     datastore: Box<dyn DataRStore>,
+    registration: traits::Registration,
+    subs: Subs,
 }
 
 // to do replace with functions instead of user action enum
@@ -151,7 +155,8 @@ impl ActionDecoder {
         todo!();
     }
     pub fn view_podcasts(&mut self) {
-        self.datastore.sub_podcasts();
+        let sub = self.datastore.sub_podcasts(self.registration);
+        self.subs.podcast = Some(sub);
         return;
     }
 
