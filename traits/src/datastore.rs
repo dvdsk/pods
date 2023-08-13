@@ -3,27 +3,38 @@ use async_trait::async_trait;
 mod config;
 pub use config::*;
 
+use crate::EpisodeId;
+use crate::PodcastId;
 use crate::Remote;
 use crate::Server;
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub enum DataUpdateVariant {
     Podcast,
+    Episodes { podcast_id: PodcastId },
+    EpisodeDetails { episode_id: EpisodeId },
 }
 
 #[derive(Debug, Clone)]
 pub enum DataUpdate {
-    Podcasts { podcasts: Vec<crate::Podcast> },
+    Podcasts {
+        podcasts: Vec<crate::Podcast>,
+    },
+    Episodes {
+        podcast_id: PodcastId,
+        list: Vec<crate::Episode>,
+    },
     Placeholder, // prevents irrifutable pattern warns
 }
 
-impl std::cmp::PartialEq<DataUpdate> for DataUpdateVariant {
-    fn eq(&self, other: &DataUpdate) -> bool {
-        use DataUpdate::*;
+impl DataUpdate {
+    pub fn variant(&self) -> DataUpdateVariant {
+        use DataUpdateVariant::*;
 
-        match (self, other) {
-            (Self::Podcast, Podcasts { .. }) => true,
-            (_, Placeholder) => panic!("placeholder should never be used"),
+        match self {
+            Self::Podcasts { .. } => Podcast,
+            Self::Episodes { podcast_id, ..} => Episodes { podcast_id: *podcast_id },
+            Self::Placeholder => panic!("placeholder should never be used"),
         }
     }
 }
@@ -72,6 +83,7 @@ pub trait DataRStore: Send {
     fn register(&mut self, tx: Box<dyn DataTx>) -> Registration;
     /// Get updates until the subscription is dropped
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn DataSub>;
+    fn sub_episodes(&self, registration: Registration, podcast: PodcastId) -> Box<dyn DataSub>;
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {

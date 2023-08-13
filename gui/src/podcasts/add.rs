@@ -89,7 +89,7 @@ impl Search {
     }
 }
 
-fn text<'a>(text: String) -> Text<'a> {
+pub fn text<'a>(text: String) -> Text<'a> {
     widget::Text::new(text)
         .width(Length::Fill)
         .horizontal_alignment(Horizontal::Center)

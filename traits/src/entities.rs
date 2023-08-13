@@ -1,8 +1,8 @@
 pub use async_trait::async_trait;
-use serde::{Serialize, Deserialize};
 pub use color_eyre::eyre;
+use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
-
+use url::Url;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SearchResult {
@@ -50,14 +50,39 @@ pub struct Server {
 }
 
 pub type PodcastId = usize;
+pub type EpisodeId = usize;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Podcast {
     pub name: String,
+    pub feed: Url,
     pub id: PodcastId,
+}
+
+#[derive(Debug)]
+pub struct InvalidPodcastFeedUrl(url::ParseError);
+impl Podcast {
+    pub fn try_from_searchres(
+        res: SearchResult,
+        id: PodcastId,
+    ) -> Result<Self, InvalidPodcastFeedUrl> {
+        let feed = Url::parse(&res.url).map_err(InvalidPodcastFeedUrl)?;
+        Ok(Self {
+            name: res.title,
+            feed,
+            id,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Episode {
     pub name: String,
+    pub id: EpisodeId,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeDetails {
+    pub description: String,
+    pub id: EpisodeId,
 }

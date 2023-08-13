@@ -46,10 +46,8 @@ impl Tasks {
     }
 
     pub(crate) fn add_podcast(&mut self, podcast: traits::SearchResult, tx: Box<dyn Updater>) {
-        let podcast = Podcast {
-            name: podcast.title,
-            id: 0,
-        };
+        let id = 0;
+        let podcast = Podcast::try_from_searchres(podcast, id).unwrap();
         self.db_writer.add_podcast(podcast.clone());
     }
 
@@ -69,7 +67,6 @@ async fn maintain_feed(
     mut db: Box<dyn DataWStore>,
     _registration: Registration,
 ) {
-    // let indexer = feed.indexer();
     let mut known = HashSet::new();
     loop {
         let Some(update) = rx.recv().await else {

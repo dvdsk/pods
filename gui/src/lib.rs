@@ -1,12 +1,15 @@
 mod home;
 mod icon;
 mod menu;
+mod podcast;
 mod podcasts;
 
-use async_trait::async_trait;
+use std::collections::HashSet;
 use std::sync::Arc;
+
+use async_trait::async_trait;
 use tokio::sync::Mutex;
-use traits::DataUpdateVariant;
+use traits::{DataUpdateVariant, Episode, PodcastId, EpisodeDetails};
 
 use color_eyre::eyre;
 use iced::{executor, window, Application, Subscription};
@@ -17,11 +20,25 @@ pub enum Page {
     #[default]
     Home,
     Podcasts,
-    Podcast(traits::PodcastId),
+    Podcast {
+        id: traits::PodcastId,
+        details: Option<traits::EpisodeId>,
+    },
     AddPodcast,
     Settings,
     Downloads,
     Playlists,
+}
+
+impl Page {
+    pub(crate) fn load(&self, state: &mut crate::State) {
+        match self {
+            Page::Podcasts => podcasts::load(state),
+            Page::Podcast { id, details } => podcast::load(state, *id, *details),
+
+            _ => state.layout.to(self.clone()),
+        }
+    }
 }
 
 #[derive(Default)]
@@ -39,12 +56,36 @@ impl Layout {
 
 #[derive(Debug)]
 struct Loading {
-    pub needed_data: DataUpdateVariant,
+    pub needed_data: HashSet<DataUpdateVariant>,
     pub page: Page,
+}
+
+impl Loading {
+    fn new<const N: usize>(page: Page, needed: [DataUpdateVariant; N]) -> Self {
+        Self {
+            needed_data: HashSet::from(needed),
+            page,
+        }
+    }
+
+    /// returns true if one of the loading requirements is
+    /// the Episodes list for the podcast with podcast_id
+    fn episodes_for(&self, podcast_id: PodcastId) -> bool {
+        self.needed_data
+            .contains(&DataUpdateVariant::Episodes { podcast_id })
+    }
+}
+
+pub(crate) struct Podcast {
+    name: String,
+    id: PodcastId,
+    episodes: Vec<Episode>,
+    details: Option<EpisodeDetails>,
 }
 
 struct State {
     podcasts: podcasts::Podcasts,
+    podcast: Option<Podcast>,
     search: podcasts::add::Search,
     layout: Layout,
     loading: Option<Loading>,
@@ -56,6 +97,12 @@ impl State {
         use traits::DataUpdate::*;
         match data {
             Podcasts { podcasts } => self.podcasts = podcasts,
+            Episodes { list, podcast_id } => {
+                let Some(loading) = &self.loading else {return };
+                if loading.episodes_for(podcast_id) {
+                    self.podcast.as_mut().unwrap().episodes = list;
+                }
+            }
             Placeholder => panic!("Placeholder should never be used"),
         }
     }
@@ -89,6 +136,7 @@ impl Application for State {
                 layout: Layout::default(),
                 loading: None,
                 podcasts: podcasts::Podcasts::default(),
+                podcast: None,
                 rx: Arc::new(Mutex::new(rx)),
                 tx,
                 search: podcasts::add::Search::default(),
@@ -108,17 +156,15 @@ impl Application for State {
             Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
             Message::Gui(GuiUpdate::Data(data)) => {
                 /* TODO: can we move this to presenter? <dvdsk noreply@davidsk.dev> */
-                let mut ready_to_load = None;
-                if let Some(loading) = &self.loading {
-                    if loading.needed_data == data {
-                        ready_to_load = Some(self.loading.take().unwrap().page);
+                let variant = data.variant();
+                self.handle_data(data);
+                if let Some(Loading { needed_data, page }) = &mut self.loading {
+                    needed_data.remove(&variant);
+                    if needed_data.is_empty() {
+                        self.layout.to(page.clone());
                     }
                 }
-
-                self.handle_data(data);
-                if let Some(page) = ready_to_load {
-                    self.layout.to(page);
-                }
+                dbg!(&self.loading);
             }
             Message::SearchUpdate(query) => self.search.update_query(query, &mut self.tx),
             Message::SearchDetails(idx) => self.search.open_details(idx),
@@ -126,12 +172,11 @@ impl Application for State {
             Message::AddPodcast(idx) => {
                 self.search.add_podcast(idx, &mut self.tx);
                 self.loading = Some(Loading {
-                    needed_data: DataUpdateVariant::Podcast,
+                    needed_data: HashSet::from([DataUpdateVariant::Podcast]),
                     page: Page::Podcasts,
                 });
             }
-            Message::ToPage(Page::Podcasts) => podcasts::load(self),
-            Message::ToPage(page) => self.layout.to(page),
+            Message::ToPage(page) => page.load(self),
             Message::CloseMenu => self.layout.in_menu = false,
             Message::OpenMenu => self.layout.in_menu = true,
         }
@@ -146,11 +191,11 @@ impl Application for State {
         match self.layout.page {
             Page::Home => home::view(column),
             Page::Podcasts => podcasts::view(column, &self.podcasts),
+            Page::Podcast { .. } => podcast::view(column, self.podcast.as_ref().unwrap()),
             Page::AddPodcast => self.search.view(column),
             Page::Settings => todo!(),
             Page::Downloads => todo!(),
             Page::Playlists => todo!(),
-            Page::Podcast(_) => todo!(),
         }
         .into()
     }

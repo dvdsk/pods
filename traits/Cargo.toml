@@ -14,3 +14,4 @@ color-eyre = "0.6.2"
 futures-core = "0.3.28"
 serde = { version = "1.0.178", features = ["derive"] }
 tokio = { version = "1", features = ["sync"] }
+url = { version = "2.4.0", features = ["serde"] }

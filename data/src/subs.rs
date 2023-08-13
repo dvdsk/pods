@@ -1,7 +1,8 @@
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use traits::{DataUpdate, Registration};
+use traits::{DataUpdate, PodcastId, Registration};
 
 #[derive(Debug)]
 pub(crate) struct Client {
@@ -10,11 +11,15 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    fn new(registration: Registration) -> Self {
-        Self {
+    fn new(registration: Registration) -> (Self, Sub) {
+        let client = Self {
             expired: Arc::new(AtomicBool::new(false)),
             registration,
-        }
+        };
+        let sub = Sub {
+            expired: client.expired.clone(),
+        };
+        (client, sub)
     }
 
     pub fn not_expired(&self) -> bool {
@@ -39,16 +44,39 @@ pub(crate) struct Clients(Arc<Mutex<Vec<Client>>>);
 
 impl Clients {
     pub fn sub(&self, registration: Registration) -> Sub {
-        let client = Client::new(registration);
-        let sub = Sub {
-            expired: client.expired.clone(),
-        };
+        let (client, sub) = Client::new(registration);
         self.0.lock().unwrap().push(client);
         sub
     }
 
     pub(crate) fn regs(&self) -> Vec<Registration> {
         let mut list = self.0.lock().unwrap();
+        list.retain(Client::not_expired);
+        list.iter().map(|c| c.registration).collect()
+    }
+}
+
+#[derive(Debug, Default, Clone)]
+pub(crate) struct ClientsMap<T>(Arc<Mutex<HashMap<T, Vec<Client>>>>);
+
+impl<T: Eq + PartialEq + std::hash::Hash> ClientsMap<T> {
+    pub fn sub(&self, registration: Registration, id: T) -> Sub {
+        let mut map = self.0.lock().unwrap();
+        let (client, sub) = Client::new(registration);
+        if let Some(clients) = map.get_mut(&id) {
+            clients.push(client)
+        } else {
+            let clients = vec![client];
+            map.insert(id, clients);
+        }
+        sub
+    }
+
+    pub fn regs(&self, id: &T) -> Vec<Registration> {
+        let mut map = self.0.lock().unwrap();
+        let Some(list) = map.get_mut(id) else {
+            return Vec::new()
+        };
         list.retain(Client::not_expired);
         list.iter().map(|c| c.registration).collect()
     }
@@ -78,6 +106,7 @@ impl Senders {
 pub(crate) struct Subs {
     pub(crate) senders: Senders,
     pub(crate) podcast: Clients,
+    pub(crate) episodes: ClientsMap<PodcastId>,
 }
 
 macro_rules! sub {
@@ -94,4 +123,7 @@ impl Subs {
         Registration::new(idx)
     }
     sub! {sub_podcasts, podcast}
+    pub(crate) fn sub_episodes(&self, registration: Registration, podcast: usize) -> Sub {
+        self.episodes.sub(registration, podcast)
+    }
 }

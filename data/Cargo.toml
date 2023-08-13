@@ -9,7 +9,7 @@ edition = "2021"
 
 [dependencies]
 tracing = "0.1"
-dbstruct = "0.2"
+dbstruct = "0.3"
 
 traits = { path = "../traits" }
 futures-core = "0.3.28"

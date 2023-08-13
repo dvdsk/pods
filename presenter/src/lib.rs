@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use color_eyre::eyre;
 use tokio::sync::mpsc;
@@ -6,6 +8,7 @@ use tracing::instrument;
 use traits::DataRStore;
 use traits::DataSub;
 use traits::DataUpdate;
+use traits::PodcastId;
 use traits::SearchResult;
 pub use traits::{AppUpdate, UserIntent};
 
@@ -119,6 +122,7 @@ impl Presenter {
 #[derive(Default)]
 struct Subs {
     podcast: Option<Box<dyn DataSub>>,
+    episodes: HashMap<PodcastId, Box<dyn DataSub>>,
 }
 
 pub struct ActionDecoder {
@@ -157,6 +161,12 @@ impl ActionDecoder {
     pub fn view_podcasts(&mut self) {
         let sub = self.datastore.sub_podcasts(self.registration);
         self.subs.podcast = Some(sub);
+        return;
+    }
+
+    pub fn view_episodes(&mut self, podcast: PodcastId) {
+        let sub = self.datastore.sub_episodes(self.registration, podcast);
+        self.subs.episodes.insert(podcast, sub);
         return;
     }
 

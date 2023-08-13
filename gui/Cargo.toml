@@ -15,3 +15,4 @@ traits = { path = "../traits" }
 iced = { version = "0.7.0", features = ["tokio"] }
 tokio = { version = "1", features = ["sync"] }
 color-eyre = "0.6"
+tracing = "0.1.37"

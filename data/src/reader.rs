@@ -1,3 +1,4 @@
+use crate::subs::Clients;
 use crate::Registration;
 
 use super::db;
@@ -7,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use traits::DataUpdate;
+use traits::PodcastId;
 
 pub struct ReadReq {
     needed: Needed,
@@ -46,18 +48,21 @@ impl ReadReq {
 
 pub enum Needed {
     PodcastList,
+    Episodes(PodcastId),
 }
 
 impl Needed {
     fn subs(&self, subs: &subs::Subs) -> Vec<Registration> {
         match self {
             Needed::PodcastList => subs.podcast.regs(),
+            Needed::Episodes(podcast_id) => subs.episodes.regs(podcast_id),
         }
     }
 
     fn update(&self, data: &db::Store) -> DataUpdate {
         match self {
             Needed::PodcastList => data.podcast_update(),
+            Needed::Episodes(podcast_id) => data.episodes_update(*podcast_id),
         }
     }
 }

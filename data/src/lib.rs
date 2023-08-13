@@ -79,26 +79,47 @@ impl traits::DataRStore for DataReader {
     fn settings(&self) -> &dyn traits::Settings {
         self.config.as_ref()
     }
-}
 
-impl traits::DataWStore for DataWriter {
-    fn add_podcast(&mut self, podcast: traits::Podcast) {
-        self.data.podcasts().push(podcast).unwrap();
+    fn sub_episodes(
+        &self,
+        registration: Registration,
+        podcast: traits::PodcastId,
+    ) -> Box<dyn traits::DataSub> {
+        let sub = self.subs.sub_episodes(registration, podcast);
         match self
             .reader_tx
-            .try_send(ReadReq::update_all(Needed::PodcastList))
+            .try_send(ReadReq::update_one(registration, Needed::Episodes(podcast)))
         {
             Ok(_) => (),
             Err(TrySendError::Full(_)) => error!("reader pipe full"),
             Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
         }
+        Box::new(sub)
+    }
+}
+
+impl DataWriter {
+    fn update_all(&mut self, data: Needed) {
+        match self.reader_tx.try_send(ReadReq::update_all(data)) {
+            Ok(_) => (),
+            Err(TrySendError::Full(_)) => error!("reader pipe full"),
+            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
+        }
+    }
+}
+
+impl traits::DataWStore for DataWriter {
+    fn add_podcast(&mut self, podcast: traits::Podcast) {
+        self.data.podcasts().insert(&podcast.id, &podcast).unwrap();
+        self.update_all(Needed::PodcastList);
     }
     fn box_clone(&self) -> Box<dyn traits::DataWStore> {
         Box::new(self.clone())
     }
 
     fn add_episodes(&mut self, podcast: &traits::Podcast, episodes: Vec<traits::Episode>) {
-        todo!()
+        self.data.episodes().insert(&podcast.id, &episodes).unwrap();
+        self.update_all(Needed::Episodes(podcast.id));
     }
 }
 
