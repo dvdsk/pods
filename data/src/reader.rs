@@ -8,6 +8,7 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
 use traits::DataUpdate;
+use traits::EpisodeId;
 use traits::PodcastId;
 
 pub struct ReadReq {
@@ -49,6 +50,7 @@ impl ReadReq {
 pub enum Needed {
     PodcastList,
     Episodes(PodcastId),
+    EpisodeDetails(EpisodeId),
 }
 
 impl Needed {
@@ -56,6 +58,7 @@ impl Needed {
         match self {
             Needed::PodcastList => subs.podcast.regs(),
             Needed::Episodes(podcast_id) => subs.episodes.regs(podcast_id),
+            Needed::EpisodeDetails(episode_id) => subs.episode_details.regs(episode_id),
         }
     }
 
@@ -63,6 +66,7 @@ impl Needed {
         match self {
             Needed::PodcastList => data.podcast_update(),
             Needed::Episodes(podcast_id) => data.episodes_update(*podcast_id),
+            Needed::EpisodeDetails(episode_id) => data.episode_details_update(*episode_id),
         }
     }
 }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use traits::{DataUpdate, PodcastId, Registration};
+use traits::{DataUpdate, PodcastId, Registration, EpisodeId};
 
 #[derive(Debug)]
 pub(crate) struct Client {
@@ -107,6 +107,7 @@ pub(crate) struct Subs {
     pub(crate) senders: Senders,
     pub(crate) podcast: Clients,
     pub(crate) episodes: ClientsMap<PodcastId>,
+    pub(crate) episode_details: ClientsMap<EpisodeId>,
 }
 
 macro_rules! sub {

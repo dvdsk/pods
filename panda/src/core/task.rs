@@ -4,10 +4,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tracing::debug;
+use tracing::info;
 use traits::AppUpdate;
 use traits::DataRStore;
 use traits::DataUpdate;
 use traits::DataWStore;
+use traits::Episode;
+use traits::EpisodeDetails;
 use traits::Feed;
 use traits::IndexSearcher;
 
@@ -60,7 +63,7 @@ impl Tasks {
     }
 }
 
-// TODO make feed task that responds to new data
+// TODO report errors?
 async fn maintain_feed(
     mut rx: mpsc::Receiver<DataUpdate>,
     feed: Box<dyn Feed>,
@@ -79,8 +82,30 @@ async fn maintain_feed(
 
         let podcasts = HashSet::from_iter(podcasts);
         for new_podcast in podcasts.difference(&known) {
-            let episodes = feed.index(new_podcast).await;
-            db.add_episodes(&new_podcast, episodes);
+            let info = feed.index(new_podcast).await.unwrap();
+            let (list, details) = info
+                .into_iter()
+                .map(|e| {
+                    (
+                        Episode {
+                            name: e.title,
+                            id: new_podcast.id,
+                        },
+                        EpisodeDetails {
+                            description: e.description,
+                            duration: e.duration,
+                            date: e.date,
+                            id: new_podcast.id,
+                        },
+                    )
+                })
+                .unzip();
+            info!(
+                "adding episode for podcast: {}, id: {}",
+                new_podcast.name, new_podcast.id
+            );
+            db.add_episodes(&new_podcast, list);
+            db.add_episode_details(details);
         }
         known.extend(podcasts.into_iter());
     }

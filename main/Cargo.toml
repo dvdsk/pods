@@ -25,3 +25,6 @@ color-eyre = { version = "^0.6.2", features = ["issue-url"] }
 tracing-error = "0.2.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing = "0.1.36"
+
+[profile.release]
+strip = "debuginfo"

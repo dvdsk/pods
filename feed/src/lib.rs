@@ -1,12 +1,38 @@
-// use std::str::FromStr;
-// use url::Url;
+use std::str::FromStr;
+use std::time::Duration;
+use url::Url;
 
 // pub use search::{Search, SearchResult};
-use traits::Podcast;
 use async_trait::async_trait;
+use traits::{Date, EpisodeInfo, Podcast};
 
 #[derive(Debug, Clone)]
 pub struct Feed {}
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Could not connect to podcast feed, details: {0:?}")]
+    CouldNotConnect(reqwest::Error),
+    #[error("Feed server returned error, details: {0:?}")]
+    FeedServerError(reqwest::Error),
+    #[error("Could not download body, details: {0:?}")]
+    FaildToDownload(reqwest::Error),
+    #[error("Can not parse feed body as rss, text: {0}")]
+    ParsingRss(rss::Error),
+    #[error("No stream for podcast episode")]
+    MissingStreamUrl,
+    #[error("No duration for podcast episode")]
+    MissingDuration,
+    #[error("No title for podcast episode")]
+    MissingEpisodeTitle,
+    #[error("The url: {url} is not valid because: {error}")]
+    InvalidStreamUrl {
+        url: String,
+        error: url::ParseError,
+    },
+    #[error("No description for podcast episode")]
+    MissingDescription,
+}
 
 impl Feed {
     pub fn new() -> Self {
@@ -16,8 +42,12 @@ impl Feed {
 
 #[async_trait]
 impl traits::Feed for Feed {
-    async fn index(&self, podcast: &Podcast) -> Vec<traits::Episode> {
-        todo!()
+    async fn index(&self, podcast: &Podcast) -> Result<Vec<EpisodeInfo>, Box<dyn traits::Error>> {
+        let info = get_podcast_info(&podcast.feed).await?;
+        let result: Result<Vec<_>, _> = info.items.iter().map(|i| to_episode_ext(i)).collect();
+        result
+            .map_err(Box::new)
+            .map_err(|e| e as Box<dyn traits::Error>)
     }
 
     fn box_clone(&self) -> Box<dyn traits::Feed> {
@@ -25,119 +55,97 @@ impl traits::Feed for Feed {
     }
 }
 
-// pub fn valid_url(s: &str) -> bool {
-//     if let Ok(url) = Url::parse(s) {
-//         url.scheme() == "http" || url.scheme() == "https"
-//     } else {
-//         false
-//     }
-// }
-//
-// async fn get_podcast_info(url: &str) -> eyre::Result<rss::Channel> {
-//     let feed_text = reqwest::get(url)
-//         .await
-//         .wrap_err("could not connect to podcast feed")?
-//         .error_for_status()
-//         .wrap_err("feed server returned error")?
-//         .text()
-//         .await
-//         .wrap_err("could not download body")?;
-//
-//     let channel = rss::Channel::from_str(&feed_text)
-//         .wrap_err_with(|| format!("can not parse feed body as rss, text: {}", url))?;
-//     Ok(channel)
-// }
-//
-// fn get_episode_info(items: &[rss::Item], podcast_title: &str) -> Result<Vec<EpisodeExt>, Error> {
-//     let list: Result<Vec<EpisodeExt>, _> = items
-//         .iter()
-//         .map(|i| to_episode_ext(i, podcast_title))
-//         .collect();
-//     list
-// }
-//
-// pub async fn add_podcast(pod_db: database::PodcastDb, url: String) -> (String, PodcastKey) {
-//     let info = get_podcast_info(&url).await.unwrap();
-//
-//     let podcast = Podcast::from_url(&info, url);
-//     pod_db.add_podcast(&podcast).unwrap();
-//
-//     let episodes = get_episode_info(info.items(), &podcast.title).unwrap();
-//     pod_db
-//         .update_episodes(podcast.title.as_str(), episodes)
-//         .unwrap();
-//
-//     (podcast.title.clone(), PodcastKey::from(podcast.title))
-// }
-//
-// fn url_from_extensions(item: &rss::Item) -> Option<String> {
-//     let media = item.extensions().get("media")?;
-//     let content = media.get("content")?;
-//     let extention = content.first()?;
-//     if extention.name() != "media:content" {
-//         return None;
-//     }
-//     extention.attrs().get("url").cloned()
-// }
-//
-// fn duration_from_extensions(item: &rss::Item) -> Option<f32> {
-//     let media = item.extensions().get("media")?;
-//     let content = media.get("content")?;
-//     let extention = content.first()?;
-//     if extention.name() != "media:content" {
-//         return None;
-//     }
-//     extention
-//         .attrs()
-//         .get("duration")
-//         .map(|u| u.parse().ok())
-//         .flatten()
-// }
-//
-// fn parse_itunes_duration(duration: &str) -> Option<f32> {
-//     let mut parts = duration.rsplitn(3, ':');
-//     let seconds: f32 = parts.next()?.parse().ok()?;
-//     let minutes: f32 = parts.next()?.parse().ok()?;
-//     let hours: f32 = parts.next().unwrap_or("0").parse().ok()?;
-//     let seconds = seconds + 60. * (minutes + 60. * hours);
-//     Some(seconds)
-// }
-//
-// #[derive(thiserror::Error, Debug)]
-// pub enum Error {
-//     #[error("No stream for podcast episode")]
-//     MissingStreamUrl,
-//     #[error("No duration for podcast episode")]
-//     MissingDuration,
-//     #[error("No title for podcast episode")]
-//     MissingEpisodeTitle,
-// }
-//
-// fn to_episode_ext(item: &rss::Item, podcast_title: &str) -> Result<EpisodeExt, Error> {
-//     //try to get the url from the description of the media object
-//     let stream_url = item.enclosure().map(|encl| encl.url().to_owned());
-//
-//     //try to get the url and duration possible extensions
-//     let stream_url = stream_url.or_else(|| url_from_extensions(item));
-//     let duration = duration_from_extensions(item);
-//
-//     //try to get duration from any included itunes extensions
-//     let duration = duration.or_else(|| {
-//         item.itunes_ext()
-//             .map(|ext| ext.duration().map(parse_itunes_duration).flatten())
-//             .flatten()
-//     });
-//
-//     let stream_url = stream_url.ok_or(Error::MissingStreamUrl)?;
-//     let duration = duration.ok_or(Error::MissingDuration)?;
-//     let title = item.title().ok_or(Error::MissingEpisodeTitle)?;
-//     let podcast = podcast_title.to_owned();
-//
-//     Ok(EpisodeExt {
-//         stream_url,
-//         duration,
-//         title: title.to_owned(),
-//         podcast,
-//         date: Date::from_item(item),
-//     })
-// }
+async fn get_podcast_info(feed: &Url) -> Result<rss::Channel, Error> {
+    let feed_text = reqwest::get(dbg!(feed.as_str()))
+        .await
+        .map_err(Error::CouldNotConnect)?
+        .error_for_status()
+        .map_err(Error::FeedServerError)?
+        .text()
+        .await
+        .map_err(Error::FaildToDownload)?;
+
+    let channel = rss::Channel::from_str(&feed_text).map_err(Error::ParsingRss)?;
+    Ok(channel)
+}
+
+fn to_episode_ext(item: &rss::Item) -> Result<EpisodeInfo, Error> {
+    let stream_url = url_from_enclosure(item)
+        .or_else(|| url_from_extensions(item))
+        .ok_or(Error::MissingStreamUrl)?;
+    let stream_url = url::Url::parse(stream_url).map_err(|why| Error::InvalidStreamUrl {
+        url: stream_url.to_string(),
+        error: why,
+    })?;
+
+    let duration = duration_from_dur_ext(item)
+        .or_else(|| duration_from_itunes_ext(item))
+        .map(Duration::from_secs_f32)
+        .ok_or(Error::MissingDuration)?;
+
+    let title = item.title().ok_or(Error::MissingEpisodeTitle)?;
+    let description = item.description().ok_or(Error::MissingDescription)?;
+
+    Ok(EpisodeInfo {
+        stream_url,
+        duration,
+        title: title.to_owned(),
+        date: parse_date(item),
+        description: description.to_owned(),
+    })
+}
+
+pub fn parse_date(item: &rss::Item) -> traits::Date {
+    use chrono::{DateTime, Utc};
+
+    let pub_date = item
+        .pub_date()
+        .map(DateTime::parse_from_rfc2822)
+        .map(Result::ok)
+        .flatten()
+        .map(DateTime::from); // convert to Utc
+    match pub_date {
+        Some(date) => Date::Publication(date),
+        None => Date::Added(Utc::now()),
+    }
+}
+
+fn url_from_enclosure(item: &rss::Item) -> Option<&str> {
+    item.enclosure().map(|encl| encl.url())
+}
+
+fn url_from_extensions(item: &rss::Item) -> Option<&str> {
+    let media = item.extensions().get("media")?;
+    let content = media.get("content")?;
+    let extention = content.first()?;
+    if extention.name() != "media:content" {
+        return None;
+    }
+    extention.attrs().get("url").map(String::as_str)
+}
+
+fn duration_from_itunes_ext(item: &rss::Item) -> Option<f32> {
+    item.itunes_ext()?.duration().map(parse_itunes_duration)?
+}
+
+fn duration_from_dur_ext(item: &rss::Item) -> Option<f32> {
+    let media = item.extensions().get("media")?;
+    let content = media.get("content")?;
+    let extention = content.first()?;
+    if extention.name() != "media:content" {
+        return None;
+    }
+    extention
+        .attrs()
+        .get("duration")
+        .map(|u| u.parse().ok())
+        .flatten()
+}
+
+fn parse_itunes_duration(duration: &str) -> Option<f32> {
+    let mut parts = duration.rsplitn(3, ':');
+    let seconds: f32 = parts.next()?.parse().ok()?;
+    let minutes: f32 = parts.next()?.parse().ok()?;
+    let hours: f32 = parts.next().unwrap_or("0").parse().ok()?;
+    Some(seconds + 60. * (minutes + 60. * hours))
+}

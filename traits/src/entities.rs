@@ -1,5 +1,8 @@
 pub use async_trait::async_trait;
 pub use color_eyre::eyre;
+use std::time::Duration;
+
+use chrono::{DateTime, Local, Utc};
 use serde::{Deserialize, Serialize};
 use tokio::sync::oneshot;
 use url::Url;
@@ -60,13 +63,23 @@ pub struct Podcast {
 }
 
 #[derive(Debug)]
-pub struct InvalidPodcastFeedUrl(url::ParseError);
+pub enum InvalidPodcastFeedUrl {
+    Parse(url::ParseError),
+    WrongScheme { is: String },
+}
+
 impl Podcast {
     pub fn try_from_searchres(
         res: SearchResult,
         id: PodcastId,
     ) -> Result<Self, InvalidPodcastFeedUrl> {
-        let feed = Url::parse(&res.url).map_err(InvalidPodcastFeedUrl)?;
+        let feed = Url::parse(&res.url).map_err(InvalidPodcastFeedUrl::Parse)?;
+        if feed.scheme() != "http" && feed.scheme() != "https" {
+            return Err(InvalidPodcastFeedUrl::WrongScheme {
+                is: feed.scheme().into(),
+            });
+        }
+
         Ok(Self {
             name: res.title,
             feed,
@@ -83,6 +96,35 @@ pub struct Episode {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpisodeDetails {
-    pub description: String,
     pub id: EpisodeId,
+    pub date: Date,
+    pub duration: Duration,
+    pub description: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+pub enum Date {
+    Publication(DateTime<Utc>),
+    Added(DateTime<Utc>),
+}
+
+impl Date {
+    pub fn inner(&self) -> &DateTime<Utc> {
+        match self {
+            Self::Publication(d) => d,
+            Self::Added(d) => d,
+        }
+    }
+    pub fn format(&self) -> String {
+        let local: DateTime<Local> = self.inner().clone().into();
+        let since = local.signed_duration_since(Local::now());
+        if since.num_days() > 30 {
+            return format!("{}", local.format("%d:%m:%Y"));
+        }
+        if since.num_hours() > 48 {
+            return format!("{} days ago", since.num_days());
+        }
+
+        format!("{} hours ago", since.num_hours())
+    }
 }

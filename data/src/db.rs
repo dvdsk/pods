@@ -1,11 +1,11 @@
 use tracing::debug;
-use traits::{DataUpdate, Episode, EpisodeDetails, Podcast, PodcastId, EpisodeId};
+use traits::{DataUpdate, Episode, EpisodeDetails, EpisodeId, Podcast, PodcastId};
 
 #[dbstruct::dbstruct(db=sled)]
 pub struct Store {
     pub podcasts: HashMap<PodcastId, Podcast>,
     pub episodes: HashMap<PodcastId, Vec<Episode>>,
-    pub episode_details: HashMap<EpisodeId, EpisodeDetails, >,
+    pub episode_details: HashMap<EpisodeId, EpisodeDetails>,
 }
 
 impl Store {
@@ -27,5 +27,18 @@ impl Store {
             Some(list) => list,
         };
         DataUpdate::Episodes { podcast_id, list }
+    }
+
+    pub(crate) fn episode_details_update(&self, episode_id: EpisodeId) -> DataUpdate {
+        let details = match self.episode_details().get(&episode_id).unwrap() {
+            None => {
+                debug!("No details for episode with id: {episode_id}");
+                return DataUpdate::Missing {
+                    variant: traits::DataUpdateVariant::EpisodeDetails { episode_id },
+                };
+            }
+            Some(details) => details,
+        };
+        DataUpdate::EpisodeDetails { details }
     }
 }

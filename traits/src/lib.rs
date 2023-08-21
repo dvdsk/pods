@@ -6,11 +6,14 @@ pub use datastore::*;
 pub use entities::*;
 
 use core::fmt;
+use std::time::Duration;
 
 pub use async_trait::async_trait;
 pub use color_eyre::eyre;
 use eyre::WrapErr;
 use tokio::sync::{broadcast, mpsc};
+
+pub use std::error::Error;
 
 #[async_trait]
 pub trait IntentReciever: Send + fmt::Debug {
@@ -68,17 +71,25 @@ pub trait IndexSearcher: Send {
         term: &str,
     ) -> (
         Vec<SearchResult>,
-        Result<(), Box<dyn std::error::Error + Send>>,
+        Result<(), Box<dyn Error + Send>>,
     );
 }
 
-// #[async_trait]
-// pub trait FeedIndexer: Send {
-// }
+#[derive(Debug)]
+pub struct EpisodeInfo {
+    pub stream_url: url::Url,
+    pub duration: Duration,
+    pub description: String,
+    pub title: String,
+    pub date: Date,
+}
 
 #[async_trait]
 pub trait Feed: Send + Sync {
-    async fn index(&self, podcast: &Podcast) -> Vec<Episode>;
+    async fn index(
+        &self,
+        podcast: &Podcast,
+    ) -> Result<Vec<EpisodeInfo>, Box<dyn Error>>;
     fn box_clone(&self) -> Box<dyn Feed>;
 }
 

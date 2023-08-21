@@ -113,6 +113,7 @@ impl traits::DataWStore for DataWriter {
         self.data.podcasts().insert(&podcast.id, &podcast).unwrap();
         self.update_all(Needed::PodcastList);
     }
+
     fn box_clone(&self) -> Box<dyn traits::DataWStore> {
         Box::new(self.clone())
     }
@@ -120,6 +121,17 @@ impl traits::DataWStore for DataWriter {
     fn add_episodes(&mut self, podcast: &traits::Podcast, episodes: Vec<traits::Episode>) {
         self.data.episodes().insert(&podcast.id, &episodes).unwrap();
         self.update_all(Needed::Episodes(podcast.id));
+    }
+
+    fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
+        use dbstruct::TryExtend;
+
+        let ids = details.iter().map(|e| e.id);
+        let pairs = details.iter().map(|e| (&e.id, e));
+        self.data.episode_details().try_extend(pairs).unwrap();
+        for id in ids {
+            self.update_all(Needed::EpisodeDetails(id));
+        }
     }
 }
 

@@ -12,7 +12,8 @@ use traits::PodcastId;
 use traits::SearchResult;
 pub use traits::{AppUpdate, UserIntent};
 
-mod tasks;
+/* TODO: remove? <21-08-23, dvdsk> */
+// mod tasks;
 
 #[async_trait]
 pub trait Ui: Send {
@@ -43,6 +44,7 @@ impl traits::LocalUI for Interface {
 }
 
 pub struct InternalPorts(pub ActionDecoder, pub Presenter);
+pub type UiBuilder = Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>;
 
 pub fn new(
     mut datastore: Box<dyn DataRStore>,

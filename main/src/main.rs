@@ -2,8 +2,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use data::Data;
-use presenter::InternalPorts;
-use presenter::Ui;
+use presenter::UiBuilder;
 use tokio::sync::Mutex;
 use traits::DataStore;
 use traits::Settings as _;
@@ -78,8 +77,8 @@ async fn main() {
         choice @ UiArg::Tui | choice @ UiArg::Gui => {
             let ui_fn = match choice {
                 UiArg::None => unreachable!(),
-                UiArg::Gui => Box::new(gui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
-                UiArg::Tui => Box::new(tui::new) as Box<dyn Fn(InternalPorts) -> Box<dyn Ui>>,
+                UiArg::Gui => Box::new(gui::new) as UiBuilder,
+                UiArg::Tui => Box::new(tui::new) as UiBuilder,
             };
             let (runtime, interface) = presenter::new(data.reader(), ui_fn);
             (Some(runtime), Some(interface))

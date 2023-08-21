@@ -3,12 +3,13 @@ use async_trait::async_trait;
 mod config;
 pub use config::*;
 
+use crate::EpisodeDetails;
 use crate::EpisodeId;
 use crate::PodcastId;
 use crate::Remote;
 use crate::Server;
 
-#[derive(Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DataUpdateVariant {
     Podcast,
     Episodes { podcast_id: PodcastId },
@@ -24,7 +25,13 @@ pub enum DataUpdate {
         podcast_id: PodcastId,
         list: Vec<crate::Episode>,
     },
+    Missing {
+        variant: DataUpdateVariant,
+    },
     Placeholder, // prevents irrifutable pattern warns
+    EpisodeDetails {
+        details: EpisodeDetails,
+    },
 }
 
 impl DataUpdate {
@@ -33,8 +40,14 @@ impl DataUpdate {
 
         match self {
             Self::Podcasts { .. } => Podcast,
-            Self::Episodes { podcast_id, ..} => Episodes { podcast_id: *podcast_id },
+            Self::Episodes { podcast_id, .. } => Episodes {
+                podcast_id: *podcast_id,
+            },
+            Self::EpisodeDetails { details } => EpisodeDetails {
+                episode_id: details.id,
+            },
             Self::Placeholder => panic!("placeholder should never be used"),
+            Self::Missing { .. } => panic!("can not wait for data no being there"),
         }
     }
 }
@@ -90,6 +103,7 @@ pub trait DataWStore: Send {
     /// Add a new podcast to the database.
     fn add_podcast(&mut self, podcast: crate::Podcast);
     fn add_episodes(&mut self, podcast: &crate::Podcast, episodes: Vec<crate::Episode>);
+    fn add_episode_details(&mut self, details: Vec<crate::EpisodeDetails>);
     fn box_clone(&self) -> Box<dyn DataWStore>;
 }
 

@@ -104,6 +104,12 @@ impl State {
                 }
             }
             Placeholder => panic!("Placeholder should never be used"),
+            EpisodeDetails { details } => if let Some(podcast) = &mut self.podcast {
+                if podcast.id == details.id {
+                    podcast.details = Some(details);
+                }
+            }
+            Missing { variant } => todo!("missing data for {variant:?}"),
         }
     }
 }
