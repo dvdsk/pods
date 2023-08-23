@@ -58,8 +58,8 @@ pub struct DataWriter {
 
 impl traits::DataRStore for DataReader {
     #[instrument(skip_all, ret)]
-    fn register(&mut self, tx: Box<dyn traits::DataTx>) -> Registration {
-        self.subs.register(tx)
+    fn register(&mut self, tx: Box<dyn traits::DataTx>, description: &'static str) -> Registration {
+        self.subs.register(tx, description)
     }
 
     #[instrument(skip_all, fields(registration))]
@@ -99,6 +99,7 @@ impl traits::DataRStore for DataReader {
 }
 
 impl DataWriter {
+    #[instrument(skip(self))]
     fn update_all(&mut self, data: Needed) {
         match self.reader_tx.try_send(ReadReq::update_all(data)) {
             Ok(_) => (),
@@ -109,6 +110,7 @@ impl DataWriter {
 }
 
 impl traits::DataWStore for DataWriter {
+    #[instrument(skip(self))]
     fn add_podcast(&mut self, podcast: traits::Podcast) {
         self.data.podcasts().insert(&podcast.id, &podcast).unwrap();
         self.update_all(Needed::PodcastList);

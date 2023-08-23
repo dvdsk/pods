@@ -1,15 +1,35 @@
+use color_eyre::eyre;
 use data::Data;
-use presenter::{AppUpdate, UserIntent};
+use presenter::{ActionDecoder, AppUpdate, GuiUpdate, Presenter, UiBuilder, UserIntent};
 use std::sync::Arc;
+use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
-use traits::{DataStore, IndexSearcher, LocalIntentReciever, Settings};
+use tokio::time::timeout;
+use traits::{async_trait, DataRStore, DataStore, DataUpdate, IndexSearcher, Settings};
 
-use super::simulate_user::{Action, Condition, Steps};
+use super::simulate_user::{Action, Condition, Steps, ViewableData};
 
-pub struct SimulatedUI {
-    intent_tx: mpsc::Sender<UserIntent>,
-    update_rx: mpsc::Receiver<AppUpdate>,
-    steps: Steps,
+pub struct SimulatedUI<'a> {
+    rx: Presenter,
+    tx: ActionDecoder,
+    steps: Option<Steps<'a>>,
+}
+
+// only implemented so we can get a SimulatedUI from presenter::new
+#[async_trait]
+impl<'a> presenter::Ui for SimulatedUI<'a> {
+    async fn run(&mut self) -> Result<(), eyre::Report> {
+        unimplemented!()
+    }
+}
+
+pub fn new_simulated_ui(interface: presenter::InternalPorts) -> Box<dyn presenter::Ui> {
+    let presenter::InternalPorts(tx, rx) = interface;
+    Box::new(SimulatedUI {
+        rx,
+        tx,
+        steps: None,
+    })
 }
 
 use tokio::sync::mpsc;
@@ -19,37 +39,82 @@ struct SimulatedUIPorts {
 }
 
 pub struct State;
+#[derive(Debug)]
+pub enum Error {
+    TimeoutError { step: usize },
+}
 
-impl SimulatedUI {
-    fn new(steps: Steps) -> (SimulatedUI, Box<dyn traits::LocalUI>) {
-        let (intent_tx, intent_rx) = mpsc::channel(100);
-        let (update_tx, update_rx) = mpsc::channel(100);
-        let intent_reciever = LocalIntentReciever::new(intent_rx, update_tx.clone());
-        (
-            SimulatedUI {
-                intent_tx,
-                update_rx,
-                steps,
-            },
-            Box::new(SimulatedUIPorts {
-                update_tx,
-                intent_reciever,
-            }),
-        )
+impl<'a> SimulatedUI<'a> {
+    fn new(
+        steps: Steps<'a>,
+        data: Box<dyn DataRStore>,
+    ) -> (SimulatedUI<'a>, Box<dyn traits::LocalUI>) {
+        let ui_fn = Box::new(new_simulated_ui) as UiBuilder;
+        let (ui, ports) = presenter::new(data, ui_fn);
+        // presenter returns the ui as a trait obj. We want to
+        // use presenter so but need a SimulatedUI, therefore we
+        // turn it into a concrete type again
+        let mut ui: Box<SimulatedUI> =
+            unsafe { Box::from_raw(Box::into_raw(ui) as *mut SimulatedUI) };
+        ui.steps = Some(steps);
+        (*ui, ports)
     }
-    async fn run(self) -> State {
-        for (condition, action) in self.steps.list {
+
+    async fn run(&mut self) -> Result<State, Error> {
+        use ViewableData::{Podcast, PodcastList};
+        let duration = self.steps.as_ref().map(|s| s.timeout).unwrap();
+        let list = &mut self.steps.as_mut().unwrap().list;
+        for (i, (condition, action)) in list.iter_mut().enumerate() {
             match condition {
                 Condition::None => (),
-                _ => todo!(),
+                Condition::DataUpdate(update) => {
+                    timeout(duration, data_update(&mut self.rx, update.clone()))
+                        .await
+                        .map_err(|_| Error::TimeoutError { step: i })?;
+                }
+                Condition::DataUpdateAndFnMut { update, func } => {
+                    timeout(
+                        duration,
+                        data_update_fnmut(&mut self.rx, update.clone(), func),
+                    )
+                    .await
+                    .map_err(|_| Error::TimeoutError { step: i })?;
+                }
+                other => todo!("{other:?}"),
             }
             match action {
-                Action::Intent(intent) => self.intent_tx.try_send(intent).unwrap(),
+                Action::Intent(UserIntent::AddPodcast(p)) => self.tx.add_podcast(p.clone()),
                 Action::Stop => break,
-                Action::View(data) => self.
+                Action::View(PodcastList) => self.tx.view_podcasts(),
+                Action::View(Podcast { podcast_id }) => self.tx.view_episodes(*podcast_id),
+                other => todo!("{other:?}"),
             }
         }
-        State
+        Ok(State)
+    }
+}
+
+async fn data_update_fnmut(
+    rx: &mut Presenter,
+    update: traits::DataUpdateVariant,
+    func: &mut dyn FnMut(&DataUpdate) -> bool,
+) {
+    loop {
+        let GuiUpdate::Data(got) = rx.update().await else { continue };
+        if got.variant() == update {
+            if func(&got) {
+                break;
+            }
+        }
+    }
+}
+
+async fn data_update(rx: &mut Presenter, update: traits::DataUpdateVariant) {
+    loop {
+        let GuiUpdate::Data(got) = rx.update().await else { continue };
+        if got.variant() == update {
+            break;
+        }
     }
 }
 
@@ -59,20 +124,25 @@ impl traits::LocalUI for SimulatedUIPorts {
     }
 }
 
-impl Steps {
-    pub async fn run(self) -> State {
-        let mut data = Data::new();
-        let server_config = data.settings_mut().server().get_value();
+async fn run_inner<'a>(steps: Steps<'a>) -> Result<State, Error> {
+    let mut data = Data::new();
+    let server_config = data.settings_mut().server().get_value();
 
-        let (ui, ui_port) = SimulatedUI::new(self);
+    let (mut ui, ui_port) = SimulatedUI::new(steps, data.reader());
 
-        let remote = Box::new(remote_ui::new(server_config));
-        let searcher = Arc::new(Mutex::new(search::new())) as Arc<Mutex<dyn IndexSearcher>>;
+    let remote = Box::new(remote_ui::new(server_config));
+    let searcher = Arc::new(Mutex::new(search::new())) as Arc<Mutex<dyn IndexSearcher>>;
 
-        let data = Box::new(data) as Box<dyn DataStore>;
-        let feed = Box::new(feed::Feed::new());
-        tokio::task::spawn(panda::app(data, Some(ui_port), remote, searcher, feed));
+    let data = Box::new(data) as Box<dyn DataStore>;
+    let feed = Box::new(feed::Feed::new());
+    tokio::task::spawn(panda::app(data, Some(ui_port), remote, searcher, feed));
 
-        ui.run().await
+    ui.run().await
+}
+
+impl<'a> Steps<'a> {
+    pub fn run(self) -> Result<State, Error> {
+        let rt = Runtime::new().unwrap();
+        rt.block_on(async { run_inner(self).await })
     }
 }

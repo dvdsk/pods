@@ -178,7 +178,7 @@ impl Application for State {
             Message::AddPodcast(idx) => {
                 self.search.add_podcast(idx, &mut self.tx);
                 self.loading = Some(Loading {
-                    needed_data: HashSet::from([DataUpdateVariant::Podcast]),
+                    needed_data: HashSet::from([DataUpdateVariant::Podcasts]),
                     page: Page::Podcasts,
                 });
             }

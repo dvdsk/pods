@@ -88,7 +88,7 @@ impl Podcast {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct Episode {
     pub name: String,
     pub id: EpisodeId,

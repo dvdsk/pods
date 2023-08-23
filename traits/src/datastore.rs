@@ -11,7 +11,7 @@ use crate::Server;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DataUpdateVariant {
-    Podcast,
+    Podcasts,
     Episodes { podcast_id: PodcastId },
     EpisodeDetails { episode_id: EpisodeId },
 }
@@ -39,7 +39,7 @@ impl DataUpdate {
         use DataUpdateVariant::*;
 
         match self {
-            Self::Podcasts { .. } => Podcast,
+            Self::Podcasts { .. } => Podcasts,
             Self::Episodes { podcast_id, .. } => Episodes {
                 podcast_id: *podcast_id,
             },
@@ -55,15 +55,22 @@ impl DataUpdate {
 pub enum DataKey {}
 pub trait DataSub: Send {}
 #[derive(Debug, Clone, Copy)]
-pub struct Registration(usize);
+pub struct Registration {
+    id: usize,
+    description: &'static str,
+}
 
 impl Registration {
-    pub fn new(id: usize) -> Self {
-        Self(id)
+    pub fn new(id: usize, description: &'static str) -> Self {
+        Self { id, description }
     }
 
     pub fn id(&self) -> usize {
-        self.0
+        self.id
+    }
+
+    pub fn description(&self) -> &'static str {
+        self.description
     }
 }
 
@@ -93,7 +100,7 @@ pub trait Settings {
 
 pub trait DataRStore: Send {
     /// Need to register before subscribing
-    fn register(&mut self, tx: Box<dyn DataTx>) -> Registration;
+    fn register(&mut self, tx: Box<dyn DataTx>, description: &'static str) -> Registration;
     /// Get updates until the subscription is dropped
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn DataSub>;
     fn sub_episodes(&self, registration: Registration, podcast: PodcastId) -> Box<dyn DataSub>;

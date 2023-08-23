@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
+use tracing::info;
 use traits::DataUpdate;
 use traits::EpisodeId;
 use traits::PodcastId;
@@ -47,6 +48,7 @@ impl ReadReq {
     }
 }
 
+#[derive(Debug)]
 pub enum Needed {
     PodcastList,
     Episodes(PodcastId),

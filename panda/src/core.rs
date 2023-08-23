@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tracing::{instrument, debug};
-use traits::{AppUpdate, DataStore, IndexSearcher, UserIntent, Feed};
+use tracing::{debug, instrument};
+use traits::{AppUpdate, DataStore, Feed, IndexSearcher, UserIntent};
 
 use crate::Reason;
 
@@ -18,7 +18,7 @@ pub(super) async fn run(
 ) -> Reason {
     db.set_local();
     let mut tasks = task::Tasks::new(searcher, db.writer(), db.reader());
-    tasks.maintain_feed(feed);
+    tasks.start_maintain_feed(feed).await;
     let (_, rx, remote) = interface.ports();
 
     loop {
@@ -29,7 +29,6 @@ pub(super) async fn run(
             None => return Reason::Exit,
         };
 
-        dbg!();
         debug!("got intent: {intent:?}");
         match intent {
             UserIntent::DisconnectRemote => unreachable!(),

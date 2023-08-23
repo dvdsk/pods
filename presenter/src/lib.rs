@@ -54,7 +54,7 @@ pub fn new(
     let (intent_tx, intent_rx) = mpsc::channel(32);
     let (data_tx, data_rx) = mpsc::channel(32);
 
-    let registration = datastore.register(Box::new(data_tx));
+    let registration = datastore.register(Box::new(data_tx), "presenter");
     let presenter = Presenter { update_rx, data_rx };
 
     let decoder = ActionDecoder {
@@ -163,19 +163,16 @@ impl ActionDecoder {
     pub fn view_podcasts(&mut self) {
         let sub = self.datastore.sub_podcasts(self.registration);
         self.subs.podcast = Some(sub);
-        return;
     }
 
     pub fn view_episodes(&mut self, podcast: PodcastId) {
         let sub = self.datastore.sub_episodes(self.registration, podcast);
         self.subs.episodes.insert(podcast, sub);
-        return;
     }
 
     pub fn add_podcast(&self, podcast: SearchResult) {
         self.intent_tx
             .try_send(UserIntent::AddPodcast(podcast))
             .unwrap();
-        return;
     }
 }

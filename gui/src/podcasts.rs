@@ -8,7 +8,7 @@ pub type Podcasts = Vec<traits::Podcast>;
 
 pub(super) fn load(state: &mut super::State) {
     state.tx.view_podcasts();
-    state.loading = Some(Loading::new(Page::Podcasts, [DataUpdateVariant::Podcast]));
+    state.loading = Some(Loading::new(Page::Podcasts, [DataUpdateVariant::Podcasts]));
 }
 
 pub fn view(

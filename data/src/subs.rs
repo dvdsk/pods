@@ -119,9 +119,9 @@ macro_rules! sub {
 }
 
 impl Subs {
-    pub(crate) fn register(&self, client: Box<dyn traits::DataTx>) -> Registration {
+    pub(crate) fn register(&self, client: Box<dyn traits::DataTx>, client_description: &'static str) -> Registration {
         let idx = self.senders.add(client);
-        Registration::new(idx)
+        Registration::new(idx, client_description)
     }
     sub! {sub_podcasts, podcast}
     pub(crate) fn sub_episodes(&self, registration: Registration, podcast: usize) -> Sub {
