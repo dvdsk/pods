@@ -1,4 +1,3 @@
-use crate::subs::Clients;
 use crate::Registration;
 
 use super::db;
@@ -7,7 +6,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
-use tracing::info;
 use traits::DataUpdate;
 use traits::EpisodeId;
 use traits::PodcastId;
