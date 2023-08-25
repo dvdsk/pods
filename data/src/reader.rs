@@ -30,8 +30,8 @@ impl ReadReq {
             Target::AllSubs => self.needed.subs(&subs),
         };
 
-        let data_update = self.needed.update(data);
-        subs.senders.update(&regs, data_update).await;
+        let data_update = dbg!(self.needed.update(data));
+        subs.senders.update(&dbg!(regs), data_update).await;
     }
 
     pub fn update_all(data: Needed) -> Self {

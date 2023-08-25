@@ -120,9 +120,11 @@ impl traits::DataWStore for DataWriter {
         Box::new(self.clone())
     }
 
-    fn add_episodes(&mut self, podcast: &traits::Podcast, episodes: Vec<traits::Episode>) {
-        self.data.episodes().insert(&podcast.id, &episodes).unwrap();
-        self.update_all(Needed::Episodes(podcast.id));
+    fn add_episodes(&mut self, podcast_id: traits::PodcastId, episodes: Vec<traits::Episode>) {
+        self.data.episodes().insert(&podcast_id, &episodes).unwrap();
+        dbg!();
+        self.update_all(Needed::Episodes(podcast_id));
+        dbg!();
     }
 
     fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
