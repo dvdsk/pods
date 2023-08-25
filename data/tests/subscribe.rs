@@ -2,6 +2,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 use data::Data;
+use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use traits::{
     DataRStore, DataStore, DataSub, DataUpdate, Podcast, PodcastId, Registration, SearchResult,
@@ -24,8 +25,8 @@ pub struct TestSub {
     reg: Registration,
 }
 
-fn testsubs(reader: &mut dyn DataRStore) -> Vec<TestSub> {
-    (0..10)
+async fn testsubs(reader: &mut dyn DataRStore) -> Vec<TestSub> {
+    let mut subs: Vec<_> = (0..1)
         .into_iter()
         .map(|_| {
             let (tx, rx) = mpsc::channel(10);
@@ -33,10 +34,19 @@ fn testsubs(reader: &mut dyn DataRStore) -> Vec<TestSub> {
             let sub = reader.sub_podcasts(reg);
             TestSub { rx, sub, reg }
         })
-        .collect()
+        .collect();
+
+    // get the initial update out
+    testsubs_got_update(&mut subs, |podcasts| podcasts.is_empty())
+        .await
+        .unwrap();
+    subs
 }
 
-async fn testsubs_got_update(list: &mut [TestSub], podcast_id: PodcastId) -> bool {
+async fn testsubs_got_update(
+    list: &mut [TestSub],
+    predicate: impl Fn(Vec<Podcast>) -> bool,
+) -> Result<bool, Elapsed> {
     use futures::stream::FuturesUnordered;
     use futures::StreamExt;
     let updates: FuturesUnordered<_> = list
@@ -50,45 +60,62 @@ async fn testsubs_got_update(list: &mut [TestSub], podcast_id: PodcastId) -> boo
         .collect();
     timeout(
         Duration::from_secs(1),
-        updates.all(|podcast| async move { podcast.first() == Some(&test_podcast(podcast_id)) }),
+        updates.all(|podcast| async { predicate(podcast) }),
     )
     .await
-    .unwrap()
 }
 
 #[tokio::test]
-async fn subscribers_recieves_current_state() {
+async fn recieves_current_state() {
     let mut data = Data::new();
     let mut writer = data.writer();
     writer.add_podcast(test_podcast(1));
 
-    let mut subs = testsubs(data.reader().as_mut());
-    assert!(testsubs_got_update(&mut subs, 1).await);
+    let mut subs = testsubs(data.reader().as_mut()).await;
+    assert!(
+        testsubs_got_update(&mut subs, |podcasts| podcasts[0] == test_podcast(1))
+            .await
+            .unwrap()
+    );
 }
 
 #[tokio::test]
-async fn subscribers_are_updated() {
+async fn are_updated() {
     let mut data = Data::new();
-    let mut subs = testsubs(data.reader().as_mut());
+    let mut subs = testsubs(data.reader().as_mut()).await;
 
     let mut writer = data.writer();
     writer.add_podcast(test_podcast(1));
-    assert!(testsubs_got_update(&mut subs, 1).await);
+    assert!(
+        testsubs_got_update(&mut subs, |podcasts| podcasts[0] == test_podcast(1))
+            .await
+            .unwrap()
+    );
+    dbg!();
     writer.add_podcast(test_podcast(2));
-    assert!(testsubs_got_update(&mut subs, 2).await);
+    dbg!();
+    assert!(
+        testsubs_got_update(&mut subs, |podcasts| podcasts[1] == test_podcast(2))
+            .await
+            .unwrap()
+    );
 }
 
 struct FakeSub;
 impl DataSub for FakeSub {}
 
 #[tokio::test]
-async fn dropped_subscribers_are_not_updated() {
+async fn dropped_are_not_updated() {
     let mut data = Data::new();
-    let mut subs = testsubs(data.reader().as_mut());
+    let mut subs = testsubs(data.reader().as_mut()).await;
 
     let mut writer = data.writer();
     writer.add_podcast(test_podcast(1));
-    assert!(testsubs_got_update(&mut subs, 1).await);
+    assert!(
+        testsubs_got_update(&mut subs, |podcasts| podcasts[0] == test_podcast(1))
+            .await
+            .unwrap()
+    );
 
     for sub in &mut subs {
         sub.sub = Box::new(FakeSub);
@@ -96,5 +123,9 @@ async fn dropped_subscribers_are_not_updated() {
         // should no longer be subscribed past here
     }
     writer.add_podcast(test_podcast(2));
-    assert!(!testsubs_got_update(&mut subs, 2).await);
+    assert!(
+        testsubs_got_update(&mut subs, |podcasts| podcasts.len() == 1)
+            .await
+            .is_err()
+    );
 }

@@ -6,15 +6,18 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinHandle;
+use tracing::warn;
 use traits::DataUpdate;
 use traits::EpisodeId;
 use traits::PodcastId;
 
+#[derive(Debug)]
 pub struct ReadReq {
     needed: Needed,
     target: Target,
 }
 
+#[derive(Debug)]
 pub enum Target {
     AllSubs,
     One(Registration),
@@ -103,9 +106,7 @@ async fn read_loop(data: Arc<db::Store>, subs: subs::Subs, mut rx: ReadReciever)
 
         data_req.handle(&subs, &data).await;
     }
-    // loop wait for new subs
-    // (in future also wait for remote subs)
-    // then send them the data they need
+    warn!("Read loop shutting down, can no longer read data")
 }
 
 type ReadReciever = mpsc::Receiver<ReadReq>;
