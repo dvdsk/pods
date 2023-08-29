@@ -2,13 +2,18 @@ use std::sync::Arc;
 
 use clap::Parser;
 use data::Data;
+use presenter::Ui;
 use presenter::UiBuilder;
 use tokio::sync::Mutex;
+use tokio::task::JoinError;
+use tracing::info;
 use traits::DataStore;
+use traits::Feed;
+use traits::IndexSearcher;
+use traits::LocalUI;
 use traits::Settings as _;
 
-use tokio::signal;
-
+use main::run_and_watch_for_errors;
 mod errors;
 
 #[derive(Debug, Clone, clap::ValueEnum)]
@@ -68,7 +73,7 @@ async fn main() {
     errors::install_tracing();
 
     let cli = Cli::parse();
-    let mut data = Data::new();
+    let (mut data, data_maintain) = Data::new();
     force_cli_arguments(data.settings_mut(), &cli);
     let server_config = data.settings_mut().server().get_value();
 
@@ -90,10 +95,16 @@ async fn main() {
 
     let data = Box::new(data) as Box<dyn DataStore>;
     let feed = Box::new(feed::Feed::new());
-    tokio::task::spawn(panda::app(data, ui_port, remote, searcher, feed));
 
-    match ui_runtime {
-        Some(mut ui) => ui.run().await.unwrap(),
-        None => signal::ctrl_c().await.unwrap(),
-    }
+    run_and_watch_for_errors(
+        data,
+        ui_port,
+        remote,
+        searcher,
+        feed,
+        data_maintain,
+        ui_runtime,
+    )
+    .await;
 }
+

@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use traits::{DataUpdate, PodcastId, Registration, EpisodeId};
+use tracing::{debug, instrument};
+use traits::{DataUpdate, EpisodeId, PodcastId, Registration};
 
 #[derive(Debug)]
 pub(crate) struct Client {
@@ -27,6 +28,7 @@ impl Client {
     }
 }
 
+#[derive(Debug)]
 pub struct Sub {
     expired: Arc<AtomicBool>,
 }
@@ -91,7 +93,9 @@ impl Senders {
         list.push(client);
         list.len() - 1
     }
+    #[instrument(skip(self, update))]
     pub(super) async fn update(&self, recievers: &[Registration], update: DataUpdate) {
+        debug!("Sending data update (variant: {:?})", update.variant());
         for reciever in recievers {
             let mut tx = {
                 let list = self.0.lock().unwrap();
@@ -102,8 +106,10 @@ impl Senders {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default, Clone, derivative::Derivative)]
+#[derivative(Debug)]
 pub(crate) struct Subs {
+    #[derivative(Debug = "ignore")]
     pub(crate) senders: Senders,
     pub(crate) podcast: Clients,
     pub(crate) episodes: ClientsMap<PodcastId>,
@@ -112,6 +118,7 @@ pub(crate) struct Subs {
 
 macro_rules! sub {
     ($name:ident, $member:ident) => {
+        #[tracing::instrument(skip(self), ret)]
         pub fn $name(&self, registration: Registration) -> Sub {
             self.$member.sub(registration)
         }
@@ -119,12 +126,24 @@ macro_rules! sub {
 }
 
 impl Subs {
-    pub(crate) fn register(&self, client: Box<dyn traits::DataTx>, client_description: &'static str) -> Registration {
+    pub(crate) fn register(
+        &self,
+        client: Box<dyn traits::DataTx>,
+        client_description: &'static str,
+    ) -> Registration {
         let idx = self.senders.add(client);
         Registration::new(idx, client_description)
     }
     sub! {sub_podcasts, podcast}
-    pub(crate) fn sub_episodes(&self, registration: Registration, podcast: usize) -> Sub {
+    pub(crate) fn sub_episodes(&self, registration: Registration, podcast: PodcastId) -> Sub {
         self.episodes.sub(registration, podcast)
+    }
+
+    pub(crate) fn sub_episode_details(
+        &self,
+        registration: Registration,
+        episode: EpisodeId,
+    ) -> Sub {
+        self.episode_details.sub(registration, episode)
     }
 }

@@ -56,9 +56,11 @@ fn adding_episodes_works() {
             podcast_id.store(podcasts.first().unwrap().id, Ordering::Relaxed);
             true
         })
-        .then_view_using(|| ViewableData::Podcast {
+        .then_view_with(|| ViewableData::Podcast {
             podcast_id: podcast_id.load(Ordering::Relaxed),
         })
+        // todo check if we are not just getting the empty list 
+        // because thats the first update schedualled
         .after_data_and(
             DataUpdateVariant::Episodes {
                 podcast_id: podcast_id.load(Ordering::Relaxed),
@@ -66,7 +68,7 @@ fn adding_episodes_works() {
             |update| {
                 let DataUpdate::Episodes { list, .. } = update else { panic!() };
                 episodes = Some(list.clone());
-                true
+                !list.is_empty()
             },
         )
         .then_stop()

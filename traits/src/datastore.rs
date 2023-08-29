@@ -100,10 +100,15 @@ pub trait Settings {
 
 pub trait DataRStore: Send {
     /// Need to register before subscribing
+    #[must_use]
     fn register(&mut self, tx: Box<dyn DataTx>, description: &'static str) -> Registration;
     /// Get updates until the subscription is dropped
+    #[must_use]
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn DataSub>;
+    #[must_use]
     fn sub_episodes(&self, registration: Registration, podcast: PodcastId) -> Box<dyn DataSub>;
+    #[must_use]
+    fn sub_episode_details(&self, registration: Registration, episode: EpisodeId) -> Box<dyn DataSub>;
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {

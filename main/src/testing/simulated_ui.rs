@@ -1,7 +1,10 @@
+use std::panic;
+use std::sync::Arc;
+
 use color_eyre::eyre;
 use data::Data;
 use presenter::{ActionDecoder, AppUpdate, GuiUpdate, Presenter, UiBuilder, UserIntent};
-use std::sync::Arc;
+use tokio::task::JoinError;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::time::timeout;
@@ -124,8 +127,16 @@ impl traits::LocalUI for SimulatedUIPorts {
     }
 }
 
+enum Res {
+    Data(Result<(), JoinError>),
+    App(Result<(), JoinError>),
+    UI(Result<State, Error>),
+}
+use futures::FutureExt;
+use futures_concurrency::future::Race;
+
 async fn run_inner<'a>(steps: Steps<'a>) -> Result<State, Error> {
-    let mut data = Data::new();
+    let (mut data, data_maintain) = Data::new();
     let server_config = data.settings_mut().server().get_value();
 
     let (mut ui, ui_port) = SimulatedUI::new(steps, data.reader());
@@ -135,9 +146,19 @@ async fn run_inner<'a>(steps: Steps<'a>) -> Result<State, Error> {
 
     let data = Box::new(data) as Box<dyn DataStore>;
     let feed = Box::new(feed::Feed::new());
-    tokio::task::spawn(panda::app(data, Some(ui_port), remote, searcher, feed));
 
-    ui.run().await
+    let app =
+        tokio::task::spawn(panda::app(data, Some(ui_port), remote, searcher, feed)).map(Res::App);
+    let ui = ui.run().map(Res::UI);
+    let data_maintain = data_maintain.map(Res::Data);
+
+    match (app, ui, data_maintain).race().await {
+        Res::Data(Err(e)) => panic::resume_unwind(e.into_panic()),
+        Res::App(Err(e)) => panic::resume_unwind(e.into_panic()),
+        Res::UI(Err(e)) => panic!("UI ran into error: {e:?}"),
+        Res::UI(Ok(state)) => return Ok(state),
+        _ => unreachable!(),
+    }
 }
 
 impl<'a> Steps<'a> {

@@ -8,6 +8,7 @@ use tracing::instrument;
 use traits::DataRStore;
 use traits::DataSub;
 use traits::DataUpdate;
+use traits::EpisodeId;
 use traits::PodcastId;
 use traits::SearchResult;
 pub use traits::{AppUpdate, UserIntent};
@@ -125,6 +126,7 @@ impl Presenter {
 struct Subs {
     podcast: Option<Box<dyn DataSub>>,
     episodes: HashMap<PodcastId, Box<dyn DataSub>>,
+    episode_details: HashMap<EpisodeId, Box<dyn DataSub>>,
 }
 
 pub struct ActionDecoder {
@@ -168,6 +170,11 @@ impl ActionDecoder {
     pub fn view_episodes(&mut self, podcast: PodcastId) {
         let sub = self.datastore.sub_episodes(self.registration, podcast);
         self.subs.episodes.insert(podcast, sub);
+    }
+
+    pub fn view_episode_details(&mut self, episode: EpisodeId) {
+        let sub = self.datastore.sub_episode_details(self.registration, episode);
+        self.subs.episodes.insert(episode, sub);
     }
 
     pub fn add_podcast(&self, podcast: SearchResult) {

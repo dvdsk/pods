@@ -10,8 +10,11 @@ use reader::ReadReq;
 use reader::Reader;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
+use tokio::task::JoinHandle;
 use tracing::error;
+use tracing::info;
 use tracing::instrument;
+use traits::EpisodeId;
 use traits::Registration;
 
 pub struct Data {
@@ -23,20 +26,23 @@ pub struct Data {
 }
 
 impl Data {
-    pub fn new() -> Self {
+    pub fn new() -> (Self, JoinHandle<()>) {
         let tempdir = tempfile::tempdir().unwrap();
         let data = db::Store::new(&tempdir).unwrap();
         let data = Arc::new(data);
         let subs = subs::Subs::default();
-        let reader = Reader::new(data.clone(), subs.clone());
+        let (reader, reader_loop) = Reader::new(data.clone(), subs.clone());
 
-        Data {
-            config: Arc::new(Settings {}),
-            data,
-            subs,
-            _tempdir: tempdir,
-            reader,
-        }
+        (
+            Data {
+                config: Arc::new(Settings {}),
+                data,
+                subs,
+                _tempdir: tempdir,
+                reader,
+            },
+            reader_loop,
+        )
     }
 
     pub fn settings_mut(&mut self) -> &mut Settings {
@@ -96,15 +102,32 @@ impl traits::DataRStore for DataReader {
         }
         Box::new(sub)
     }
+
+    fn sub_episode_details(
+        &self,
+        registration: Registration,
+        episode: EpisodeId,
+    ) -> Box<dyn traits::DataSub> {
+        let sub = self.subs.sub_episode_details(registration, episode);
+        match self
+            .reader_tx
+            .try_send(ReadReq::update_one(registration, Needed::Episodes(episode)))
+        {
+            Ok(_) => (),
+            Err(TrySendError::Full(_)) => error!("reader pipe full"),
+            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
+        }
+        Box::new(sub)
+    }
 }
 
 impl DataWriter {
     #[instrument(skip(self))]
-    fn update_all(&mut self, data: Needed) {
+    fn update_all(&mut self, data: Vec<Needed>) {
         match self.reader_tx.try_send(ReadReq::update_all(data)) {
             Ok(_) => (),
-            Err(TrySendError::Full(_)) => error!("reader pipe full"),
-            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
+            Err(TrySendError::Full(_)) => panic!("reader pipe full, messages are being send to quickly or reader is not processing fast enough"),
+            Err(TrySendError::Closed(_)) => panic!("reader shut down before data writers"),
         }
     }
 }
@@ -113,7 +136,8 @@ impl traits::DataWStore for DataWriter {
     #[instrument(skip(self))]
     fn add_podcast(&mut self, podcast: traits::Podcast) {
         self.data.podcasts().insert(&podcast.id, &podcast).unwrap();
-        self.update_all(Needed::PodcastList);
+        self.update_all(vec![Needed::PodcastList]);
+        info!("added podcast")
     }
 
     fn box_clone(&self) -> Box<dyn traits::DataWStore> {
@@ -122,9 +146,7 @@ impl traits::DataWStore for DataWriter {
 
     fn add_episodes(&mut self, podcast_id: traits::PodcastId, episodes: Vec<traits::Episode>) {
         self.data.episodes().insert(&podcast_id, &episodes).unwrap();
-        dbg!();
-        self.update_all(Needed::Episodes(podcast_id));
-        dbg!();
+        self.update_all(vec![Needed::Episodes(podcast_id)]);
     }
 
     fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
@@ -133,9 +155,8 @@ impl traits::DataWStore for DataWriter {
         let ids = details.iter().map(|e| e.id);
         let pairs = details.iter().map(|e| (&e.id, e));
         self.data.episode_details().try_extend(pairs).unwrap();
-        for id in ids {
-            self.update_all(Needed::EpisodeDetails(id));
-        }
+        let batch = ids.map(Needed::EpisodeDetails).collect();
+        self.update_all(batch);
     }
 }
 

@@ -15,7 +15,6 @@ pub enum Condition<'a> {
         update: DataUpdateVariant,
         func: Box<dyn FnMut(&DataUpdate) -> bool + Send + 'a>,
     },
-    Sleep(std::time::Duration),
     AppUpdate(AppUpdateVariant),
     DataUpdate(DataUpdateVariant),
 }
@@ -27,7 +26,6 @@ impl std::fmt::Debug for Condition<'_> {
                 write!(f, "Condition::FnMut{{ DataUpdate::{update:?}, .. }}")
             }
             Condition::None => write!(f, "Condition::None"),
-            Condition::Sleep(d) => write!(f, "Condition::Sleep({d:?})"),
             Condition::AppUpdate(u) => write!(f, "Condition::AppUpdate({u:?})"),
             Condition::DataUpdate(u) => write!(f, "Condition::DataUpdate({u:?})"),
         }
@@ -79,7 +77,7 @@ impl<'a> StepsWNextCondition<'a> {
         }
     }
 
-    pub fn then_view_using<F>(mut self, mut func: F) -> Steps<'a>
+    pub fn then_view_with<F>(mut self, mut func: F) -> Steps<'a>
     where
         F: FnMut() -> ViewableData + Send + 'a,
     {
@@ -143,14 +141,6 @@ impl<'a> Steps<'a> {
                 update: data,
                 func: Box::new(condition),
             },
-            list: self.list,
-            timeout: self.timeout,
-        }
-    }
-
-    fn sleep(self, duration: std::time::Duration) -> StepsWNextCondition<'a> {
-        StepsWNextCondition {
-            next_condition: Condition::Sleep(duration),
             list: self.list,
             timeout: self.timeout,
         }

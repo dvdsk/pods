@@ -5,15 +5,17 @@ use super::subs;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
+use tokio::task::AbortHandle;
 use tokio::task::JoinHandle;
+use tokio::task::JoinSet;
+use tracing::instrument;
 use tracing::warn;
 use traits::DataUpdate;
-use traits::EpisodeId;
 use traits::PodcastId;
 
 #[derive(Debug)]
 pub struct ReadReq {
-    needed: Needed,
+    needed: Vec<Needed>,
     target: Target,
 }
 
@@ -24,17 +26,48 @@ pub enum Target {
 }
 
 impl ReadReq {
-    async fn handle(&self, subs: &subs::Subs, data: &db::Store) {
-        let regs = match self.target {
-            Target::One(reg) => vec![reg],
-            Target::AllSubs => self.needed.subs(&subs),
+    #[instrument(skip(data, tasks))]
+    async fn handle(self, subs: &subs::Subs, data: &Arc<db::Store>, tasks: &mut JoinSet<()>) {
+        let needed = if self.needed.len() > 1 {
+            /* TODO: do away with background task (commit first!) in
+             * favor of set/set compare for batches <27-08-23, dvdsk> */
+            let batch = self.handle_batch(subs.clone(), data.clone());
+            tasks.spawn(batch);
+            return;
+        } else {
+            self.needed.first().unwrap()
         };
 
-        let data_update = dbg!(self.needed.update(data));
-        subs.senders.update(&dbg!(regs), data_update).await;
+        let regs = match self.target {
+            Target::One(reg) => vec![reg],
+            Target::AllSubs => needed.subs(&subs),
+        };
+
+        let data_update = needed.update(&data);
+        subs.senders.update(&regs, data_update).await;
     }
 
-    pub fn update_all(data: Needed) -> Self {
+    // specialized version of handle that performs better on large
+    // updates
+    async fn handle_batch(self, subs: subs::Subs, data: Arc<db::Store>) {
+        match self.target {
+            Target::AllSubs => {
+                for needed in &self.needed {
+                    let data_update = needed.update(&data);
+                    let regs = needed.subs(&subs);
+                    subs.senders.update(&regs, data_update).await;
+                }
+            }
+            Target::One(reg) => {
+                for needed in &self.needed {
+                    let data_update = needed.update(&data);
+                    subs.senders.update(&[reg], data_update).await;
+                }
+            }
+        }
+    }
+
+    pub fn update_all(data: Vec<Needed>) -> Self {
         Self {
             needed: data,
             target: Target::AllSubs,
@@ -43,7 +76,7 @@ impl ReadReq {
 
     pub(crate) fn update_one(registration: Registration, data: Needed) -> ReadReq {
         Self {
-            needed: data,
+            needed: vec![data],
             target: Target::One(registration),
         }
     }
@@ -53,7 +86,7 @@ impl ReadReq {
 pub enum Needed {
     PodcastList,
     Episodes(PodcastId),
-    EpisodeDetails(EpisodeId),
+    EpisodeDetails(PodcastId),
 }
 
 impl Needed {
@@ -75,16 +108,23 @@ impl Needed {
 }
 
 pub(crate) struct Reader {
-    task: JoinHandle<()>,
     tx: mpsc::Sender<ReadReq>,
+    abort_handle: AbortHandle,
 }
 
 impl Reader {
-    pub(crate) fn new(data: Arc<db::Store>, subs: subs::Subs) -> Self {
+    #[must_use]
+    pub(crate) fn new(data: Arc<db::Store>, subs: subs::Subs) -> (Self, JoinHandle<()>) {
         let (tx, rx) = mpsc::channel(20);
         let read_loop = read_loop(data, subs, rx);
         let task = task::spawn(read_loop);
-        Self { task, tx }
+        (
+            Self {
+                tx,
+                abort_handle: task.abort_handle(),
+            },
+            task,
+        )
     }
 
     pub(crate) fn read_req_tx(&self) -> mpsc::Sender<ReadReq> {
@@ -94,19 +134,51 @@ impl Reader {
 
 impl Drop for Reader {
     fn drop(&mut self) {
-        self.task.abort()
+        self.abort_handle.abort()
     }
 }
 
 async fn read_loop(data: Arc<db::Store>, subs: subs::Subs, mut rx: ReadReciever) {
+    use futures::FutureExt;
+    use futures_concurrency::future::Race;
+
+    let mut tasks = JoinSet::new();
     loop {
-        let Some(data_req) = rx.recv().await else {
+        enum Res {
+            DataReq(Option<ReadReq>),
+            Panic(Box<dyn std::any::Any + Send + 'static>),
+        }
+
+        let new_req = rx.recv().map(Res::DataReq);
+        let panic = panicked(&mut tasks).map(Res::Panic);
+
+        let req = match (new_req, panic).race().await {
+            Res::DataReq(req) => req,
+            Res::Panic(reason) => std::panic::resume_unwind(reason),
+        };
+
+        let Some(data_req) = req else {
+            tasks.abort_all();
             break;
         };
 
-        data_req.handle(&subs, &data).await;
+        data_req.handle(&subs, &data, &mut tasks).await;
     }
     warn!("Read loop shutting down, can no longer read data")
+}
+
+pub async fn panicked(tasks: &mut JoinSet<()>) -> Box<dyn std::any::Any + Send + 'static> {
+    loop {
+        let finished = tasks
+            .join_next()
+            .await
+            .expect("set is never empty since `maintain_feed` runs till the end");
+        if let Err(e) = finished {
+            if e.is_panic() {
+                return e.into_panic();
+            }
+        }
+    }
 }
 
 type ReadReciever = mpsc::Receiver<ReadReq>;

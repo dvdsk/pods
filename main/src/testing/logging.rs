@@ -20,7 +20,9 @@ pub fn install_tracing() {
     use std::sync::Once;
     static TRACING_SETUP: Once = Once::new();
     TRACING_SETUP.call_once(|| {
-        let fmt_layer = fmt::layer().pretty().with_line_number(true);
+        let fmt_layer = fmt::layer().pretty()
+            .with_writer(std::io::stdout) // so it is captured by test harnass
+            .with_line_number(true);
         let filter_layer = EnvFilter::try_from_default_env()
             .or_else(|_| EnvFilter::try_new("info"))
             .unwrap()

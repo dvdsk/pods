@@ -7,6 +7,7 @@ use tokio::task::JoinSet;
 use tracing::debug;
 use tracing::info;
 use tracing::instrument;
+use traits::DataSub;
 use traits::Feed;
 use traits::IndexSearcher;
 use traits::{AppUpdate, DataRStore, DataUpdate, DataWStore, Episode, EpisodeDetails};
@@ -40,6 +41,21 @@ impl Tasks {
         }
     }
 
+    pub async fn panicked(&mut self) -> Box<dyn std::any::Any + Send + 'static> {
+        loop {
+            let finished = self
+                .set
+                .join_next()
+                .await
+                .expect("set is never empty since `maintain_feed` runs till the end");
+            if let Err(e) = finished {
+                if e.is_panic() {
+                    return e.into_panic()
+                }
+            }
+        }
+    }
+
     pub fn search(&mut self, query: String, tx: Box<dyn Updater>) {
         let search = search(self.searcher.clone(), query, tx);
         self.set.spawn(search);
@@ -55,21 +71,29 @@ impl Tasks {
     pub(crate) async fn start_maintain_feed(&mut self, feed: Box<dyn Feed>) {
         let (tx, rx) = mpsc::channel(10);
         let reg = self.db_reader.register(Box::new(tx), "maintain_feed");
-        self.db_reader.sub_podcasts(reg);
+        let sub = self.db_reader.sub_podcasts(reg);
         let ready = Arc::new(Notify::new());
-        let maintain = maintain_feed(rx, feed, self.db_writer.box_clone(), reg, ready.clone());
+        let maintain = maintain_feed(
+            rx,
+            feed,
+            self.db_writer.box_clone(),
+            reg,
+            sub,
+            ready.clone(),
+        );
         self.set.spawn(maintain);
         ready.notified().await
     }
 }
 
 // TODO report errors?
-#[instrument(skip(rx, feed, db))]
+#[instrument(skip(rx, feed, db, _subscription))]
 async fn maintain_feed(
     mut rx: mpsc::Receiver<DataUpdate>,
     feed: Box<dyn Feed>,
     mut db: Box<dyn DataWStore>,
     _registration: Registration,
+    _subscription: Box<dyn DataSub>,
     ready: Arc<Notify>,
 ) {
     let mut known = HashSet::new();
@@ -83,7 +107,6 @@ async fn maintain_feed(
         let DataUpdate::Podcasts { podcasts } = update else {
             panic!("maintain feed recieved update it is not subscribed too");
         };
-        dbg!(&podcasts);
 
         let podcasts = HashSet::from_iter(podcasts);
         for new_podcast in podcasts.difference(&known) {
@@ -109,7 +132,7 @@ async fn maintain_feed(
                 "adding episode for podcast: {}, id: {}",
                 new_podcast.name, new_podcast.id
             );
-            db.add_episodes(&new_podcast, list);
+            db.add_episodes(new_podcast.id, list);
             db.add_episode_details(details);
         }
         known.extend(podcasts.into_iter());

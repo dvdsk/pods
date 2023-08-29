@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use futures::FutureExt;
+use futures_concurrency::future::Race;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
 use traits::{AppUpdate, DataStore, Feed, IndexSearcher, UserIntent};
@@ -24,7 +26,21 @@ pub(super) async fn run(
     loop {
         // Note different intents can be from different users
         // if we are running as a server
-        let (intent, mut tx) = match rx.next_intent().await {
+        enum Res {
+            Intent(Option<(UserIntent, Box<(dyn traits::Updater + 'static)>)>),
+            Panic(Box<dyn std::any::Any + Send + 'static>),
+        }
+
+        let catch_panics = tasks.panicked().map(Res::Panic);
+        let next_intent = rx.next_intent().map(Res::Intent);
+        let res = (catch_panics, next_intent).race().await;
+
+        let next_intent = match res {
+            Res::Panic(reason) => std::panic::resume_unwind(reason),
+            Res::Intent(next_intent) => next_intent,
+        };
+
+        let (intent, mut tx) = match next_intent {
             Some(val) => val,
             None => return Reason::Exit,
         };
