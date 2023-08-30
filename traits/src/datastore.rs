@@ -122,6 +122,8 @@ pub trait DataRStore: Send {
 }
 pub trait DataWStore: Send {
     /// Add a new podcast to the database.
+    fn podcast_id_gen(&self) -> Box<dyn IdGen>;
+    fn episode_id_gen(&self) -> Box<dyn IdGen>;
     fn add_podcast(&mut self, podcast: crate::Podcast);
     fn add_episodes(&mut self, podcast_id: crate::PodcastId, episodes: Vec<crate::Episode>);
     fn add_episode_details(&mut self, details: Vec<crate::EpisodeDetails>);

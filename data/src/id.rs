@@ -1,17 +1,33 @@
 use crate::db;
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const LEAP: u64 = 100;
 
 macro_rules! impl_idgen {
     ($struct:ident, $field:ident) => {
-        struct $struct {
+        pub(crate) struct $struct {
             next_free: Option<u64>,
             db: Arc<db::Store>,
         }
 
+        mod $field {
+            use core::sync::atomic::AtomicBool;
+            pub(super) static IN_USE: AtomicBool = AtomicBool::new(false);
+        }
+
         impl $struct {
             pub fn new(db: Arc<db::Store>) -> Self {
+                let res = $field::IN_USE.compare_exchange(
+                    false,
+                    true,
+                    Ordering::SeqCst,
+                    Ordering::Relaxed,
+                );
+                if res.is_err() {
+                    panic!("Can only run one IdGen simultatiously")
+                }
+
                 Self {
                     next_free: None,
                     db,
@@ -23,6 +39,12 @@ macro_rules! impl_idgen {
                 let new_id = id + LEAP;
                 db.$field().set(&new_id).unwrap();
                 new_id
+            }
+        }
+
+        impl Drop for $struct {
+            fn drop(&mut self) {
+                $field::IN_USE.store(false, Ordering::Relaxed);
             }
         }
 
