@@ -8,22 +8,24 @@ use tracing::warn;
 use iced::widget::{self, Column, Scrollable};
 use traits::{DataUpdateVariant, Episode, EpisodeDetails, EpisodeId, PodcastId};
 
-pub(crate) fn load(state: &mut crate::State, podcast: PodcastId, episode: Option<EpisodeId>) {
+pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, episode: Option<EpisodeId>) {
     let Some(podcast) = state
         .podcasts
         .iter()
-        .find(|p| p.id == podcast) else {
-            warn!("podcast with id: {podcast} got deleted after clicking view");
+        .find(|p| p.id == podcast_id) else {
+            warn!("podcast with id: {podcast_id} got deleted after clicking view");
             return;
         };
 
-    state.tx.view_episodes(podcast.id);
-    state.podcast = Some(crate::Podcast {
-        name: podcast.name.clone(),
-        id: podcast.id,
-        episodes: Vec::new(),
-        details: None,
-    });
+    if state.podcast.as_ref().map(|p| p.id) != Some(podcast.id) {
+        state.tx.view_episodes(podcast.id);
+        state.podcast = Some(crate::Podcast {
+            name: podcast.name.clone(),
+            id: podcast.id,
+            episodes: Vec::new(),
+            details: None,
+        });
+    }
 
     let mut needed_data = HashSet::from([DataUpdateVariant::Episodes {
         podcast_id: podcast.id,

@@ -1,6 +1,8 @@
 use std::sync::Arc;
+
 mod config;
 mod db;
+mod id;
 mod reader;
 mod subs;
 

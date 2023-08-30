@@ -7,7 +7,6 @@ use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::AbortHandle;
 use tokio::task::JoinHandle;
-use tokio::task::JoinSet;
 use tracing::instrument;
 use tracing::warn;
 use traits::DataUpdate;
@@ -26,13 +25,12 @@ pub enum Target {
 }
 
 impl ReadReq {
-    #[instrument(skip(data, tasks))]
-    async fn handle(self, subs: &subs::Subs, data: &Arc<db::Store>, tasks: &mut JoinSet<()>) {
+    #[instrument(skip(data))]
+    async fn handle(self, subs: &subs::Subs, data: &Arc<db::Store>) {
         let needed = if self.needed.len() > 1 {
-            /* TODO: do away with background task (commit first!) in
-             * favor of set/set compare for batches <27-08-23, dvdsk> */
-            let batch = self.handle_batch(subs.clone(), data.clone());
-            tasks.spawn(batch);
+            /* TODO: 
+             * set/set compare for batches <27-08-23, dvdsk> */
+            self.handle_batch(subs.clone(), data.clone()).await;
             return;
         } else {
             self.needed.first().unwrap()
@@ -139,46 +137,14 @@ impl Drop for Reader {
 }
 
 async fn read_loop(data: Arc<db::Store>, subs: subs::Subs, mut rx: ReadReciever) {
-    use futures::FutureExt;
-    use futures_concurrency::future::Race;
-
-    let mut tasks = JoinSet::new();
     loop {
-        enum Res {
-            DataReq(Option<ReadReq>),
-            Panic(Box<dyn std::any::Any + Send + 'static>),
-        }
-
-        let new_req = rx.recv().map(Res::DataReq);
-        let panic = panicked(&mut tasks).map(Res::Panic);
-
-        let req = match (new_req, panic).race().await {
-            Res::DataReq(req) => req,
-            Res::Panic(reason) => std::panic::resume_unwind(reason),
-        };
-
-        let Some(data_req) = req else {
-            tasks.abort_all();
+        let Some(data_req) = rx.recv().await else {
             break;
         };
 
-        data_req.handle(&subs, &data, &mut tasks).await;
+        data_req.handle(&subs, &data).await;
     }
     warn!("Read loop shutting down, can no longer read data")
-}
-
-pub async fn panicked(tasks: &mut JoinSet<()>) -> Box<dyn std::any::Any + Send + 'static> {
-    loop {
-        let finished = tasks
-            .join_next()
-            .await
-            .expect("set is never empty since `maintain_feed` runs till the end");
-        if let Err(e) = finished {
-            if e.is_panic() {
-                return e.into_panic();
-            }
-        }
-    }
 }
 
 type ReadReciever = mpsc::Receiver<ReadReq>;

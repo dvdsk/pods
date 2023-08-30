@@ -98,6 +98,11 @@ pub trait Settings {
     fn force_server(&mut self, val: Option<Server>);
 }
 
+pub trait IdGen: Send {
+    #[must_use]
+    fn next(&mut self) -> u64;
+}
+
 pub trait DataRStore: Send {
     /// Need to register before subscribing
     #[must_use]
@@ -108,7 +113,11 @@ pub trait DataRStore: Send {
     #[must_use]
     fn sub_episodes(&self, registration: Registration, podcast: PodcastId) -> Box<dyn DataSub>;
     #[must_use]
-    fn sub_episode_details(&self, registration: Registration, episode: EpisodeId) -> Box<dyn DataSub>;
+    fn sub_episode_details(
+        &self,
+        registration: Registration,
+        episode: EpisodeId,
+    ) -> Box<dyn DataSub>;
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {

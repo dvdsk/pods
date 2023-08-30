@@ -52,8 +52,8 @@ pub struct Server {
     pub password: Option<String>,
 }
 
-pub type PodcastId = usize;
-pub type EpisodeId = usize;
+pub type PodcastId = u64;
+pub type EpisodeId = u64;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct Podcast {

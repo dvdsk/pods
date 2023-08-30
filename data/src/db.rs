@@ -3,6 +3,11 @@ use traits::{DataUpdate, Episode, EpisodeDetails, EpisodeId, Podcast, PodcastId}
 
 #[dbstruct::dbstruct(db=sled)]
 pub struct Store {
+    #[dbstruct(Default)]
+    pub podcast_id: u64,
+    #[dbstruct(Default)]
+    pub episode_id: u64,
+
     pub podcasts: HashMap<PodcastId, Podcast>,
     pub episodes: HashMap<PodcastId, Vec<Episode>>,
     pub episode_details: HashMap<EpisodeId, EpisodeDetails>,
