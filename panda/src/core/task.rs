@@ -4,11 +4,13 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::sync::Notify;
 use tokio::task::JoinSet;
+use tokio::time::sleep;
 use tracing::debug;
 use tracing::info;
 use tracing::instrument;
 use traits::DataSub;
 use traits::Feed;
+use traits::IdGen;
 use traits::IndexSearcher;
 use traits::{AppUpdate, DataRStore, DataUpdate, DataWStore, Episode, EpisodeDetails};
 
@@ -21,6 +23,7 @@ use traits::Updater;
 pub struct Tasks {
     set: JoinSet<()>,
     searcher: Arc<Mutex<dyn IndexSearcher>>,
+    podcast_id_gen: Box<dyn IdGen>,
     db_writer: Box<dyn DataWStore>,
     db_reader: Box<dyn DataRStore>,
 }
@@ -36,6 +39,7 @@ impl Tasks {
         Self {
             set: JoinSet::new(),
             searcher,
+            podcast_id_gen: db_writer.podcast_id_gen(),
             db_writer,
             db_reader,
         }
@@ -50,7 +54,7 @@ impl Tasks {
                 .expect("set is never empty since `maintain_feed` runs till the end");
             if let Err(e) = finished {
                 if e.is_panic() {
-                    return e.into_panic()
+                    return e.into_panic();
                 }
             }
         }
@@ -63,8 +67,9 @@ impl Tasks {
 
     #[instrument(level = "Info", skip(self, tx))]
     pub(crate) fn add_podcast(&mut self, podcast: traits::SearchResult, tx: Box<dyn Updater>) {
-        let id = 0;
+        let id = self.podcast_id_gen.next();
         let podcast = Podcast::try_from_searchres(podcast, id).unwrap();
+        // check for duplicates in db TODO
         self.db_writer.add_podcast(podcast.clone());
     }
 
@@ -97,6 +102,7 @@ async fn maintain_feed(
     ready: Arc<Notify>,
 ) {
     let mut known = HashSet::new();
+    let mut idgen = db.episode_id_gen();
     info!("maintaining feed, ready");
     ready.notify_one();
     loop {
@@ -108,22 +114,22 @@ async fn maintain_feed(
             panic!("maintain feed recieved update it is not subscribed too");
         };
 
+        use std::time::Duration;
+        sleep(Duration::from_secs(20)).await;
         let podcasts = HashSet::from_iter(podcasts);
         for new_podcast in podcasts.difference(&known) {
             let info = feed.index(new_podcast).await.unwrap();
             let (list, details) = info
                 .into_iter()
                 .map(|e| {
+                    let id = idgen.next();
                     (
-                        Episode {
-                            name: e.title,
-                            id: new_podcast.id,
-                        },
+                        Episode { name: e.title, id },
                         EpisodeDetails {
                             description: e.description,
                             duration: e.duration,
                             date: e.date,
-                            id: new_podcast.id,
+                            id,
                         },
                     )
                 })
@@ -136,6 +142,7 @@ async fn maintain_feed(
             db.add_episode_details(details);
         }
         known.extend(podcasts.into_iter());
+        // TODO check for updates to existing podcasts
     }
 }
 

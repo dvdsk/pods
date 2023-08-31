@@ -1,5 +1,5 @@
 use crate::db;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{Ordering};
 use std::sync::Arc;
 
 const LEAP: u64 = 100;

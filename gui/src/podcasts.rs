@@ -18,7 +18,7 @@ pub fn view(
     let mut list = Column::new();
     for podcast in podcasts {
         let on_click = Message::ToPage(Page::Podcast {
-            id: 0,
+            id: podcast.id,
             details: None,
         });
         list = list.push(menu::button(podcast.name.clone(), on_click));

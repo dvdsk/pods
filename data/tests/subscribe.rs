@@ -175,6 +175,8 @@ async fn recieve_episodes() {
     );
 
     for sub in &mut subs {
+        () =false 
+        // this drops its sub directly, why does it still work?!?
         data.reader().sub_episodes(sub.reg, 1);
     }
     writer.add_episodes(1, test_episodes());

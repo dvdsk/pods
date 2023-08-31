@@ -134,7 +134,7 @@ impl DataWriter {
     }
 }
 
-use std::sync::Mutex;
+
 impl traits::DataWStore for DataWriter {
     fn podcast_id_gen(&self) -> Box<dyn traits::IdGen> {
         Box::new(id::PodcastIdGen::new(self.data.clone()))

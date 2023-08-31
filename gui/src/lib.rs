@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
-use traits::{DataUpdateVariant, Episode, PodcastId, EpisodeDetails};
+use traits::{DataUpdateVariant, Episode, EpisodeDetails, PodcastId};
 
 use color_eyre::eyre;
 use iced::{executor, window, Application, Subscription};
@@ -98,15 +98,24 @@ impl State {
         match data {
             Podcasts { podcasts } => self.podcasts = podcasts,
             Episodes { list, podcast_id } => {
-                let Some(loading) = &self.loading else {return };
-                if loading.episodes_for(podcast_id) {
-                    self.podcast.as_mut().unwrap().episodes = list;
+                if let Some(loading) = &self.loading {
+                    if loading.episodes_for(podcast_id) {
+                        self.podcast.as_mut().unwrap().episodes = list;
+                        return;
+                    }
+                }
+                if let Some(podcast) = &mut self.podcast {
+                    if podcast.id == podcast_id {
+                        podcast.episodes = list
+                    }
                 }
             }
             Placeholder => panic!("Placeholder should never be used"),
-            EpisodeDetails { details } => if let Some(podcast) = &mut self.podcast {
-                if podcast.id == details.id {
-                    podcast.details = Some(details);
+            EpisodeDetails { details } => {
+                if let Some(podcast) = &mut self.podcast {
+                    if podcast.id == details.id {
+                        podcast.details = Some(details);
+                    }
                 }
             }
             Missing { variant } => todo!("missing data for {variant:?}"),
@@ -156,7 +165,7 @@ impl Application for State {
     }
 
     fn update(&mut self, message: Self::Message) -> Command {
-        match dbg!(message) {
+        match message {
             Message::Gui(GuiUpdate::Exit) => return window::close(),
             Message::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
             Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
