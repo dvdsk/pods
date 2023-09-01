@@ -114,8 +114,6 @@ async fn maintain_feed(
             panic!("maintain feed recieved update it is not subscribed too");
         };
 
-        use std::time::Duration;
-        sleep(Duration::from_secs(20)).await;
         let podcasts = HashSet::from_iter(podcasts);
         for new_podcast in podcasts.difference(&known) {
             let info = feed.index(new_podcast).await.unwrap();

@@ -5,8 +5,8 @@ use data::Data;
 use tokio::time::error::Elapsed;
 use tokio::time::timeout;
 use traits::{
-    DataRStore, DataStore, DataSub, DataUpdate, Episode, Podcast, PodcastId, Registration,
-    SearchResult,
+    DataRStore, DataStore, DataSub, DataUpdate, Episode, EpisodeDetails, EpisodeId, Podcast,
+    PodcastId, Registration, SearchResult,
 };
 
 fn test_podcast(id: PodcastId) -> Podcast {
@@ -28,6 +28,22 @@ fn test_episodes() -> Vec<Episode> {
             name: format!("Test Episode {id}"),
         })
         .collect()
+}
+
+fn test_episode_details(id: EpisodeId) -> EpisodeDetails {
+    use chrono::{NaiveDate, Utc};
+    let date = NaiveDate::from_ymd_opt(2014, 7, 8)
+        .unwrap()
+        .and_hms_opt(9, 10, 11)
+        .unwrap()
+        .and_local_timezone(Utc)
+        .unwrap();
+    EpisodeDetails {
+        id,
+        date: traits::Date::Publication(date),
+        duration: Duration::from_secs(10),
+        description: String::from("description"),
+    }
 }
 
 pub struct TestSub {
@@ -94,6 +110,28 @@ async fn testsubs_got_episodes(
     timeout(
         Duration::from_secs(1),
         updates.all(|(id, list)| async move { predicate(id, list) }),
+    )
+    .await
+}
+
+async fn testsubs_got_episodes_details(
+    list: &mut [TestSub],
+    predicate: impl Fn(EpisodeDetails) -> bool + Copy,
+) -> Result<bool, Elapsed> {
+    use futures::stream::FuturesUnordered;
+    use futures::StreamExt;
+    let updates: FuturesUnordered<_> = list
+        .iter_mut()
+        .map(|s| async {
+            let DataUpdate::EpisodeDetails{ details } = dbg!(s.rx.recv().await).unwrap() else {
+                    panic!("wrong update");
+                };
+            details
+        })
+        .collect();
+    timeout(
+        Duration::from_secs(1),
+        updates.all(|details| async move { predicate(details) }),
     )
     .await
 }
@@ -166,23 +204,36 @@ async fn recieve_episodes() {
     let (mut data, _task) = Data::new();
     let mut subs = testsubs(data.reader().as_mut()).await;
 
-    let mut writer = data.writer();
-    writer.add_podcast(test_podcast(1));
-    assert!(
-        testsubs_got_podcasts(&mut subs, |podcasts| podcasts[0] == test_podcast(1))
-            .await
-            .unwrap()
-    );
-
-    for sub in &mut subs {
-        () =false 
-        // this drops its sub directly, why does it still work?!?
-        data.reader().sub_episodes(sub.reg, 1);
+    let mut episode_subs = Vec::new();
+    for test_sub in &mut subs {
+        let sub = data.reader().sub_episodes(test_sub.reg, 1);
+        episode_subs.push(sub)
     }
+    let mut writer = data.writer();
     writer.add_episodes(1, test_episodes());
     assert!(
         testsubs_got_episodes(&mut subs, |id, list| id == 1 && list == test_episodes())
             .await
             .unwrap()
     );
+}
+
+#[tokio::test]
+async fn recieve_episode_details() {
+    let (mut data, _task) = Data::new();
+    let mut subs = testsubs(data.reader().as_mut()).await;
+
+    const ID: EpisodeId = 42;
+    let mut detail_subs = Vec::new();
+    for test_sub in &mut subs {
+        let sub = data.reader().sub_episode_details(test_sub.reg, ID);
+        detail_subs.push(sub)
+    }
+
+    let mut writer = data.writer();
+    writer.add_episode_details(vec![test_episode_details(ID)]);
+    assert!(testsubs_got_episodes_details(&mut subs, |details| details
+        == test_episode_details(ID))
+    .await
+    .unwrap());
 }

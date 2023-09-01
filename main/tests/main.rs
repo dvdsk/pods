@@ -1,4 +1,4 @@
-use std::sync::{atomic::AtomicUsize, atomic::Ordering};
+use std::sync::{atomic::AtomicU64, atomic::Ordering};
 use std::time::Duration;
 
 use main::testing::{logging, simulate_user};
@@ -45,7 +45,7 @@ fn adding_episodes_works() {
         title: "99%Invisible".into(),
         url: "https://feeds.simplecast.com/BqbsxVfO".to_string(),
     };
-    let podcast_id = AtomicUsize::new(0);
+    let podcast_id = AtomicU64::new(0);
     let mut episodes = None;
     Steps::start_w_timeout(Duration::from_secs(5))
         .then_view(ViewableData::PodcastList)

@@ -19,3 +19,6 @@ tokio-stream = "0.1.14"
 tempfile = "3.7.0"
 derivative = "2.2.0"
 futures-concurrency = "7.4.2"
+
+[dev-dependencies]
+chrono = "0.4.28"

@@ -94,7 +94,7 @@ pub struct Episode {
     pub id: EpisodeId,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct EpisodeDetails {
     pub id: EpisodeId,
     pub date: Date,
@@ -102,7 +102,7 @@ pub struct EpisodeDetails {
     pub description: String,
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Eq, PartialEq)]
 pub enum Date {
     Publication(DateTime<Utc>),
     Added(DateTime<Utc>),

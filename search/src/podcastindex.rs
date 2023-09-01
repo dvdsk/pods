@@ -122,6 +122,8 @@ impl Search {
 
 #[tokio::test]
 async fn test_podcast_index() {
+    use crate::SearchBackend;
+
     let mut searcher = Search::default();
     let res = searcher
         .search("Soft Skills Engineering", true)

@@ -8,7 +8,7 @@ use tracing::warn;
 use iced::widget::{self, Column, Scrollable};
 use traits::{DataUpdateVariant, Episode, EpisodeDetails, EpisodeId, PodcastId};
 
-pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, episode: Option<EpisodeId>) {
+pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, details: Option<EpisodeId>) {
     let Some(podcast) = state
         .podcasts
         .iter()
@@ -30,15 +30,16 @@ pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, episode: Opt
     let mut needed_data = HashSet::from([DataUpdateVariant::Episodes {
         podcast_id: podcast.id,
     }]);
-    if let Some(episode) = episode {
+    if let Some(episode) = details {
         needed_data.insert(DataUpdateVariant::EpisodeDetails {
             episode_id: episode,
         });
+        state.tx.view_episode_details(episode);
     }
     state.loading = Some(Loading {
         page: Page::Podcast {
             id: podcast.id,
-            details: episode,
+            details,
         },
         needed_data,
     });

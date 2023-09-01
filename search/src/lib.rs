@@ -26,10 +26,8 @@ pub fn new() -> combiner::Searcher {
         backends: vec![
             Box::new(applepodcasts::Search::default()),
             Box::new(podcastindex::Search::default()),
-
-        ]
+        ],
     }
-
 }
 
 // Name user agent after app
@@ -49,9 +47,7 @@ pub enum Error {
 
 #[tokio::test]
 async fn find_99pi() {
-    let mut searcher = SearchCombiner::default();
-    let res = searcher
-        .search("Soft Skills Engineering".to_owned(), false)
-        .await;
-    assert_eq!(res[0].title, "Soft Skills Engineering");
+    let mut searcher = new();
+    let res = searcher.search("Soft Skills Engineering").await;
+    assert_eq!(res.0.first().unwrap().title, "Soft Skills Engineering");
 }

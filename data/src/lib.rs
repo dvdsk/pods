@@ -23,6 +23,7 @@ pub struct Data {
     reader: Reader,
     config: Arc<Settings>,
     data: Arc<db::Store>,
+    leases: Arc<id::Leases>,
     subs: subs::Subs,
     _tempdir: tempfile::TempDir,
 }
@@ -39,6 +40,7 @@ impl Data {
             Data {
                 config: Arc::new(Settings {}),
                 data,
+                leases: id::Leases::new(),
                 subs,
                 _tempdir: tempdir,
                 reader,
@@ -61,6 +63,7 @@ pub struct DataReader {
 #[derive(Clone)]
 pub struct DataWriter {
     data: Arc<db::Store>,
+    leases: Arc<id::Leases>,
     reader_tx: mpsc::Sender<ReadReq>,
 }
 
@@ -113,7 +116,7 @@ impl traits::DataRStore for DataReader {
         let sub = self.subs.sub_episode_details(registration, episode);
         match self
             .reader_tx
-            .try_send(ReadReq::update_one(registration, Needed::Episodes(episode)))
+            .try_send(ReadReq::update_one(registration, Needed::EpisodeDetails(episode)))
         {
             Ok(_) => (),
             Err(TrySendError::Full(_)) => error!("reader pipe full"),
@@ -134,13 +137,12 @@ impl DataWriter {
     }
 }
 
-
 impl traits::DataWStore for DataWriter {
     fn podcast_id_gen(&self) -> Box<dyn traits::IdGen> {
-        Box::new(id::PodcastIdGen::new(self.data.clone()))
+        Box::new(id::PodcastIdGen::new(self.data.clone(), self.leases.clone()))
     }
     fn episode_id_gen(&self) -> Box<dyn traits::IdGen> {
-        Box::new(id::EpisodeIdGen::new(self.data.clone()))
+        Box::new(id::EpisodeIdGen::new(self.data.clone(), self.leases.clone()))
     }
 
     #[instrument(skip(self))]
@@ -200,6 +202,7 @@ impl traits::DataStore for Data {
     fn writer(&mut self) -> Box<dyn traits::DataWStore> {
         Box::new(DataWriter {
             data: self.data.clone(),
+            leases: self.leases.clone(),
             reader_tx: self.reader.read_req_tx(),
         })
     }

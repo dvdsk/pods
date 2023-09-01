@@ -1,24 +1,35 @@
 use crate::db;
-use core::sync::atomic::{Ordering};
+use core::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const LEAP: u64 = 100;
+
+pub(super) struct Leases {
+    podcast_id: AtomicBool,
+    episode_id: AtomicBool,
+}
+
+// should create only one
+impl Leases {
+    pub(super) fn new() -> Arc<Self> {
+        Arc::new(Leases {
+            podcast_id: AtomicBool::new(false),
+            episode_id: AtomicBool::new(false),
+        })
+    }
+}
 
 macro_rules! impl_idgen {
     ($struct:ident, $field:ident) => {
         pub(crate) struct $struct {
             next_free: Option<u64>,
+            leases: Arc<Leases>,
             db: Arc<db::Store>,
         }
 
-        mod $field {
-            use core::sync::atomic::AtomicBool;
-            pub(super) static IN_USE: AtomicBool = AtomicBool::new(false);
-        }
-
         impl $struct {
-            pub fn new(db: Arc<db::Store>) -> Self {
-                let res = $field::IN_USE.compare_exchange(
+            pub fn new(db: Arc<db::Store>, leases: Arc<Leases>) -> Self {
+                let res = leases.$field.compare_exchange(
                     false,
                     true,
                     Ordering::SeqCst,
@@ -29,6 +40,7 @@ macro_rules! impl_idgen {
                 }
 
                 Self {
+                    leases,
                     next_free: None,
                     db,
                 }
@@ -44,7 +56,7 @@ macro_rules! impl_idgen {
 
         impl Drop for $struct {
             fn drop(&mut self) {
-                $field::IN_USE.store(false, Ordering::Relaxed);
+                self.leases.$field.store(false, Ordering::Relaxed);
             }
         }
 
@@ -82,7 +94,8 @@ mod tests {
     fn monotonically_increasing() {
         let tempdir = tempfile::tempdir().unwrap();
         let db = Arc::new(db::Store::new(tempdir).unwrap());
-        let mut id_gen = PodcastIdGen::new(db);
+        let leases = Leases::new();
+        let mut id_gen = PodcastIdGen::new(db, leases);
 
         let mut prev = 0;
         for _ in 0..2000 {
@@ -96,7 +109,8 @@ mod tests {
     fn monotonically_increasing_between_runs() {
         let tempdir = tempfile::tempdir().unwrap();
         let db = Arc::new(db::Store::new(tempdir).unwrap());
-        let mut id_gen = PodcastIdGen::new(db.clone());
+        let leases = Leases::new();
+        let mut id_gen = PodcastIdGen::new(db.clone(), leases.clone());
 
         let mut prev = 0;
         for _ in 0..2000 {
@@ -106,7 +120,7 @@ mod tests {
         }
 
         std::mem::drop(id_gen); // here for readability
-        let mut id_gen = PodcastIdGen::new(db);
+        let mut id_gen = PodcastIdGen::new(db, leases);
         for _ in 0..10 {
             let curr = id_gen.next();
             assert!(curr > prev);

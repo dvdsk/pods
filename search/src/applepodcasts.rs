@@ -95,6 +95,7 @@ impl Search {
 
 #[tokio::test]
 async fn test_apple_podcasts() {
+    use crate::SearchBackend;
     let mut searcher = Search::default();
     let res = searcher.search("Soft Skills", true).await.unwrap();
     assert_eq!(res[0].title, "Soft Skills Engineering");

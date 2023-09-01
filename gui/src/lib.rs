@@ -165,7 +165,7 @@ impl Application for State {
     }
 
     fn update(&mut self, message: Self::Message) -> Command {
-        match message {
+        match dbg!(message) {
             Message::Gui(GuiUpdate::Exit) => return window::close(),
             Message::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
             Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
