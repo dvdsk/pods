@@ -69,10 +69,21 @@ pub trait IndexSearcher: Send {
     async fn search(
         &mut self,
         term: &str,
-    ) -> (
-        Vec<SearchResult>,
-        Result<(), Box<dyn Error + Send>>,
-    );
+    ) -> (Vec<SearchResult>, Result<(), Box<dyn Error + Send>>);
+}
+
+pub trait Source {}
+
+pub trait Media: Send {
+    fn get(&mut self, episode_id: EpisodeId) -> Result<Box<dyn Source>, ()>;
+    fn download(&mut self, episode_id: EpisodeId);
+}
+
+pub trait Player: Send {
+    fn play(&mut self, source: Box<dyn Source>);
+    fn pause(&mut self);
+    fn stop(&mut self);
+    fn seek(&mut self);
 }
 
 #[derive(Debug)]
@@ -86,10 +97,7 @@ pub struct EpisodeInfo {
 
 #[async_trait]
 pub trait Feed: Send + Sync {
-    async fn index(
-        &self,
-        podcast: &Podcast,
-    ) -> Result<Vec<EpisodeInfo>, Box<dyn Error>>;
+    async fn index(&self, podcast: &Podcast) -> Result<Vec<EpisodeInfo>, Box<dyn Error>>;
     fn box_clone(&self) -> Box<dyn Feed>;
 }
 

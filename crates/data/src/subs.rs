@@ -24,7 +24,7 @@ impl Client {
     }
 
     pub fn not_expired(&self) -> bool {
-        !dbg!(self).expired.load(Ordering::Relaxed)
+        !self.expired.load(Ordering::Relaxed)
     }
 }
 
@@ -35,7 +35,6 @@ pub struct Sub {
 
 impl Drop for Sub {
     fn drop(&mut self) {
-        dbg!("sub dropping");
         self.expired.store(true, Ordering::Relaxed);
     }
 }

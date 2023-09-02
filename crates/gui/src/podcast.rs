@@ -3,12 +3,13 @@ use std::collections::HashSet;
 use crate::podcasts::add::text;
 use crate::{menu, Loading, Message, Page};
 
-use tracing::warn;
+use tracing::{instrument, warn};
 
 use iced::widget::{self, Column, Scrollable};
 use traits::{DataUpdateVariant, Episode, EpisodeDetails, EpisodeId, PodcastId};
 
-pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, details: Option<EpisodeId>) {
+#[instrument(skip(state), ret)]
+pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId) {
     let Some(podcast) = state
         .podcasts
         .iter()
@@ -27,19 +28,28 @@ pub(crate) fn load(state: &mut crate::State, podcast_id: PodcastId, details: Opt
         });
     }
 
-    let mut needed_data = HashSet::from([DataUpdateVariant::Episodes {
+    let needed_data = HashSet::from([DataUpdateVariant::Episodes {
         podcast_id: podcast.id,
     }]);
-    if let Some(episode) = details {
-        needed_data.insert(DataUpdateVariant::EpisodeDetails {
-            episode_id: episode,
-        });
-        state.tx.view_episode_details(episode);
-    }
     state.loading = Some(Loading {
         page: Page::Podcast {
             id: podcast.id,
-            details,
+            details: None,
+        },
+        needed_data,
+    });
+}
+
+#[instrument(skip(state), ret)]
+pub(crate) fn load_details(state: &mut crate::State, podcast_id: PodcastId, details: EpisodeId) {
+    let needed_data = HashSet::from([DataUpdateVariant::EpisodeDetails {
+        episode_id: details,
+    }]);
+    state.tx.view_episode_details(details);
+    state.loading = Some(Loading {
+        page: Page::Podcast {
+            id: podcast_id,
+            details: Some(details),
         },
         needed_data,
     });
@@ -54,7 +64,7 @@ pub(crate) fn view(
 
     for episode in &podcast.episodes {
         if let Some(details) = &podcast.details {
-            if details.id == episode.id {
+            if details.episode_id == episode.id {
                 list = view_details(list, podcast, episode, details);
                 continue;
             }

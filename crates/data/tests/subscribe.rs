@@ -39,7 +39,7 @@ fn test_episode_details(id: EpisodeId) -> EpisodeDetails {
         .and_local_timezone(Utc)
         .unwrap();
     EpisodeDetails {
-        id,
+        episode_id: id,
         date: traits::Date::Publication(date),
         duration: Duration::from_secs(10),
         description: String::from("description"),
@@ -123,7 +123,7 @@ async fn testsubs_got_episodes_details(
     let updates: FuturesUnordered<_> = list
         .iter_mut()
         .map(|s| async {
-            let DataUpdate::EpisodeDetails{ details } = dbg!(s.rx.recv().await).unwrap() else {
+            let DataUpdate::EpisodeDetails{ details } = s.rx.recv().await.unwrap() else {
                     panic!("wrong update");
                 };
             details

@@ -164,8 +164,8 @@ impl traits::DataWStore for DataWriter {
     fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
         use dbstruct::TryExtend;
 
-        let ids = details.iter().map(|e| e.id);
-        let pairs = details.iter().map(|e| (&e.id, e));
+        let ids = details.iter().map(|e| e.episode_id);
+        let pairs = details.iter().map(|e| (&e.episode_id, e));
         self.data.episode_details().try_extend(pairs).unwrap();
         let batch = ids.map(Needed::EpisodeDetails).collect();
         self.update_all(batch);

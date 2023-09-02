@@ -44,7 +44,7 @@ impl DataUpdate {
                 podcast_id: *podcast_id,
             },
             Self::EpisodeDetails { details } => EpisodeDetails {
-                episode_id: details.id,
+                episode_id: details.episode_id,
             },
             Self::Placeholder => panic!("placeholder should never be used"),
             Self::Missing { .. } => panic!("can not wait for data no being there"),

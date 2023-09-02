@@ -120,14 +120,17 @@ async fn maintain_feed(
             let (list, details) = info
                 .into_iter()
                 .map(|e| {
-                    let id = idgen.next();
+                    let episode_id = idgen.next();
                     (
-                        Episode { name: e.title, id },
+                        Episode {
+                            name: e.title,
+                            id: episode_id,
+                        },
                         EpisodeDetails {
                             description: e.description,
                             duration: e.duration,
                             date: e.date,
-                            id,
+                            episode_id,
                         },
                     )
                 })

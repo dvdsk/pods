@@ -173,13 +173,23 @@ impl ActionDecoder {
     }
 
     pub fn view_episode_details(&mut self, episode: EpisodeId) {
-        let sub = self.datastore.sub_episode_details(self.registration, episode);
-        self.subs.episodes.insert(episode, sub);
+        let sub = self
+            .datastore
+            .sub_episode_details(self.registration, episode);
+        self.subs.episode_details.insert(episode, sub);
     }
 
     pub fn add_podcast(&self, podcast: SearchResult) {
         self.intent_tx
             .try_send(UserIntent::AddPodcast(podcast))
             .unwrap();
+    }
+
+    pub fn play(&self, episode: EpisodeId) {
+        self.intent_tx.try_send(UserIntent::Play(episode)).unwrap()
+    }
+
+    pub fn download(&self, episode: EpisodeId) {
+        self.intent_tx.try_send(UserIntent::Download(episode)).unwrap()
     }
 }

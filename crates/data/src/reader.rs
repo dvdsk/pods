@@ -42,7 +42,7 @@ impl ReadReq {
         };
 
         let data_update = needed.update(&data);
-        subs.senders.update(dbg!(&regs), data_update).await;
+        subs.senders.update(&regs, data_update).await;
     }
 
     // specialized version of handle that performs better on large

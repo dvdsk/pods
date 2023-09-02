@@ -21,6 +21,8 @@ pub enum UserIntent {
     RefuseRemoteClients,
     FullSearch { query: String },
     AddPodcast(SearchResult),
+    Play(EpisodeId),
+    Download(PodcastId),
 }
 
 pub type ReturnTx = oneshot::Sender<AppUpdate>;
@@ -96,7 +98,7 @@ pub struct Episode {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Eq, PartialEq)]
 pub struct EpisodeDetails {
-    pub id: EpisodeId,
+    pub episode_id: EpisodeId,
     pub date: Date,
     pub duration: Duration,
     pub description: String,

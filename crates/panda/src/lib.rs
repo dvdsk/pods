@@ -19,6 +19,8 @@ pub async fn app(
     mut local_ui: Option<Box<dyn traits::LocalUI>>,
     mut remote: Box<dyn traits::RemoteUI>,
     searcher: Arc<Mutex<dyn traits::IndexSearcher>>,
+    mut media: Box<dyn traits::Media>,
+    mut player: Box<dyn traits::Player>,
     feed: Box<dyn traits::Feed>,
 ) {
     loop {
@@ -35,6 +37,8 @@ pub async fn app(
                 match core::run(
                     remote.as_mut(),
                     searcher.clone(),
+                    media.as_mut(),
+                    player.as_mut(),
                     state.as_mut(),
                     feed.box_clone(),
                 )
@@ -49,6 +53,8 @@ pub async fn app(
                 match core::run(
                     &mut interface,
                     searcher.clone(),
+                    media.as_mut(),
+                    player.as_mut(),
                     state.as_mut(),
                     feed.box_clone(),
                 )

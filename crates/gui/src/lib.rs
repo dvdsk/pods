@@ -9,7 +9,8 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
-use traits::{DataUpdateVariant, Episode, EpisodeDetails, PodcastId};
+use tracing::instrument;
+use traits::{DataUpdateVariant, Episode, EpisodeDetails, PodcastId, EpisodeId};
 
 use color_eyre::eyre;
 use iced::{executor, window, Application, Subscription};
@@ -34,7 +35,11 @@ impl Page {
     pub(crate) fn load(&self, state: &mut crate::State) {
         match self {
             Page::Podcasts => podcasts::load(state),
-            Page::Podcast { id, details } => podcast::load(state, *id, *details),
+            Page::Podcast { id, details: None } => podcast::load(state, *id),
+            Page::Podcast {
+                id,
+                details: Some(details),
+            } => podcast::load_details(state, *id, *details),
 
             _ => state.layout.to(self.clone()),
         }
@@ -48,6 +53,7 @@ struct Layout {
 }
 
 impl Layout {
+    #[instrument(skip(self), ret)]
     fn to(&mut self, page: Page) {
         self.page = page;
         self.in_menu = false;
@@ -113,9 +119,9 @@ impl State {
             Placeholder => panic!("Placeholder should never be used"),
             EpisodeDetails { details } => {
                 if let Some(podcast) = &mut self.podcast {
-                    if podcast.id == details.id {
-                        podcast.details = Some(details);
-                    }
+                    // episode_id is unique therefore no check is needed
+                    // if these details are for the right podcast
+                    podcast.details = Some(details);
                 }
             }
             Missing { variant } => todo!("missing data for {variant:?}"),
@@ -133,6 +139,8 @@ pub enum Message {
     SearchDetails(podcasts::add::ResultIdx),
     AddPodcast(podcasts::add::ResultIdx),
     SearchDetailsClose,
+    Play(EpisodeId),
+    Download(EpisodeId),
 }
 
 #[derive(Debug)]
@@ -165,12 +173,14 @@ impl Application for State {
     }
 
     fn update(&mut self, message: Self::Message) -> Command {
+        use Message as M;
         match dbg!(message) {
-            Message::Gui(GuiUpdate::Exit) => return window::close(),
-            Message::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
-            Message::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
-            Message::Gui(GuiUpdate::Data(data)) => {
+            M::Gui(GuiUpdate::Exit) => return window::close(),
+            M::Gui(GuiUpdate::Error(e)) => panic!("Error: {e:?}"),
+            M::Gui(GuiUpdate::SearchResult(results)) => self.search.update_results(results),
+            M::Gui(GuiUpdate::Data(data)) => {
                 /* TODO: can we move this to presenter? <dvdsk noreply@davidsk.dev> */
+                dbg!(&self.loading);
                 let variant = data.variant();
                 self.handle_data(data);
                 if let Some(Loading { needed_data, page }) = &mut self.loading {
@@ -181,19 +191,21 @@ impl Application for State {
                 }
                 dbg!(&self.loading);
             }
-            Message::SearchUpdate(query) => self.search.update_query(query, &mut self.tx),
-            Message::SearchDetails(idx) => self.search.open_details(idx),
-            Message::SearchDetailsClose => self.search.close_details(),
-            Message::AddPodcast(idx) => {
+            M::SearchUpdate(query) => self.search.update_query(query, &mut self.tx),
+            M::SearchDetails(idx) => self.search.open_details(idx),
+            M::SearchDetailsClose => self.search.close_details(),
+            M::AddPodcast(idx) => {
                 self.search.add_podcast(idx, &mut self.tx);
                 self.loading = Some(Loading {
                     needed_data: HashSet::from([DataUpdateVariant::Podcasts]),
                     page: Page::Podcasts,
                 });
             }
-            Message::ToPage(page) => page.load(self),
-            Message::CloseMenu => self.layout.in_menu = false,
-            Message::OpenMenu => self.layout.in_menu = true,
+            M::Play(id) => self.tx.play(id),
+            M::Download(id) => self.tx.download(id),
+            M::ToPage(page) => page.load(self),
+            M::CloseMenu => self.layout.in_menu = false,
+            M::OpenMenu => self.layout.in_menu = true,
         }
         Command::none()
     }

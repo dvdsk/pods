@@ -4,7 +4,7 @@ use futures::FutureExt;
 use futures_concurrency::future::Race;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
-use traits::{AppUpdate, DataStore, Feed, IndexSearcher, UserIntent};
+use traits::{AppUpdate, DataStore, Feed, IndexSearcher, UserIntent, Media, Player};
 
 use crate::Reason;
 
@@ -15,6 +15,8 @@ mod task;
 pub(super) async fn run(
     interface: &mut dyn traits::RemoteUI,
     searcher: Arc<Mutex<dyn IndexSearcher>>,
+    media: &mut dyn Media,
+    player: &mut dyn Player,
     db: &mut dyn DataStore,
     feed: Box<dyn Feed>,
 ) -> Reason {
@@ -56,6 +58,11 @@ pub(super) async fn run(
             }
             UserIntent::FullSearch { query } => tasks.search(query, tx),
             UserIntent::AddPodcast(podcast) => tasks.add_podcast(podcast, tx),
+            UserIntent::Download(episode_id) => media.download(episode_id),
+            UserIntent::Play(episode_id) => {
+                let source = media.get(episode_id).unwrap();
+                player.play(source);
+            },
         }
     }
 }
@@ -82,6 +89,8 @@ pub(super) async fn run_remote(
             UserIntent::DisconnectRemote => return Reason::ConnectChange,
             UserIntent::FullSearch { .. } => todo!(),
             UserIntent::AddPodcast(_) => todo!(),
+            UserIntent::Play(_) => todo!(),
+            UserIntent::Download(_) => todo!(),
         }
     }
 }
