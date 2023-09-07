@@ -8,6 +8,7 @@ pub struct Store {
     #[dbstruct(Default)]
     pub episode_id: u64,
 
+    pub downloads: HashMap<EpisodeId, ()>,
     pub podcasts: HashMap<PodcastId, Podcast>,
     pub episodes: HashMap<PodcastId, Vec<Episode>>,
     pub episode_details: HashMap<EpisodeId, EpisodeDetails>,
@@ -45,5 +46,10 @@ impl Store {
             Some(details) => details,
         };
         DataUpdate::EpisodeDetails { details }
+    }
+
+    pub(crate) fn downloads_update(&self) -> DataUpdate {
+        // let downloads: Result<_, ()> = self.downloads().values().collect();
+        DataUpdate::Downloads { list: () }
     }
 }

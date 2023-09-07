@@ -1,14 +1,24 @@
-pub fn add(left: usize, right: usize) -> usize {
-    left + right
+use traits::Source;
+
+pub struct Player {}
+
+impl Player {
+    pub fn new() -> Self {
+        Player {}
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
+impl traits::Player for Player {
+    fn play(&mut self, source: Box<dyn Source>) {
+        todo!()
+    }
+    fn pause(&mut self) {
+        todo!()
+    }
+    fn stop(&mut self) {
+        todo!()
+    }
+    fn seek(&mut self) {
+        todo!()
     }
 }

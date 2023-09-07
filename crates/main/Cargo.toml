@@ -18,6 +18,7 @@ feed= { path = "../feed" }
 traits= { path = "../traits" }
 search= { path = "../search" }
 player= { path = "../player" }
+media= { path = "../media" }
 
 clap = { version = "4.0.0-alpha.0", features = ["derive"], git = "https://github.com/clap-rs/clap" }
 tokio = { version = "1.21", features = ["macros", "signal"] }

@@ -4,9 +4,9 @@ use std::sync::Arc;
 use color_eyre::eyre;
 use data::Data;
 use presenter::{ActionDecoder, AppUpdate, GuiUpdate, Presenter, UiBuilder, UserIntent};
-use tokio::task::JoinError;
 use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
+use tokio::task::JoinError;
 use tokio::time::timeout;
 use traits::{async_trait, DataRStore, DataStore, DataUpdate, IndexSearcher, Settings};
 
@@ -103,7 +103,9 @@ async fn data_update_fnmut(
     func: &mut dyn FnMut(&DataUpdate) -> bool,
 ) {
     loop {
-        let GuiUpdate::Data(got) = rx.update().await else { continue };
+        let GuiUpdate::Data(got) = rx.update().await else {
+            continue;
+        };
         if got.variant() == update {
             if func(&got) {
                 break;
@@ -114,7 +116,9 @@ async fn data_update_fnmut(
 
 async fn data_update(rx: &mut Presenter, update: traits::DataUpdateVariant) {
     loop {
-        let GuiUpdate::Data(got) = rx.update().await else { continue };
+        let GuiUpdate::Data(got) = rx.update().await else {
+            continue;
+        };
         if got.variant() == update {
             break;
         }
@@ -129,6 +133,7 @@ impl traits::LocalUI for SimulatedUIPorts {
 
 enum Res {
     Data(Result<(), JoinError>),
+    Media(Box<dyn std::any::Any + Send + 'static>),
     App(Result<(), JoinError>),
     UI(Result<State, Error>),
 }
@@ -145,16 +150,28 @@ async fn run_inner<'a>(steps: Steps<'a>) -> Result<State, Error> {
     let searcher = Arc::new(Mutex::new(search::new())) as Arc<Mutex<dyn IndexSearcher>>;
 
     let data = Box::new(data) as Box<dyn DataStore>;
+    let (media, mut media_handle) = media::Media::new();
+    let media = Box::new(media);
+    let player = Box::new(player::Player::new());
     let feed = Box::new(feed::Feed::new());
 
-    let app =
-        tokio::task::spawn(panda::app(data, Some(ui_port), remote, searcher, feed)).map(Res::App);
+    let app = tokio::task::spawn(panda::app(
+        data,
+        Some(ui_port),
+        remote,
+        searcher,
+        media,
+        player,
+        feed,
+    ))
+    .map(Res::App);
     let ui = ui.run().map(Res::UI);
     let data_maintain = data_maintain.map(Res::Data);
+    let media_handle = media_handle.errors().map(Res::Media);
 
-    match (app, ui, data_maintain).race().await {
-        Res::Data(Err(e)) => panic::resume_unwind(e.into_panic()),
-        Res::App(Err(e)) => panic::resume_unwind(e.into_panic()),
+    match (app, ui, data_maintain, media_handle).race().await {
+        Res::Data(Err(e)) | Res::App(Err(e)) => panic::resume_unwind(e.into_panic()),
+        Res::Media(e) => panic::resume_unwind(e),
         Res::UI(Err(e)) => panic!("UI ran into error: {e:?}"),
         Res::UI(Ok(state)) => return Ok(state),
         _ => unreachable!(),

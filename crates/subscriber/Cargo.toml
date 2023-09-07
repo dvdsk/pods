@@ -1,0 +1,20 @@
+[package]
+name = "subscriber"
+version = "0.1.0"
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+derivative = "2.2.0"
+tokio = { version = "1.32.0", features = ["rt"] }
+tracing = "0.1.37"
+traits = {path = "../traits" }
+
+[dev-dependencies]
+chrono = "0.4.29"
+futures = "0.3.28"
+tokio = { version = "1.32.0", features = ["time", "macros"] }

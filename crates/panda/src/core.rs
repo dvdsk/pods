@@ -60,7 +60,7 @@ pub(super) async fn run(
             UserIntent::AddPodcast(podcast) => tasks.add_podcast(podcast, tx),
             UserIntent::Download(episode_id) => media.download(episode_id),
             UserIntent::Play(episode_id) => {
-                let source = media.get(episode_id).unwrap();
+                let source = media.get(episode_id);
                 player.play(source);
             },
         }

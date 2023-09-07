@@ -75,7 +75,7 @@ impl traits::DataRStore for DataReader {
 
     #[instrument(skip_all, fields(registration))]
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.sub_podcasts(registration);
+        let sub = self.subs.podcast.sub(registration);
         match self
             .reader_tx
             .try_send(ReadReq::update_one(registration, Needed::PodcastList))
@@ -96,7 +96,7 @@ impl traits::DataRStore for DataReader {
         registration: Registration,
         podcast: traits::PodcastId,
     ) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.sub_episodes(registration, podcast);
+        let sub = self.subs.episodes.sub(registration, podcast);
         match self
             .reader_tx
             .try_send(ReadReq::update_one(registration, Needed::Episodes(podcast)))
@@ -113,10 +113,23 @@ impl traits::DataRStore for DataReader {
         registration: Registration,
         episode: EpisodeId,
     ) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.sub_episode_details(registration, episode);
+        let sub = self.subs.episode_details.sub(registration, episode);
         match self
             .reader_tx
             .try_send(ReadReq::update_one(registration, Needed::EpisodeDetails(episode)))
+        {
+            Ok(_) => (),
+            Err(TrySendError::Full(_)) => error!("reader pipe full"),
+            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
+        }
+        Box::new(sub)
+    }
+
+    fn sub_downloads(&self, registration: Registration) -> Box<dyn traits::DataSub> {
+        let sub = self.subs.downloads.sub(registration);
+        match self
+            .reader_tx
+            .try_send(ReadReq::update_one(registration, Needed::Downloads))
         {
             Ok(_) => (),
             Err(TrySendError::Full(_)) => error!("reader pipe full"),

@@ -14,6 +14,7 @@ pub enum DataUpdateVariant {
     Podcasts,
     Episodes { podcast_id: PodcastId },
     EpisodeDetails { episode_id: EpisodeId },
+    Downloads,
 }
 
 #[derive(Debug, Clone)]
@@ -32,18 +33,22 @@ pub enum DataUpdate {
     EpisodeDetails {
         details: EpisodeDetails,
     },
+    Downloads {
+        list: (),
+    },
 }
 
 impl DataUpdate {
     pub fn variant(&self) -> DataUpdateVariant {
-        use DataUpdateVariant::*;
+        use DataUpdateVariant as V;
 
         match self {
-            Self::Podcasts { .. } => Podcasts,
-            Self::Episodes { podcast_id, .. } => Episodes {
+            Self::Podcasts { .. } => V::Podcasts,
+            Self::Downloads { .. } => V::Downloads,
+            Self::Episodes { podcast_id, .. } => V::Episodes {
                 podcast_id: *podcast_id,
             },
-            Self::EpisodeDetails { details } => EpisodeDetails {
+            Self::EpisodeDetails { details } => V::EpisodeDetails {
                 episode_id: details.episode_id,
             },
             Self::Placeholder => panic!("placeholder should never be used"),
@@ -107,6 +112,7 @@ pub trait DataRStore: Send {
     /// Need to register before subscribing
     #[must_use]
     fn register(&mut self, tx: Box<dyn DataTx>, description: &'static str) -> Registration;
+
     /// Get updates until the subscription is dropped
     #[must_use]
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn DataSub>;
@@ -118,6 +124,9 @@ pub trait DataRStore: Send {
         registration: Registration,
         episode: EpisodeId,
     ) -> Box<dyn DataSub>;
+    #[must_use]
+    fn sub_downloads(&self, registration: Registration) -> Box<dyn DataSub>;
+
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {
@@ -128,6 +137,10 @@ pub trait DataWStore: Send {
     fn add_episodes(&mut self, podcast_id: crate::PodcastId, episodes: Vec<crate::Episode>);
     fn add_episode_details(&mut self, details: Vec<crate::EpisodeDetails>);
     fn box_clone(&self) -> Box<dyn DataWStore>;
+}
+
+pub trait MediaStore: Send {
+    fn update_gap(&self, range: std::ops::Range<u64>);
 }
 
 pub trait LocalOrRemoteStore {

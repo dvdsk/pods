@@ -75,7 +75,7 @@ pub trait IndexSearcher: Send {
 pub trait Source {}
 
 pub trait Media: Send {
-    fn get(&mut self, episode_id: EpisodeId) -> Result<Box<dyn Source>, ()>;
+    fn get(&mut self, episode_id: EpisodeId) -> Box<dyn Source>;
     fn download(&mut self, episode_id: EpisodeId);
 }
 

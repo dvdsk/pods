@@ -94,6 +94,8 @@ async fn main() {
     let searcher = Arc::new(Mutex::new(search::new()));
 
     let data = Box::new(data) as Box<dyn DataStore>;
+    let (media, media_handle) = media::Media::new();
+    let player = Box::new(player::Player::new());
     let feed = Box::new(feed::Feed::new());
 
     run_and_watch_for_errors(
@@ -101,6 +103,9 @@ async fn main() {
         ui_port,
         remote,
         searcher,
+        media,
+        media_handle,
+        player,
         feed,
         data_maintain,
         ui_runtime,

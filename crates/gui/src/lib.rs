@@ -10,7 +10,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::instrument;
-use traits::{DataUpdateVariant, Episode, EpisodeDetails, PodcastId, EpisodeId};
+use traits::{DataUpdateVariant, Episode, EpisodeDetails, EpisodeId, PodcastId};
 
 use color_eyre::eyre;
 use iced::{executor, window, Application, Subscription};
@@ -125,6 +125,7 @@ impl State {
                 }
             }
             Missing { variant } => todo!("missing data for {variant:?}"),
+            Downloads { .. } => todo!(),
         }
     }
 }

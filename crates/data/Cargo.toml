@@ -8,10 +8,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+traits = { path = "../traits" }
+subscriber = { path = "../subscriber" }
+
 tracing = "0.1"
 dbstruct = "0.4.1"
 
-traits = { path = "../traits" }
 futures-core = "0.3.28"
 futures = "0.3.28"
 tokio = { version = "1.29.1", features = ["sync", "rt", "macros"] }
