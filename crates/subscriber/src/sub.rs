@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use tracing::{debug, instrument};
-use traits::{DataUpdate, Registration};
+use tokio::sync::mpsc;
+use tracing::instrument;
+use traits::Registration;
 
 #[derive(Debug)]
 pub(crate) struct Client {
@@ -12,12 +13,12 @@ pub(crate) struct Client {
 }
 
 impl Client {
-    fn new(registration: Registration) -> (Self, Sub) {
+    fn new(registration: Registration) -> (Self, Subscription) {
         let client = Self {
             expired: Arc::new(AtomicBool::new(false)),
             registration,
         };
-        let sub = Sub {
+        let sub = Subscription {
             expired: client.expired.clone(),
         };
         (client, sub)
@@ -29,40 +30,32 @@ impl Client {
 }
 
 #[derive(Debug)]
-pub struct Sub {
+pub struct Subscription {
     expired: Arc<AtomicBool>,
 }
 
-impl Drop for Sub {
+impl Drop for Subscription {
     fn drop(&mut self) {
         self.expired.store(true, Ordering::Relaxed);
     }
 }
 
-impl traits::DataSub for Sub {}
+impl traits::DataSub for Subscription {}
 
-#[derive(Debug, Default, Clone)]
-pub struct Clients(Arc<Mutex<Vec<Client>>>);
+#[derive(Debug, Clone)]
+pub struct Clients<K>(Arc<Mutex<HashMap<K, Vec<Client>>>>);
 
-impl Clients {
-    pub fn sub(&self, registration: Registration) -> Sub {
-        let (client, sub) = Client::new(registration);
-        self.0.lock().unwrap().push(client);
-        sub
-    }
-
-    pub fn regs(&self) -> Vec<Registration> {
-        let mut list = self.0.lock().unwrap();
-        list.retain(Client::not_expired);
-        list.iter().map(|c| c.registration).collect()
+impl<K> Default for Clients<K> {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(HashMap::new())))
     }
 }
 
-#[derive(Debug, Default, Clone)]
-pub struct ClientsMap<T>(Arc<Mutex<HashMap<T, Vec<Client>>>>);
-
-impl<T: Eq + PartialEq + std::hash::Hash> ClientsMap<T> {
-    pub fn sub(&self, registration: Registration, id: T) -> Sub {
+impl<K> Clients<K>
+where
+    K: Eq + PartialEq + std::hash::Hash,
+{
+    pub fn sub(&self, registration: Registration, id: K) -> Subscription {
         let mut map = self.0.lock().unwrap();
         let (client, sub) = Client::new(registration);
         if let Some(clients) = map.get_mut(&id) {
@@ -74,7 +67,7 @@ impl<T: Eq + PartialEq + std::hash::Hash> ClientsMap<T> {
         sub
     }
 
-    pub fn regs(&self, id: &T) -> Vec<Registration> {
+    pub fn regs(&self, id: &K) -> Vec<Registration> {
         let mut map = self.0.lock().unwrap();
         let Some(list) = map.get_mut(id) else {
             return Vec::new();
@@ -84,63 +77,29 @@ impl<T: Eq + PartialEq + std::hash::Hash> ClientsMap<T> {
     }
 }
 
-#[derive(Default, Clone)]
-pub struct Senders(Arc<Mutex<Vec<Box<dyn traits::DataTx>>>>);
+#[derive(Clone)]
+pub struct Senders<U>(Arc<Mutex<Vec<mpsc::Sender<U>>>>);
 
-impl Senders {
-    pub fn add(&self, client: Box<dyn traits::DataTx>) -> usize {
+impl<U> Default for Senders<U> {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(Vec::new())))
+    }
+}
+
+impl<U: Clone> Senders<U> {
+    pub fn add(&self, client: mpsc::Sender<U>) -> usize {
         let mut list = self.0.lock().unwrap();
         list.push(client);
         list.len() - 1
     }
     #[instrument(skip(self, update))]
-    pub async fn update(&self, recievers: &[Registration], update: DataUpdate) {
-        debug!("Sending data update (variant: {:?})", update.variant());
+    pub async fn update(&self, recievers: &[Registration], update: U) {
         for reciever in recievers {
-            let mut tx = {
+            let tx = {
                 let list = self.0.lock().unwrap();
-                list[reciever.id()].box_clone()
+                list[reciever.id()].clone()
             };
-            tx.send(update.clone()).await;
+            tx.send(update.clone()).await.unwrap();
         }
     }
-}
-
-/// # Example
-/// Subs! {
-///     podcast Clients,
-///     downloads Clients,
-///     episodes ClientsMap<PodcastId>,
-///     episode_details ClientsMap<EpisodeId>
-/// }
-#[macro_export]
-macro_rules! Subs {
-    ( $( $name:ident $type:ty),+ ) => {
-        #[derive(Default, Clone, derivative::Derivative)]
-        #[derivative(Debug)]
-        pub(crate) struct Subs {
-            #[derivative(Debug = "ignore")]
-            pub(crate) senders: subscriber::Senders,
-            $(
-            pub(crate) $name: $type,
-            )*
-        }
-
-        impl Subs {
-            pub(crate) fn register(
-                &self,
-                client: Box<dyn traits::DataTx>,
-                client_description: &'static str,
-            ) -> traits::Registration {
-                let idx = self.senders.add(client);
-                traits::Registration::new(idx, client_description)
-            }
-        }
-
-        impl subscriber::Subs for Subs {
-            fn senders(&self) -> &subscriber::Senders {
-                &self.senders
-            }
-        }
-    };
 }
