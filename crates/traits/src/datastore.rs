@@ -2,6 +2,7 @@ use async_trait::async_trait;
 
 mod config;
 pub use config::*;
+use tokio::sync::mpsc;
 
 use crate::EpisodeDetails;
 use crate::EpisodeId;
@@ -38,22 +39,29 @@ pub enum DataUpdate {
     },
 }
 
-impl DataUpdate {
-    pub fn variant(&self) -> DataUpdateVariant {
-        use DataUpdateVariant as V;
+impl From<&DataUpdate> for DataUpdateVariant {
+    fn from(update: &DataUpdate) -> Self {
+        use DataUpdate as U;
 
-        match self {
-            Self::Podcasts { .. } => V::Podcasts,
-            Self::Downloads { .. } => V::Downloads,
-            Self::Episodes { podcast_id, .. } => V::Episodes {
+        match update {
+            U::Podcasts { .. } => Self::Podcasts,
+            U::Downloads { .. } => Self::Downloads,
+            U::Episodes { podcast_id, .. } => Self::Episodes {
                 podcast_id: *podcast_id,
             },
-            Self::EpisodeDetails { details } => V::EpisodeDetails {
+            U::EpisodeDetails { details } => Self::EpisodeDetails {
                 episode_id: details.episode_id,
             },
-            Self::Placeholder => panic!("placeholder should never be used"),
-            Self::Missing { .. } => panic!("can not wait for data no being there"),
+            U::Placeholder => panic!("placeholder should never be used"),
+            U::Missing { .. } => panic!("can not wait for data no being there"),
         }
+    }
+}
+
+impl DataUpdate {
+    #[deprecated]
+    pub fn variant(&self) -> DataUpdateVariant {
+        self.into()
     }
 }
 
@@ -111,7 +119,7 @@ pub trait IdGen: Send {
 pub trait DataRStore: Send {
     /// Need to register before subscribing
     #[must_use]
-    fn register(&mut self, tx: Box<dyn DataTx>, description: &'static str) -> Registration;
+    fn register(&mut self, tx: mpsc::Sender<DataUpdate>, description: &'static str) -> Registration;
 
     /// Get updates until the subscription is dropped
     #[must_use]
@@ -124,9 +132,6 @@ pub trait DataRStore: Send {
         registration: Registration,
         episode: EpisodeId,
     ) -> Box<dyn DataSub>;
-    #[must_use]
-    fn sub_downloads(&self, registration: Registration) -> Box<dyn DataSub>;
-
     fn settings(&self) -> &dyn Settings;
 }
 pub trait DataWStore: Send {

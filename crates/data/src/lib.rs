@@ -3,49 +3,43 @@ use std::sync::Arc;
 mod config;
 mod db;
 mod id;
-mod reader;
-mod subs;
+// mod reader;
+mod pubsub;
 
 use config::Settings;
-use reader::Needed;
-use reader::ReadReq;
-use reader::Reader;
+use pubsub::Publisher;
+use subscriber::PublishTask;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::error::TrySendError;
-use tokio::task::JoinHandle;
-use tracing::error;
 use tracing::info;
 use tracing::instrument;
+use traits::DataUpdateVariant;
 use traits::EpisodeId;
 use traits::Registration;
 
 pub struct Data {
-    reader: Reader,
+    publisher: Publisher,
     config: Arc<Settings>,
     data: Arc<db::Store>,
     leases: Arc<id::Leases>,
-    subs: subs::Subs,
     _tempdir: tempfile::TempDir,
 }
 
 impl Data {
-    pub fn new() -> (Self, JoinHandle<()>) {
+    pub fn new() -> (Self, PublishTask) {
         let tempdir = tempfile::tempdir().unwrap();
         let data = db::Store::new(&tempdir).unwrap();
         let data = Arc::new(data);
-        let subs = subs::Subs::default();
-        let (reader, reader_loop) = Reader::new(data.clone(), subs.clone());
+        let (publisher, publish_task) = pubsub::new(data.clone());
 
         (
             Data {
                 config: Arc::new(Settings {}),
                 data,
                 leases: id::Leases::new(),
-                subs,
                 _tempdir: tempdir,
-                reader,
+                publisher,
             },
-            reader_loop,
+            publish_task,
         )
     }
 
@@ -56,34 +50,31 @@ impl Data {
 
 pub struct DataReader {
     config: Arc<Settings>,
-    subs: subs::Subs,
-    reader_tx: mpsc::Sender<ReadReq>,
+    publisher: pubsub::Publisher,
 }
 
 #[derive(Clone)]
 pub struct DataWriter {
     data: Arc<db::Store>,
     leases: Arc<id::Leases>,
-    reader_tx: mpsc::Sender<ReadReq>,
+    publisher: pubsub::Publisher,
 }
 
 impl traits::DataRStore for DataReader {
     #[instrument(skip_all, ret)]
-    fn register(&mut self, tx: Box<dyn traits::DataTx>, description: &'static str) -> Registration {
-        self.subs.register(tx, description)
+    fn register(
+        &mut self,
+        tx: mpsc::Sender<traits::DataUpdate>,
+        description: &'static str,
+    ) -> Registration {
+        self.publisher.register(tx, description)
     }
 
     #[instrument(skip_all, fields(registration))]
     fn sub_podcasts(&self, registration: Registration) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.podcast.sub(registration);
-        match self
-            .reader_tx
-            .try_send(ReadReq::update_one(registration, Needed::PodcastList))
-        {
-            Ok(_) => (),
-            Err(TrySendError::Full(_)) => error!("reader pipe full"),
-            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
-        }
+        let sub = self
+            .publisher
+            .subscribe(registration, DataUpdateVariant::Podcasts);
         Box::new(sub)
     }
 
@@ -96,15 +87,12 @@ impl traits::DataRStore for DataReader {
         registration: Registration,
         podcast: traits::PodcastId,
     ) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.episodes.sub(registration, podcast);
-        match self
-            .reader_tx
-            .try_send(ReadReq::update_one(registration, Needed::Episodes(podcast)))
-        {
-            Ok(_) => (),
-            Err(TrySendError::Full(_)) => error!("reader pipe full"),
-            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
-        }
+        let sub = self.publisher.subscribe(
+            registration,
+            DataUpdateVariant::Episodes {
+                podcast_id: podcast,
+            },
+        );
         Box::new(sub)
     }
 
@@ -113,55 +101,34 @@ impl traits::DataRStore for DataReader {
         registration: Registration,
         episode: EpisodeId,
     ) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.episode_details.sub(registration, episode);
-        match self
-            .reader_tx
-            .try_send(ReadReq::update_one(registration, Needed::EpisodeDetails(episode)))
-        {
-            Ok(_) => (),
-            Err(TrySendError::Full(_)) => error!("reader pipe full"),
-            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
-        }
+        let sub = self.publisher.subscribe(
+            registration,
+            DataUpdateVariant::EpisodeDetails {
+                episode_id: episode,
+            },
+        );
         Box::new(sub)
-    }
-
-    fn sub_downloads(&self, registration: Registration) -> Box<dyn traits::DataSub> {
-        let sub = self.subs.downloads.sub(registration);
-        match self
-            .reader_tx
-            .try_send(ReadReq::update_one(registration, Needed::Downloads))
-        {
-            Ok(_) => (),
-            Err(TrySendError::Full(_)) => error!("reader pipe full"),
-            Err(TrySendError::Closed(_)) => panic!("reader pipe closed"),
-        }
-        Box::new(sub)
-    }
-}
-
-impl DataWriter {
-    #[instrument(skip(self))]
-    fn update_all(&mut self, data: Vec<Needed>) {
-        match self.reader_tx.try_send(ReadReq::update_all(data)) {
-            Ok(_) => (),
-            Err(TrySendError::Full(_)) => panic!("reader pipe full, messages are being send to quickly or reader is not processing fast enough"),
-            Err(TrySendError::Closed(_)) => panic!("reader shut down before data writers"),
-        }
     }
 }
 
 impl traits::DataWStore for DataWriter {
     fn podcast_id_gen(&self) -> Box<dyn traits::IdGen> {
-        Box::new(id::PodcastIdGen::new(self.data.clone(), self.leases.clone()))
+        Box::new(id::PodcastIdGen::new(
+            self.data.clone(),
+            self.leases.clone(),
+        ))
     }
     fn episode_id_gen(&self) -> Box<dyn traits::IdGen> {
-        Box::new(id::EpisodeIdGen::new(self.data.clone(), self.leases.clone()))
+        Box::new(id::EpisodeIdGen::new(
+            self.data.clone(),
+            self.leases.clone(),
+        ))
     }
 
     #[instrument(skip(self))]
     fn add_podcast(&mut self, podcast: traits::Podcast) {
         self.data.podcasts().insert(&podcast.id, &podcast).unwrap();
-        self.update_all(vec![Needed::PodcastList]);
+        self.publisher.publish(DataUpdateVariant::Podcasts);
         info!("added podcast")
     }
 
@@ -171,7 +138,7 @@ impl traits::DataWStore for DataWriter {
 
     fn add_episodes(&mut self, podcast_id: traits::PodcastId, episodes: Vec<traits::Episode>) {
         self.data.episodes().insert(&podcast_id, &episodes).unwrap();
-        self.update_all(vec![Needed::Episodes(podcast_id)]);
+        self.publisher.publish(DataUpdateVariant::Episodes { podcast_id });
     }
 
     fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
@@ -180,8 +147,9 @@ impl traits::DataWStore for DataWriter {
         let ids = details.iter().map(|e| e.episode_id);
         let pairs = details.iter().map(|e| (&e.episode_id, e));
         self.data.episode_details().try_extend(pairs).unwrap();
-        let batch = ids.map(Needed::EpisodeDetails).collect();
-        self.update_all(batch);
+        // let batch = ids.map(Needed::EpisodeDetails).collect();
+        todo!()
+        // self.update_all(batch);
     }
 }
 
@@ -207,16 +175,15 @@ impl traits::DataStore for Data {
     fn reader(&self) -> Box<dyn traits::DataRStore> {
         Box::new(DataReader {
             config: self.config.clone(),
-            subs: self.subs.clone(),
-            reader_tx: self.reader.read_req_tx(),
+            publisher: self.publisher.clone(),
         })
     }
 
     fn writer(&mut self) -> Box<dyn traits::DataWStore> {
         Box::new(DataWriter {
             data: self.data.clone(),
+            publisher: self.publisher.clone(),
             leases: self.leases.clone(),
-            reader_tx: self.reader.read_req_tx(),
         })
     }
 }

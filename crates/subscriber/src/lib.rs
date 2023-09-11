@@ -61,8 +61,8 @@ where
         let task = tokio::task::spawn(work);
         (publisher, PublishTask { task })
     }
-    pub fn publish(&self, update: &U) {
-        let msg = (update.into(), publisher::Target::All);
+    pub fn publish(&self, key: impl Into<K>) {
+        let msg = (key.into(), publisher::Target::All);
         self.update_queue.try_send(msg).unwrap()
     }
     // pub fn publish_batch(&self, update: &[&U]) {
