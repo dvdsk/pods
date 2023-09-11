@@ -132,7 +132,7 @@ impl traits::LocalUI for SimulatedUIPorts {
 }
 
 enum Res {
-    Data(Result<(), JoinError>),
+    Data(Box<dyn std::any::Any + Send + 'static>),
     Media(Box<dyn std::any::Any + Send + 'static>),
     App(Result<(), JoinError>),
     UI(Result<State, Error>),
@@ -166,12 +166,12 @@ async fn run_inner<'a>(steps: Steps<'a>) -> Result<State, Error> {
     ))
     .map(Res::App);
     let ui = ui.run().map(Res::UI);
-    let data_maintain = data_maintain.map(Res::Data);
+    let data_maintain = data_maintain.watch_for_errs().map(Res::Data);
     let media_handle = media_handle.errors().map(Res::Media);
 
     match (app, ui, data_maintain, media_handle).race().await {
-        Res::Data(Err(e)) | Res::App(Err(e)) => panic::resume_unwind(e.into_panic()),
-        Res::Media(e) => panic::resume_unwind(e),
+        Res::Data(e) | Res::Media(e) => panic::resume_unwind(e),
+        Res::App(Err(e)) => panic::resume_unwind(e.into_panic()),
         Res::UI(Err(e)) => panic!("UI ran into error: {e:?}"),
         Res::UI(Ok(state)) => return Ok(state),
         _ => unreachable!(),

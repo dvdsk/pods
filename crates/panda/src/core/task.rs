@@ -75,7 +75,7 @@ impl Tasks {
 
     pub(crate) async fn start_maintain_feed(&mut self, feed: Box<dyn Feed>) {
         let (tx, rx) = mpsc::channel(10);
-        let reg = self.db_reader.register(Box::new(tx), "maintain_feed");
+        let reg = self.db_reader.register(tx, "maintain_feed");
         let sub = self.db_reader.sub_podcasts(reg);
         let ready = Arc::new(Notify::new());
         let maintain = maintain_feed(

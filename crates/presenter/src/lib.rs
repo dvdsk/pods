@@ -55,7 +55,7 @@ pub fn new(
     let (intent_tx, intent_rx) = mpsc::channel(32);
     let (data_tx, data_rx) = mpsc::channel(32);
 
-    let registration = datastore.register(Box::new(data_tx), "presenter");
+    let registration = datastore.register(data_tx, "presenter");
     let presenter = Presenter { update_rx, data_rx };
 
     let decoder = ActionDecoder {
