@@ -39,14 +39,10 @@ impl PublishTask {
     }
 }
 
-pub trait AsKey<K> {
-    fn as_key(&self) -> K;
-}
-
 impl<U, K> Publisher<U, K>
 where
-    U: AsKey<K> + Clone + Send + Sync + 'static,
-    K: Clone + Send + Eq + std::hash::Hash + PartialEq + 'static,
+    U: Clone + Send + Sync + 'static,
+    K: for<'a> From<&'a U> + Clone + Send + Eq + std::hash::Hash + PartialEq + 'static,
 {
     #[must_use]
     pub fn new<F>(update_source: F) -> (Self, PublishTask)
@@ -66,7 +62,7 @@ where
         (publisher, PublishTask { task })
     }
     pub fn publish(&self, update: &U) {
-        let msg = (update.as_key(), publisher::Target::All);
+        let msg = (update.into(), publisher::Target::All);
         self.update_queue.try_send(msg).unwrap()
     }
     // pub fn publish_batch(&self, update: &[&U]) {

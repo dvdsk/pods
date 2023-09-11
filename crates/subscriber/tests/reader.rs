@@ -2,8 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use futures::{stream, StreamExt};
-use subscriber::{AsKey, PublishTask, Publisher};
+use subscriber::{PublishTask, Publisher};
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -12,9 +11,9 @@ struct Update(usize);
 #[derive(Debug, Clone, PartialEq, Eq, std::hash::Hash)]
 struct Key(usize);
 
-impl AsKey<Key> for Update {
-    fn as_key(&self) -> Key {
-        Key(self.0 / 10)
+impl From<&Update> for Key {
+    fn from(value: &Update) -> Self {
+        Self(value.0 / 10)
     }
 }
 type Data = Arc<Mutex<HashMap<Key, usize>>>;
