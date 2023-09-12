@@ -138,7 +138,8 @@ impl traits::DataWStore for DataWriter {
 
     fn add_episodes(&mut self, podcast_id: traits::PodcastId, episodes: Vec<traits::Episode>) {
         self.data.episodes().insert(&podcast_id, &episodes).unwrap();
-        self.publisher.publish(DataUpdateVariant::Episodes { podcast_id });
+        self.publisher
+            .publish(DataUpdateVariant::Episodes { podcast_id });
     }
 
     fn add_episode_details(&mut self, details: Vec<traits::EpisodeDetails>) {
@@ -147,9 +148,10 @@ impl traits::DataWStore for DataWriter {
         let ids = details.iter().map(|e| e.episode_id);
         let pairs = details.iter().map(|e| (&e.episode_id, e));
         self.data.episode_details().try_extend(pairs).unwrap();
-        // let batch = ids.map(Needed::EpisodeDetails).collect();
-        todo!()
-        // self.update_all(batch);
+        let batch = ids
+            .map(|id| DataUpdateVariant::EpisodeDetails { episode_id: id })
+            .collect();
+        self.publisher.publish_batch(batch);
     }
 }
 
