@@ -10,9 +10,9 @@ edition = "2021"
 
 [dependencies]
 traits = { path = "../traits" }
+tokio = { workspace = true }
 data = { path = "../data" }
 async-trait = "0.1" 
-tokio = { version = "1", features = ["sync"] }
 futures = "0.3"
 tracing = "0.1"
 

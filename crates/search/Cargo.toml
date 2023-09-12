@@ -10,12 +10,12 @@ edition = "2021"
 
 [dependencies]
 traits = { path = "../traits" }
+tokio = { workspace = true }
 
 arraydeque = "0.4"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 thiserror = "1"
 tracing = "0.1"
-tokio = { version = "1", features = ["macros"] }
 regex = "1.6.0"
 sha1 = "0.10.5"
 async-trait = "0.1.57"

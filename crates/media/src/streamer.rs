@@ -30,13 +30,18 @@ pub struct Handle {
 }
 
 impl Handle {
+    #[must_use]
     pub async fn errors(&mut self) -> Box<dyn std::any::Any + Send + 'static> {
+        use tracing_futures::Instrument;
+        dbg!("watching for errors", self.tasks.len());
         let task_error = self
             .tasks
             .join_next()
+            .instrument(tracing::info_span!("error join"))
             .await
             .expect("There are always two tasks")
             .expect_err("The two stream manager tasks never end");
+        dbg!("got error");
         let task_panic = task_error
             .try_into_panic()
             .expect("Stream manager is never canceld");
@@ -45,6 +50,7 @@ impl Handle {
 }
 
 impl Streamer {
+    #[must_use]
     pub fn new() -> (Self, Handle) {
         let mut tasks = JoinSet::new();
         let (mem_stream_tx, rx) = mpsc::channel(32);

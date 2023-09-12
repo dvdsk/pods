@@ -12,3 +12,6 @@ authors = ["David Kleingeld"]
 # Disabling debug info speeds up builds a bunch,
 # and we don't rely on it for debugging that much.
 debug = 0
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full", "tracing"] }

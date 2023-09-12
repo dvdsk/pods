@@ -72,9 +72,8 @@ pub async fn run_and_watch_for_errors(
         Res::CtrlC(Err(e)) => {
             panic!("could not wait for ctrl+C: {}", e);
         }
-        _ => {
-            info!("Exiting");
-            return;
-        }
+        Res::UI(Ok(_)) => info!("Exiting, UI done"),
+        Res::CtrlC(Ok(_)) => info!("Exiting, CtrlC pressed"),
+        Res::App(Ok(_)) => unreachable!("App never quits"),
     }
 }

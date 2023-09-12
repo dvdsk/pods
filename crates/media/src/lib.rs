@@ -13,6 +13,7 @@ pub struct Media {
 }
 
 impl Media {
+    #[must_use]
     pub fn new() -> (Self, streamer::Handle) {
         let (streamer, errors) = Streamer::new();
         (
