@@ -93,9 +93,9 @@ impl Streamer {
         }
     }
 
-    pub(crate) fn cancel_download(&mut self, episode_id: EpisodeId, playing: EpisodeId) {
+    pub(crate) fn cancel_download(&mut self, episode_id: EpisodeId) {
         match self.streams.remove(&episode_id) {
-            Some(Stream::ToDisk(s)) if episode_id == playing => {
+            Some(Stream::ToDisk(s)) if s.is_playing() => {
                 // convert to a memory stream as we are still playing
                 let s = s.to_mem();
                 self.streams.insert(episode_id, Stream::ToMem(s));

@@ -59,6 +59,7 @@ pub(super) async fn run(
             UserIntent::FullSearch { query } => tasks.search(query, tx),
             UserIntent::AddPodcast(podcast) => tasks.add_podcast(podcast, tx),
             UserIntent::Download(episode_id) => media.download(episode_id),
+            UserIntent::CancelDownload(episode_id) => media.cancel_download(episode_id),
             UserIntent::Play(episode_id) => {
                 let source = media.get(episode_id);
                 player.play(source);
@@ -71,13 +72,13 @@ pub(super) async fn run(
 #[instrument(skip_all, ret)]
 pub(super) async fn run_remote(
     local: &mut dyn traits::LocalUI,
-    server: traits::Server,
+    _server: traits::Server,
     db: &mut dyn DataStore,
 ) -> Reason {
     db.set_remote();
-    let (tx, rx) = local.ports();
+    let (_tx, rx) = local.ports();
     loop {
-        let (intent, updater) = match rx.next_intent().await {
+        let (intent, _updater) = match rx.next_intent().await {
             Some(val) => val,
             None => return Reason::Exit,
         };
@@ -91,6 +92,7 @@ pub(super) async fn run_remote(
             UserIntent::AddPodcast(_) => todo!(),
             UserIntent::Play(_) => todo!(),
             UserIntent::Download(_) => todo!(),
+            UserIntent::CancelDownload(_) => todo!(),
         }
     }
 }

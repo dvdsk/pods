@@ -77,6 +77,7 @@ pub trait Source {}
 pub trait Media: Send {
     fn get(&mut self, episode_id: EpisodeId) -> Box<dyn Source>;
     fn download(&mut self, episode_id: EpisodeId);
+    fn cancel_download(&mut self, episode_id: EpisodeId);
 }
 
 pub trait Player: Send {

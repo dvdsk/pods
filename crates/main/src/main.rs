@@ -2,15 +2,15 @@ use std::sync::Arc;
 
 use clap::Parser;
 use data::Data;
-use presenter::Ui;
+
 use presenter::UiBuilder;
 use tokio::sync::Mutex;
-use tokio::task::JoinError;
-use tracing::info;
+
+
 use traits::DataStore;
-use traits::Feed;
-use traits::IndexSearcher;
-use traits::LocalUI;
+
+
+
 use traits::Settings as _;
 
 use main::run_and_watch_for_errors;

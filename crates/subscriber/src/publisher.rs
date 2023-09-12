@@ -1,12 +1,6 @@
 use tokio::sync::mpsc;
-use traits::Registration;
 
 use crate::{Order, Publisher};
-
-pub(super) enum Target {
-    NewSub { reg: Registration },
-    All,
-}
 
 pub(crate) async fn work<F, U, K>(
     publisher: Publisher<U, K>,

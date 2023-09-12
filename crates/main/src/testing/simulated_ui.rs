@@ -8,7 +8,9 @@ use tokio::runtime::Runtime;
 use tokio::sync::Mutex;
 use tokio::task::JoinError;
 use tokio::time::timeout;
-use traits::{async_trait, DataRStore, DataStore, DataUpdate, IndexSearcher, Settings};
+use traits::{
+    async_trait, DataRStore, DataStore, DataUpdate, DataUpdateVariant, IndexSearcher, Settings,
+};
 
 use super::simulate_user::{Action, Condition, Steps, ViewableData};
 
@@ -106,7 +108,7 @@ async fn data_update_fnmut(
         let GuiUpdate::Data(got) = rx.update().await else {
             continue;
         };
-        if got.variant() == update {
+        if DataUpdateVariant::from(&got) == update {
             if func(&got) {
                 break;
             }
@@ -114,12 +116,12 @@ async fn data_update_fnmut(
     }
 }
 
-async fn data_update(rx: &mut Presenter, update: traits::DataUpdateVariant) {
+async fn data_update(rx: &mut Presenter, update: DataUpdateVariant) {
     loop {
         let GuiUpdate::Data(got) = rx.update().await else {
             continue;
         };
-        if got.variant() == update {
+        if DataUpdateVariant::from(&got) == update {
             break;
         }
     }

@@ -182,7 +182,7 @@ impl Application for State {
             M::Gui(GuiUpdate::Data(data)) => {
                 /* TODO: can we move this to presenter? <dvdsk noreply@davidsk.dev> */
                 dbg!(&self.loading);
-                let variant = data.variant();
+                let variant = DataUpdateVariant::from(&data);
                 self.handle_data(data);
                 if let Some(Loading { needed_data, page }) = &mut self.loading {
                     needed_data.remove(&variant);

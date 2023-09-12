@@ -1,7 +1,6 @@
 use core::fmt;
 
 use async_trait::async_trait;
-use traits::IndexSearcher;
 
 mod apikey;
 pub use apikey::{APIKEY, APISECRET};
@@ -45,9 +44,15 @@ pub enum Error {
     OutOfCalls,
 }
 
-#[tokio::test]
-async fn find_99pi() {
-    let mut searcher = new();
-    let res = searcher.search("Soft Skills Engineering").await;
-    assert_eq!(res.0.first().unwrap().title, "Soft Skills Engineering");
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use traits::IndexSearcher;
+
+    #[tokio::test]
+    async fn find_99pi() {
+        let mut searcher = new();
+        let res = searcher.search("Soft Skills Engineering").await;
+        assert_eq!(res.0.first().unwrap().title, "Soft Skills Engineering");
+    }
 }

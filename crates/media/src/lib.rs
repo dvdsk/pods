@@ -36,4 +36,7 @@ impl traits::Media for Media {
     fn download(&mut self, episode_id: EpisodeId) {
         self.streamer.download(episode_id)
     }
+    fn cancel_download(&mut self, episode_id: EpisodeId) {
+        self.streamer.cancel_download(episode_id)
+    }
 }

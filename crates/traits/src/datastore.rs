@@ -58,13 +58,6 @@ impl From<&DataUpdate> for DataUpdateVariant {
     }
 }
 
-impl DataUpdate {
-    #[deprecated]
-    pub fn variant(&self) -> DataUpdateVariant {
-        self.into()
-    }
-}
-
 pub enum DataKey {}
 pub trait DataSub: Send {}
 #[derive(Debug, Clone, Copy)]

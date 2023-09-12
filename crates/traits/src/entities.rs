@@ -23,6 +23,7 @@ pub enum UserIntent {
     AddPodcast(SearchResult),
     Play(EpisodeId),
     Download(PodcastId),
+    CancelDownload(PodcastId),
 }
 
 pub type ReturnTx = oneshot::Sender<AppUpdate>;

@@ -4,7 +4,6 @@ use iced::widget::{self, Column, Scrollable, Text, TextInput};
 use iced::{Element, Length};
 use traits::SearchResult;
 
-pub type Podcasts = Vec<traits::Podcast>;
 pub(crate) type ResultIdx = usize;
 
 #[derive(Debug)]

@@ -59,7 +59,7 @@ impl traits::RemoteController for RemoteController {
         self.config = None;
         self.sender.send(self.config.clone()).await.unwrap();
     }
-    async fn enable(&mut self, config: traits::Remote) {
+    async fn enable(&mut self, _config: traits::Remote) {
         todo!()
     }
 }
@@ -73,8 +73,8 @@ impl traits::LocalUI for Interface {
 
 async fn listen(
     mut config_rx: mpsc::Receiver<Option<traits::Server>>,
-    intent_tx: mpsc::Sender<UserIntent>,
-    update_rx: broadcast::Receiver<AppUpdate>,
+    _intent_tx: mpsc::Sender<UserIntent>,
+    _update_rx: broadcast::Receiver<AppUpdate>,
 ) {
     while let Some(change) = config_rx.recv().await {
         match change {

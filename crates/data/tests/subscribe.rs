@@ -57,7 +57,7 @@ async fn testsubs(reader: &mut dyn DataRStore) -> Vec<TestSub> {
         .into_iter()
         .map(|_| {
             let (tx, rx) = mpsc::channel(10);
-            let reg = reader.register(Box::new(tx), "test_sub");
+            let reg = reader.register(tx, "test_sub");
             let sub = reader.sub_podcasts(reg);
             TestSub { rx, sub, reg }
         })

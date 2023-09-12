@@ -7,7 +7,6 @@ use std::time::Instant;
 pub struct ApiBudget {
     max_per_min: u8,
     current_per_min: u8,
-    last_called: Instant,
     called: ArrayDeque<[Instant; 20], Wrapping>,
 }
 
@@ -16,7 +15,6 @@ impl ApiBudget {
         Self {
             max_per_min,
             current_per_min: max_per_min,
-            last_called: Instant::now(),
             called: ArrayDeque::new(),
         }
     }

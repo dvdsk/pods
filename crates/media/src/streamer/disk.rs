@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use traits::{EpisodeId, Source, MediaStore};
+use traits::{EpisodeId, Source};
 
 use tokio::sync::mpsc;
 use super::Stream;
@@ -22,6 +22,10 @@ impl ToDisk {
     }
 
     pub(crate) fn to_mem(self) -> ToMem {
+        todo!()
+    }
+
+    pub(crate) fn is_playing(&self) -> bool {
         todo!()
     }
 }
