@@ -1,4 +1,3 @@
-// mod reader;
 mod publisher;
 mod sub;
 
@@ -10,6 +9,11 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use traits::Registration;
 
+enum Order<K> {
+    Publish { updated_keys: Vec<K> },
+    Inform { key: K, reg: Registration },
+}
+
 #[derive(Clone)]
 pub struct Publisher<U, K>
 where
@@ -18,7 +22,7 @@ where
 {
     clients: Clients<K>,
     senders: Senders<U>,
-    update_queue: mpsc::Sender<(K, publisher::Target)>,
+    update_queue: mpsc::Sender<Order<K>>,
     update_ty: PhantomData<U>,
     key_ty: PhantomData<K>,
 }
@@ -62,18 +66,20 @@ where
         (publisher, PublishTask { task })
     }
     pub fn publish(&self, key: impl Into<K>) {
-        let msg = (key.into(), publisher::Target::All);
+        let msg = Order::Publish {
+            updated_keys: vec![key.into()],
+        };
         self.update_queue.try_send(msg).unwrap()
     }
-    // pub fn publish_batch(&self, update: &[&U]) {
-    //     let msg = (update.key(), publisher::Target::All);
-    //     self.update_queue.try_send(msg).unwrap()
-    // }
+    pub fn publish_batch(&self, keys: Vec<K>) {
+        let msg = Order::Publish { updated_keys: keys };
+        self.update_queue.try_send(msg).unwrap()
+    }
     #[must_use]
     pub fn subscribe(&self, reg: Registration, key: impl Into<K>) -> Subscription {
         let key = key.into();
         let sub = self.clients.sub(reg, key.clone());
-        let msg = (key, publisher::Target::NewSub { reg });
+        let msg = Order::Inform { key, reg };
         self.update_queue.try_send(msg).unwrap();
         sub
     }
