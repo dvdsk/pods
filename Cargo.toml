@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "libs/*"]
 
 [workspace.package]
 rust-version = "1.70"

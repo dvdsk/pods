@@ -1,0 +1,15 @@
+[package]
+name = "stream_owl"
+version = "0.1.0"
+description = "A download and stream manager"
+rust-version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3.28"
+futures-concurrency = "7.4.3"
+tokio.workspace = true
