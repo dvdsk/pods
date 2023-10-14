@@ -6,7 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+futures = "0.3.28"
+futures-concurrency = "7.4.2"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls"] }
 tokio = { workspace = true }
 tracing = "0.1.37"
 tracing-futures = "0.2.5"
 traits = { path = "../traits" }
+url = "2.4.1"

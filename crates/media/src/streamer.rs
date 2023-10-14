@@ -22,7 +22,7 @@ enum Stream {
 pub(crate) struct Streamer {
     streams: HashMap<EpisodeId, Stream>,
     mem_stream_tx: mpsc::Sender<()>,
-    disk_stream_tx: mpsc::Sender<()>,
+    disk_stream_tx: mpsc::Sender<disk::stream::New>,
 }
 
 pub struct Handle {
@@ -33,7 +33,6 @@ impl Handle {
     #[must_use]
     pub async fn errors(&mut self) -> Box<dyn std::any::Any + Send + 'static> {
         use tracing_futures::Instrument;
-        dbg!("watching for errors", self.tasks.len());
         let task_error = self
             .tasks
             .join_next()
@@ -41,7 +40,6 @@ impl Handle {
             .await
             .expect("There are always two tasks")
             .expect_err("The two stream manager tasks never end");
-        dbg!("got error");
         let task_panic = task_error
             .try_into_panic()
             .expect("Stream manager is never canceld");
@@ -68,7 +66,7 @@ impl Streamer {
     }
 
     /// start a lazy forgetfull stream to memory
-    pub(crate) fn stream(&mut self, episode_id: EpisodeId) -> Box<dyn Source> {
+    pub(crate) fn stream(&mut self, episode_id: EpisodeId, url: url::Url) -> Box<dyn Source> {
         match self.streams.get(&episode_id) {
             Some(Stream::ToMem(stream)) => return stream.as_source(),
             Some(Stream::ToDisk(stream)) => return stream.as_source(),
@@ -83,7 +81,7 @@ impl Streamer {
 
     /// turn an existing stream to memory into a greedy remembering
     /// stream to disk
-    pub(crate) fn download(&mut self, episode_id: EpisodeId) {
+    pub(crate) fn download(&mut self, episode_id: EpisodeId, url: url::Url) {
         match self.streams.remove(&episode_id) {
             Some(s @ Stream::ToDisk(_)) => {
                 self.streams.insert(episode_id, s);
@@ -93,7 +91,7 @@ impl Streamer {
                 self.streams.insert(episode_id, Stream::ToDisk(stream));
             }
             None => {
-                let stream = ToDisk::new(&mut self.disk_stream_tx);
+                let stream = ToDisk::new(&mut self.disk_stream_tx, url);
                 self.streams.insert(episode_id, Stream::ToDisk(stream));
             }
         }

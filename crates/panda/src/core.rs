@@ -4,7 +4,7 @@ use futures::FutureExt;
 use futures_concurrency::future::Race;
 use tokio::sync::Mutex;
 use tracing::{debug, instrument};
-use traits::{AppUpdate, DataStore, Feed, IndexSearcher, UserIntent, Media, Player};
+use traits::{AppError, AppUpdate, DataStore, Feed, IndexSearcher, Media, Player, UserIntent};
 
 use crate::Reason;
 
@@ -22,6 +22,7 @@ pub(super) async fn run(
 ) -> Reason {
     db.set_local();
     let mut tasks = task::Tasks::new(searcher, db.writer(), db.reader());
+    let db = db.writer();
     tasks.start_maintain_feed(feed).await;
     let (_, rx, remote) = interface.ports();
 
@@ -58,12 +59,24 @@ pub(super) async fn run(
             }
             UserIntent::FullSearch { query } => tasks.search(query, tx),
             UserIntent::AddPodcast(podcast) => tasks.add_podcast(podcast, tx),
-            UserIntent::Download(episode_id) => media.download(episode_id),
+            UserIntent::Download { episode_id } => {
+                if let Some(details) = db.episode_details(episode_id) {
+                    media.download(episode_id, details.url);
+                } else {
+                    let err = AppError::EpisodeDeleted("start download");
+                    tx.update(AppUpdate::NonCriticalError(err)).await.unwrap()
+                }
+            }
             UserIntent::CancelDownload(episode_id) => media.cancel_download(episode_id),
-            UserIntent::Play(episode_id) => {
-                let source = media.get(episode_id);
-                player.play(source);
-            },
+            UserIntent::Play { episode_id } => {
+                if let Some(details) = db.episode_details(episode_id) {
+                    let source = media.get(episode_id, details.url);
+                    player.play(source);
+                } else {
+                    let err = AppError::EpisodeDeleted("playing");
+                    tx.update(AppUpdate::NonCriticalError(err)).await.unwrap()
+                }
+            }
         }
     }
 }
@@ -90,8 +103,8 @@ pub(super) async fn run_remote(
             UserIntent::DisconnectRemote => return Reason::ConnectChange,
             UserIntent::FullSearch { .. } => todo!(),
             UserIntent::AddPodcast(_) => todo!(),
-            UserIntent::Play(_) => todo!(),
-            UserIntent::Download(_) => todo!(),
+            UserIntent::Play { .. } => todo!(),
+            UserIntent::Download { .. } => todo!(),
             UserIntent::CancelDownload(_) => todo!(),
         }
     }

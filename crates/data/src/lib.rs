@@ -153,6 +153,10 @@ impl traits::DataWStore for DataWriter {
             .collect();
         self.publisher.publish_batch(batch);
     }
+
+    fn episode_details(&self, episode: EpisodeId) -> Option<traits::EpisodeDetails> {
+        self.data.episode_details().get(&episode).unwrap()
+    }
 }
 
 impl traits::LocalOrRemoteStore for DataWriter {

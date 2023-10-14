@@ -126,6 +126,7 @@ async fn maintain_feed(
                             id: episode_id,
                         },
                         EpisodeDetails {
+                            url: e.stream_url,
                             description: e.description,
                             duration: e.duration,
                             date: e.date,

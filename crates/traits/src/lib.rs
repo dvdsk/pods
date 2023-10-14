@@ -72,11 +72,13 @@ pub trait IndexSearcher: Send {
     ) -> (Vec<SearchResult>, Result<(), Box<dyn Error + Send>>);
 }
 
-pub trait Source {}
+pub trait Source {
+    fn seek(&mut self, pos: u64);
+}
 
 pub trait Media: Send {
-    fn get(&mut self, episode_id: EpisodeId) -> Box<dyn Source>;
-    fn download(&mut self, episode_id: EpisodeId);
+    fn get(&mut self, episode_id: EpisodeId, url: url::Url) -> Box<dyn Source>;
+    fn download(&mut self, episode_id: EpisodeId, url: url::Url);
     fn cancel_download(&mut self, episode_id: EpisodeId);
 }
 

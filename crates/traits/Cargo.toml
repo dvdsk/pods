@@ -16,3 +16,4 @@ color-eyre = "0.6.2"
 futures-core = "0.3.28"
 serde = { version = "1.0.178", features = ["derive"] }
 url = { version = "2.4.0", features = ["serde"] }
+thiserror = "1.0.48"

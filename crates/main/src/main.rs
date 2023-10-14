@@ -70,8 +70,7 @@ fn force_cli_arguments(config: &mut impl traits::Settings, cli: &Cli) {
 #[tokio::main]
 async fn main() {
     errors::set_error_hook();
-    console_subscriber::init();
-    // errors::install_tracing();
+    errors::install_tracing();
 
     let cli = Cli::parse();
     let (mut data, data_maintain) = Data::new();

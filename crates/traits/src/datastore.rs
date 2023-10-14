@@ -112,7 +112,8 @@ pub trait IdGen: Send {
 pub trait DataRStore: Send {
     /// Need to register before subscribing
     #[must_use]
-    fn register(&mut self, tx: mpsc::Sender<DataUpdate>, description: &'static str) -> Registration;
+    fn register(&mut self, tx: mpsc::Sender<DataUpdate>, description: &'static str)
+        -> Registration;
 
     /// Get updates until the subscription is dropped
     #[must_use]
@@ -125,9 +126,10 @@ pub trait DataRStore: Send {
         registration: Registration,
         episode: EpisodeId,
     ) -> Box<dyn DataSub>;
+
     fn settings(&self) -> &dyn Settings;
 }
-pub trait DataWStore: Send {
+pub trait DataWStore: Send + Sync {
     /// Add a new podcast to the database.
     fn podcast_id_gen(&self) -> Box<dyn IdGen>;
     fn episode_id_gen(&self) -> Box<dyn IdGen>;
@@ -135,6 +137,8 @@ pub trait DataWStore: Send {
     fn add_episodes(&mut self, podcast_id: crate::PodcastId, episodes: Vec<crate::Episode>);
     fn add_episode_details(&mut self, details: Vec<crate::EpisodeDetails>);
     fn box_clone(&self) -> Box<dyn DataWStore>;
+
+    fn episode_details(&self, episode: EpisodeId) -> Option<EpisodeDetails>;
 }
 
 pub trait MediaStore: Send {

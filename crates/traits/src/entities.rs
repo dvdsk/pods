@@ -21,9 +21,9 @@ pub enum UserIntent {
     RefuseRemoteClients,
     FullSearch { query: String },
     AddPodcast(SearchResult),
-    Play(EpisodeId),
-    Download(PodcastId),
-    CancelDownload(PodcastId),
+    Play { episode_id: EpisodeId },
+    Download { episode_id: EpisodeId },
+    CancelDownload(EpisodeId),
 }
 
 pub type ReturnTx = oneshot::Sender<AppUpdate>;
@@ -32,8 +32,14 @@ pub type ReturnRx = oneshot::Receiver<AppUpdate>;
 #[derive(Debug, Clone)]
 pub enum AppUpdate {
     Exit,
-    Error(String),
+    NonCriticalError(AppError),
     SearchResults(Vec<SearchResult>),
+}
+
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum AppError {
+    #[error("Could not {0}, episode was deleted ")]
+    EpisodeDeleted(&'static str),
 }
 
 #[derive(Debug)]
@@ -101,6 +107,7 @@ pub struct Episode {
 pub struct EpisodeDetails {
     pub episode_id: EpisodeId,
     pub date: Date,
+    pub url: Url,
     pub duration: Duration,
     pub description: String,
 }

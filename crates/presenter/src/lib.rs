@@ -114,7 +114,7 @@ impl Presenter {
             };
             match res {
                 Res::App(AppUpdate::Exit) => return GuiUpdate::Exit,
-                Res::App(AppUpdate::Error(e)) => return GuiUpdate::Error(e),
+                Res::App(AppUpdate::NonCriticalError(e)) => return GuiUpdate::Error(e.to_string()),
                 Res::App(AppUpdate::SearchResults(list)) => return GuiUpdate::SearchResult(list),
                 Res::Data(update) => return GuiUpdate::Data(update),
             }
@@ -186,10 +186,18 @@ impl ActionDecoder {
     }
 
     pub fn play(&self, episode: EpisodeId) {
-        self.intent_tx.try_send(UserIntent::Play(episode)).unwrap()
+        self.intent_tx
+            .try_send(UserIntent::Play {
+                episode_id: episode,
+            })
+            .unwrap()
     }
 
     pub fn download(&self, episode: EpisodeId) {
-        self.intent_tx.try_send(UserIntent::Download(episode)).unwrap()
+        self.intent_tx
+            .try_send(UserIntent::Download {
+                episode_id: episode,
+            })
+            .unwrap()
     }
 }

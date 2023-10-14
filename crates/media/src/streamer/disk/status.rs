@@ -16,7 +16,7 @@ pub(crate) fn load() -> Vec<Status> {
         .map(Result::unwrap)
         .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
         .map(|entry| entry.path())
-        .filter(|path| path.extension() == Some(OsStr::new("test")))
+        .filter(|path| path.extension() == Some(OsStr::new("progress")))
         .map(|path| Status::from_file(&path))
         .collect()
 }
