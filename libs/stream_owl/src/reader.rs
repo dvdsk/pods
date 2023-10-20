@@ -1,6 +1,18 @@
-use std::io::{Seek, Read, self};
+use std::io::{self, Read, Seek};
 
-pub struct Reader;
+use tokio::sync::mpsc;
+
+#[derive(Debug, Clone)]
+pub struct Reader {
+    pub(crate) prefetch: usize,
+    pub(crate) seek_tx: mpsc::Sender<u64>,
+}
+
+impl Reader {
+    pub fn set_prefetch(bytes: usize) {
+        todo!()
+    }
+}
 
 impl Seek for Reader {
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {

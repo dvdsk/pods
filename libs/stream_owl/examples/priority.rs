@@ -1,11 +1,10 @@
 use futures::FutureExt;
 use futures::StreamExt;
 use futures_concurrency::prelude::*;
-use std::collections::HashMap;
 use std::io::Read;
 use stream_owl::StreamId;
 
-use stream_owl::{ManageError, Manager, StreamError};
+use stream_owl::{ManageError, StreamError, Manager};
 
 use tokio::task::{self, JoinError};
 
@@ -32,8 +31,8 @@ impl Res {
 async fn main() {
     let mut streams = Vec::new();
     let (mut manager, manage_task, mut errors) = Manager::new();
-    streams.push(manager.new_to_disk(URL1));
-    streams.push(manager.new_to_mem(URL2));
+    streams.push(manager.add_stream_to_disk(URL1));
+    streams.push(manager.add_stream_to_mem(URL2));
 
     streams[0].set_priority(1);
     streams[1].set_priority(0);
