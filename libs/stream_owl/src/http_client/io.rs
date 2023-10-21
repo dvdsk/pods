@@ -23,16 +23,6 @@ impl<T> ThrottlableIo<T> {
     pub fn new(inner: T) -> Self {
         Self { inner }
     }
-
-    /// Borrow the inner type.
-    pub fn inner(&self) -> &T {
-        &self.inner
-    }
-
-    /// Consume this wrapper and get the inner type.
-    pub fn into_inner(self) -> T {
-        self.inner
-    }
 }
 
 impl<T> hyper::rt::Read for ThrottlableIo<T>
@@ -104,7 +94,6 @@ where
         cx: &mut Context<'_>,
         tbuf: &mut tokio::io::ReadBuf<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        //let init = tbuf.initialized().len();
         let filled = tbuf.filled().len();
         let sub_filled = unsafe {
             let mut buf = hyper::rt::ReadBuf::uninit(tbuf.unfilled_mut());

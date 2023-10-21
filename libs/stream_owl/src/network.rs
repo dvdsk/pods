@@ -11,7 +11,7 @@ pub struct Network {
 }
 
 impl Network {
-    pub(crate) fn addr(self) -> IpAddr {
+    pub(crate) fn addr(&self) -> IpAddr {
         self.addr
     }
 }

@@ -8,7 +8,7 @@ use super::Error;
 pub struct Canceld;
 
 pub(crate) async fn new(url: http::Uri, mut seek_rx: mpsc::Receiver<u64>, restriction: Option<Network>) -> Result<Canceld, Error> {
-    let client = Client::new(url, restriction).await?;
+    let mut client = Client::new(url, restriction).await?;
     let Some(pos) = seek_rx.recv().await else {
         return Ok(Canceld)
     }; 
