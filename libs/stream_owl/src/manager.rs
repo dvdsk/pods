@@ -1,4 +1,4 @@
-use futures::{future, Future, Stream};
+use futures::Future;
 use tokio::sync::mpsc;
 
 use crate::network::{Bandwith, Network};

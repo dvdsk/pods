@@ -1,5 +1,3 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-
 use bytes::Bytes;
 use http::header::InvalidHeaderValue;
 use http::method::Method;
@@ -7,54 +5,65 @@ use http::uri::InvalidUri;
 use http::{header, HeaderValue, Request, StatusCode};
 use http_body_util::{BodyExt, Empty};
 use hyper::body::Incoming;
-use hyper::client::conn::http1::{self, SendRequest};
-use tokio::net::{TcpSocket, TcpStream};
-use tokio::task::JoinSet;
 
 use crate::network::Network;
 mod io;
-use io::ThrottlableIo;
+mod read;
+use read::Reader;
+
+mod connection;
+use connection::Connection;
+
+use self::connection::HyperResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Error in connection to stream host, {source}")]
-    Hyper {
-        #[from]
-        source: hyper::Error,
-    },
+    // #[error("Error in connection to stream server, {source}")]
+    // Hyper {
+    //     #[from]
+    //     source: hyper::Error,
+    // },
     #[error("Error setting up the stream request, {0}")]
     Http(#[from] http::Error),
     #[error("Error creating socket, {0}")]
     SocketCreation(std::io::Error),
     #[error("Could not restrict traffic to one network interface, {0}")]
     Restricting(std::io::Error),
-    #[error("Could not connect to host, {0}")]
+    #[error("Could not connect to server, {0}")]
     Connecting(std::io::Error),
     #[error("Could not resolve dns, resolve error, {0}")]
     DnsResolve(#[from] hickory_resolver::error::ResolveError),
-    #[error("Could not resolve dns, no ip adresses for host")]
+    #[error("Could not resolve dns, no ip adresses for server")]
     DnsEmpty,
-    #[error("Url had no host part")]
+    #[error("Url had no server part")]
     UrlWithoutHost,
-    #[error("Host returned error,\n\tcode: {code}\n\tbody: {body:?}")]
+    #[error("server returned error,\n\tcode: {code}\n\tbody: {body:?}")]
     StatusNotOk {
         code: StatusCode,
         body: Option<String>,
     },
-    #[error("Host contained invalid characters, {0}")]
+    #[error("server contained invalid characters, {0}")]
     InvalidHost(InvalidHeaderValue),
-    #[error("Host does not report we can seek in streams")]
+    #[error("server does not report we can seek in streams")]
     RangesNotAccepted,
     #[error("Invalid range")]
     InvalidRange,
-    #[error("Host redirected us however did not send location")]
+    #[error("server redirected us however did not send location")]
     MissingRedirectLocation,
     #[error("The redirect location contained invalid characters, {0}")]
     BrokenRedirectLocation(header::ToStrError),
     #[error("The redirect location is not a url, {0}")]
     InvalidUriRedirectLocation(InvalidUri),
-    #[error("Host redirected us more then 10 times")]
+    #[error("server redirected us more then 10 times")]
     TooManyRedirects,
+    #[error("Server did not send any data")]
+    MissingFrame,
+    #[error("Could not send request to server: {0}")]
+    SendingRequest(hyper::Error),
+    #[error("Could not set up connection to server: {0}")]
+    Handshake(hyper::Error),
+    #[error("Could not read response body")]
+    ReadingBody(hyper::Error),
 }
 
 impl Error {
@@ -72,60 +81,7 @@ impl Error {
     }
 }
 
-pub(crate) struct Client {
-    host: HeaderValue,
-    url: hyper::Uri,
-    conn: Connection,
-}
-
-struct Connection {
-    request_sender: SendRequest<Empty<Bytes>>,
-    // when the joinset drops the connection is ended
-    connection: JoinSet<()>,
-}
-
-type HyperResponse = hyper::Response<Incoming>;
-impl Connection {
-    async fn new(url: &hyper::Uri, restriction: &Option<Network>) -> Result<Self, Error> {
-        let tcp = new_tcp_stream(&url, &restriction).await?;
-        let io = ThrottlableIo::new(tcp);
-        let (request_sender, conn) = http1::handshake(io).await?;
-
-        let mut connection = JoinSet::new();
-        connection.spawn(async move {
-            if let Err(e) = conn.await {
-                eprintln!("Error in connection: {}", e);
-            }
-        });
-        Ok(Self {
-            request_sender,
-            connection,
-        })
-    }
-
-    async fn send_request(
-        &mut self,
-        url: &hyper::Uri,
-        cookies: &Cookies,
-    ) -> Result<HyperResponse, Error> {
-        let host = url.host().ok_or(Error::UrlWithoutHost)?;
-        let host = HeaderValue::from_str(host).map_err(Error::InvalidHost)?;
-        // todo!("url encoded stuff must become headers for some reason")
-        let mut request = Request::builder()
-            .method(Method::GET)
-            .uri(url)
-            .header(header::HOST, host.clone())
-            .header(header::USER_AGENT, "stream-owl")
-            .header(header::ACCEPT, "*/*")
-            .header(header::CONNECTION, "keep-alive");
-        cookies.add_to(&mut request);
-        let request = request.body(Empty::<Bytes>::new())?;
-        let response = self.request_sender.send_request(dbg!(request)).await?;
-        Ok(response)
-    }
-}
-
-struct Cookies(Vec<String>);
+pub(crate) struct Cookies(Vec<String>);
 impl Cookies {
     fn get_from(&mut self, response: &HyperResponse) {
         let new = response
@@ -148,14 +104,58 @@ impl Cookies {
     }
 }
 
-impl Client {
+pub(crate) struct ClientStreamingPartial {
+    stream: Incoming,
+    inner: InnerClient,
+}
+
+impl ClientStreamingPartial {
+    pub fn into_reader(self) -> Reader {
+        let Self { stream, inner } = self;
+        Reader::PartialData { stream, inner }
+    }
+}
+
+pub(crate) struct InnerClient {
+    host: HeaderValue,
+    url: hyper::Uri,
+    conn: Connection,
+}
+
+pub struct Client {
+    should_support_range: bool,
+    inner: InnerClient,
+}
+
+pub(crate) enum StreamingClient {
+    Partial(ClientStreamingPartial),
+    All(ClientStreamingAll),
+}
+
+pub(crate) struct ClientStreamingAll {
+    stream: Incoming,
+    inner: InnerClient,
+}
+
+impl ClientStreamingAll {
+    pub fn into_reader(self) -> Reader {
+        let Self { stream, inner } = self;
+        Reader::AllData { stream, inner }
+    }
+}
+
+
+impl StreamingClient {
     pub(crate) async fn new(
         mut url: hyper::Uri,
         restriction: Option<Network>,
-    ) -> Result<Client, Error> {
+    ) -> Result<Self, Error> {
         let mut conn = Connection::new(&url, &restriction).await?;
         let mut cookies = Cookies(Vec::new());
-        let mut response = conn.send_request(&url, &cookies).await?;
+        let first_range = "Range: bytes=0-4096";
+        let mut response = conn
+            .send_initial_request(&url, &cookies, first_range)
+            .await?;
         cookies.get_from(&response);
 
         let mut numb_redirect = 0;
@@ -170,59 +170,76 @@ impl Client {
                 prev_url = url.clone();
                 conn = Connection::new(&url, &restriction).await?;
             }
-            response = conn.send_request(&url, &cookies).await?;
+            response = conn
+                .send_initial_request(&url, &cookies, first_range)
+                .await?;
             cookies.get_from(&response);
 
             println!("redirecting to: {url}");
             numb_redirect += 1
         }
 
-        if !response.status().is_success() {
-            return Err(Error::status_not_ok(response).await);
+        let host = url.host().unwrap().parse().unwrap();
+        let inner = InnerClient { host, url, conn };
+        match response.status() {
+            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
+                stream: response.into_body(),
+                inner,
+            })),
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
+                stream: response.into_body(),
+                inner,
+            })),
+            StatusCode::RANGE_NOT_SATISFIABLE => todo!("redo without range"),
+            _ => Err(Error::status_not_ok(response).await),
         }
-
-        let (parts, body) = response.into_parts();
-        if !parts
-            .headers
-            .get(header::ACCEPT_RANGES)
-            .is_some_and(|val| val == "bytes")
-        {
-            return Err(Error::RangesNotAccepted);
-        }
-        println!("headers: {:#?}", parts.headers);
-        println!("body: {:#?}", body.collect().await);
-
-        Ok(Client {
-            host: url.host().unwrap().parse().unwrap(),
-            url,
-            conn,
-        })
     }
+}
 
+impl Client {
     /// Panics if pos_1 is smaller then pos_2
-    pub(crate) async fn get_range(&mut self, pos_1: u64, pos_2: u64) -> Result<Response, Error> {
-        assert!(pos_1 < pos_2);
-
-        let range = format!("Range: bytes={pos_1}-{pos_2}");
+    pub(crate) async fn try_get_range(
+        mut self,
+        start: u64,
+        len: u64,
+    ) -> Result<StreamingClient, Error> {
+        let range = format!("Range: bytes={start}-{}", start + len);
         let request = Request::builder()
             .method(Method::GET)
-            .uri(self.url.clone())
-            .header(header::HOST, self.host.clone())
+            .uri(self.inner.url.clone())
+            .header(header::HOST, self.inner.host.clone())
             .header(header::USER_AGENT, "stream-owl")
             .header(header::ACCEPT, "*/*")
             .header(header::CONNECTION, "keep-alive")
             .header(header::RANGE, range)
             .body(Empty::<Bytes>::new())?;
 
-        let response = self.conn.request_sender.send_request(request).await?;
+        let response = self
+            .inner
+            .conn
+            .request_sender
+            .send_request(request)
+            .await
+            .map_err(Error::SendingRequest)
+            .unwrap();
+
         match response.status() {
-            StatusCode::PARTIAL_CONTENT => Ok(Response::Range(response.into_body())),
-            StatusCode::RANGE_NOT_SATISFIABLE => Err(Error::InvalidRange),
-            // entire body is send at once
-            StatusCode::OK => Ok(Response::All(response.into_body())),
+            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
+                stream: response.into_body(),
+                inner: self.inner,
+            })),
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
+                stream: response.into_body(),
+                inner: self.inner,
+            })),
+            StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
             _ => Err(Error::status_not_ok(response).await),
         }
     }
+}
+
+pub(crate) struct Response {
+    bytes: Vec<Bytes>,
 }
 
 fn redirect_url<T>(redirect: hyper::Response<T>) -> Result<hyper::Uri, Error> {
@@ -236,99 +253,66 @@ fn redirect_url<T>(redirect: hyper::Response<T>) -> Result<hyper::Uri, Error> {
         .map_err(Error::InvalidUriRedirectLocation)
 }
 
-pub(crate) enum Response {
-    Range(hyper::body::Incoming),
-    All(hyper::body::Incoming),
-}
-
-async fn resolve_dns(host: &str) -> Result<IpAddr, Error> {
-    use hickory_resolver::config::{ResolverConfig, ResolverOpts};
-    use hickory_resolver::TokioAsyncResolver;
-    let resolver = TokioAsyncResolver::tokio(ResolverConfig::default(), ResolverOpts::default());
-
-    resolver
-        .lookup_ip(host)
-        .await?
-        .iter()
-        .next()
-        .ok_or(Error::DnsEmpty)
-}
-
-async fn new_tcp_stream(
-    url: &hyper::Uri,
-    restriction: &Option<Network>,
-) -> Result<TcpStream, Error> {
-    let bind_addr = restriction
-        .as_ref()
-        .map(Network::addr)
-        .unwrap_or(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)));
-    let bind_addr = SocketAddr::new(bind_addr, 0);
-
-    let host = url.host().expect("stream urls always have a host");
-    let host = resolve_dns(host).await?;
-    let port = url.port().map(|p| p.as_u16()).unwrap_or(80);
-    let connect_addr = SocketAddr::new(host, port);
-
-    let socket = TcpSocket::new_v4().map_err(Error::SocketCreation)?;
-    socket.bind(bind_addr).map_err(Error::Restricting)?;
-    dbg!(&connect_addr);
-    Ok(socket
-        .connect(connect_addr)
-        .await
-        .map_err(Error::Connecting)?)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use http_body_util::BodyExt;
 
     // feed url: 274- The Age of the Algorithm
     const FEED_URL: &str = "https://dts.podtrac.com/redirect.mp3/chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3?aid=rss_feed&awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&feed=BqbsxVfO";
     const REDIR_URL: &str = "http://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3/default.mp3_ywr3ahjkcgo_c288ef3e9f147075ce20a657c0c05108_20203379.mp3?aid=rss_feed&amp;awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&amp;awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&amp;feed=BqbsxVfO&hash_redirect=1&x-total-bytes=20203379&x-ais-classified=unclassified&listeningSessionID=0CD_382_295__75b258bb6b5c08fb4943101f0901735a80c29237";
 
-    #[test]
-    fn wtf() {
-        let url = hyper::Uri::from_static(REDIR_URL);
-        let query = url.query().unwrap_or("");
-        let headers: Vec<(String, String)> = serde_urlencoded::from_str(query).unwrap();
-        dbg!(headers);
-        panic!();
-    }
-
     #[tokio::test]
-    async fn stream_works() {
+    async fn get_stream_client() {
         let url = hyper::Uri::from_static(FEED_URL);
-        let mut client = Client::new(url, None).await.unwrap();
-        let response = client.get_range(0, 1024).await;
+        let client = StreamingClient::new(url, None).await.unwrap();
 
-        match response {
-            Ok(Response::All(incoming)) | Ok(Response::Range(incoming)) => {
-                incoming.collect().await.unwrap().to_bytes()
-            }
-            Err(Error::InvalidRange) => todo!(),
-            Err(Error::RangesNotAccepted) => todo!(),
-            Err(e) => unimplemented!("cant handle error: {e}"),
+        let StreamingClient::Partial(client) = client else {
+            panic!("should get chunking client")
         };
     }
 
     #[tokio::test]
-    async fn basic_http_works() {
-        let url = hyper::Uri::from_static("http://www.example.org");
-        let mut client = match Client::new(url, None).await {
-            Ok(client) => client,
-            Err(Error::RangesNotAccepted) => return,
-            Err(e) => panic!("{e:?}"),
-        };
-        let response = client.get_range(0, 1024).await;
-
-        match response {
-            Ok(Response::All(incoming)) | Ok(Response::Range(incoming)) => {
-                incoming.collect().await.unwrap().to_bytes()
+    async fn state_machine_works() {
+        let url = hyper::Uri::from_static(FEED_URL);
+        let mut client = StreamingClient::new(url, None).await.unwrap();
+        let mut buffer = Vec::new();
+        loop {
+            match client {
+                StreamingClient::Partial(client_with_stream) => {
+                    let mut reader = client_with_stream.into_reader();
+                    tokio::io::copy(&mut reader, &mut buffer).await.unwrap();
+                    client = reader
+                        .into_client()
+                        .try_get_range(buffer.len() as u64, 1024)
+                        .await
+                        .unwrap();
+                }
+                StreamingClient::All(client_with_stream) => {
+                    let mut reader = client_with_stream.into_reader();
+                    tokio::io::copy(&mut reader, &mut buffer).await.unwrap();
+                    break;
+                }
             }
-            Err(Error::InvalidRange) => todo!(),
-            Err(Error::RangesNotAccepted) => todo!(),
-            Err(e) => unimplemented!("cant handle error: {e}"),
-        };
+        }
     }
+
+    // #[tokio::test]
+    // async fn basic_http_works() {
+    //     let url = hyper::Uri::from_static("http://www.example.org");
+    //     let (mut client, data) = match Client::new(url, None).await {
+    //         Ok(v) => v,
+    //         Err(Error::RangesNotAccepted) => return,
+    //         Err(e) => panic!("{e:?}"),
+    //     };
+    //     let response = client.get_range(0, 1024).await;
+    //
+    //     match response {
+    //         Ok(Response::All(incoming)) | Ok(Response::Range(incoming)) => {
+    //             incoming.collect().await.unwrap().to_bytes()
+    //         }
+    //         Err(Error::InvalidRange) => todo!(),
+    //         Err(Error::RangesNotAccepted) => todo!(),
+    //         Err(e) => unimplemented!("cant handle error: {e}"),
+    //     };
+    // }
 }
