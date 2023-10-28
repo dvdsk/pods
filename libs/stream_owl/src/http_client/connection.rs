@@ -19,7 +19,7 @@ use super::{Error, Cookies};
 pub(crate) struct Connection {
     pub request_sender: SendRequest<Empty<Bytes>>,
     // when the joinset drops the connection is ended
-    connection: JoinSet<()>,
+    _connection: JoinSet<()>,
 }
 
 pub(crate) type HyperResponse = hyper::Response<Incoming>;
@@ -37,7 +37,7 @@ impl Connection {
         });
         Ok(Self {
             request_sender,
-            connection,
+            _connection: connection,
         })
     }
 
@@ -61,7 +61,7 @@ impl Connection {
         let request = request.body(Empty::<Bytes>::new())?;
         let response = self
             .request_sender
-            .send_request(request)
+            .send_request(dbg!(request))
             .await
             .map_err(Error::SendingRequest)?;
         Ok(response)

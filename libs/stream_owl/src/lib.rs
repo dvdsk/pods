@@ -12,3 +12,4 @@ pub use stream::Error as StreamError;
 pub use stream::Id as StreamId;
 pub use manager::Manager;
 
+pub use network::list_interfaces;

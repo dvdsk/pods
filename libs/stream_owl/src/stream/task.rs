@@ -13,7 +13,7 @@ pub(crate) async fn new(
     restriction: Option<Network>,
 ) -> Result<Canceld, Error> {
     let mut client = StreamingClient::new(url, restriction).await?;
-    let Some(pos) = seek_rx.recv().await else {
+    let Some(_pos) = seek_rx.recv().await else {
         return Ok(Canceld);
     };
 

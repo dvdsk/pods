@@ -37,11 +37,11 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub fn set_priority(&mut self, arg: i32) {
+    pub fn set_priority(&mut self, _arg: i32) {
         todo!()
     }
 
-    pub fn limit_bandwith(&mut self, bandwith: Bandwith) {
+    pub fn limit_bandwith(&mut self, _bandwith: Bandwith) {
         todo!();
     }
 

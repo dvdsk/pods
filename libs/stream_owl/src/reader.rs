@@ -9,19 +9,19 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub fn set_prefetch(bytes: usize) {
+    pub fn set_prefetch(_bytes: usize) {
         todo!()
     }
 }
 
 impl Seek for Reader {
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+    fn seek(&mut self, _pos: io::SeekFrom) -> io::Result<u64> {
         todo!()
     }
 }
 
 impl Read for Reader {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+    fn read(&mut self, _buf: &mut [u8]) -> io::Result<usize> {
         todo!()
     }
 }

@@ -60,11 +60,11 @@ impl Manager {
         self.add_stream(url, false)
     }
 
-    pub fn add_stream(&mut self, url: &str, to_disk: bool) -> stream::Handle {
+    pub fn add_stream(&mut self, _url: &str, _to_disk: bool) -> stream::Handle {
         todo!()
     }
 
-    pub fn limit_bandwith(&mut self, bandwith: Bandwith) {
+    pub fn limit_bandwith(&mut self, _bandwith: Bandwith) {
         todo!();
     }
 }

@@ -15,6 +15,7 @@ mod connection;
 use connection::Connection;
 
 use self::connection::HyperResponse;
+use self::read::InnerReader;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -64,6 +65,8 @@ pub enum Error {
     Handshake(hyper::Error),
     #[error("Could not read response body")]
     ReadingBody(hyper::Error),
+    #[error("Could now write the recieved data to storage")]
+    WritingData(std::io::Error),
 }
 
 impl Error {
@@ -112,7 +115,19 @@ pub(crate) struct ClientStreamingPartial {
 impl ClientStreamingPartial {
     pub fn into_reader(self) -> Reader {
         let Self { stream, inner } = self;
-        Reader::PartialData { stream, inner }
+        Reader::PartialData(InnerReader::new(stream, inner))
+    }
+}
+
+pub(crate) struct ClientStreamingAll {
+    stream: Incoming,
+    inner: InnerClient,
+}
+
+impl ClientStreamingAll {
+    pub fn into_reader(self) -> Reader {
+        let Self { stream, inner } = self;
+        Reader::AllData(InnerReader::new(stream, inner))
     }
 }
 
@@ -132,19 +147,6 @@ pub(crate) enum StreamingClient {
     All(ClientStreamingAll),
 }
 
-pub(crate) struct ClientStreamingAll {
-    stream: Incoming,
-    inner: InnerClient,
-}
-
-impl ClientStreamingAll {
-    pub fn into_reader(self) -> Reader {
-        let Self { stream, inner } = self;
-        Reader::AllData { stream, inner }
-    }
-}
-
-
 impl StreamingClient {
     pub(crate) async fn new(
         mut url: hyper::Uri,
@@ -152,7 +154,7 @@ impl StreamingClient {
     ) -> Result<Self, Error> {
         let mut conn = Connection::new(&url, &restriction).await?;
         let mut cookies = Cookies(Vec::new());
-        let first_range = "Range: bytes=0-4096";
+        let first_range = "bytes=0-4096";
         let mut response = conn
             .send_initial_request(&url, &cookies, first_range)
             .await?;
@@ -238,10 +240,6 @@ impl Client {
     }
 }
 
-pub(crate) struct Response {
-    bytes: Vec<Bytes>,
-}
-
 fn redirect_url<T>(redirect: hyper::Response<T>) -> Result<hyper::Uri, Error> {
     redirect
         .headers()
@@ -266,8 +264,15 @@ mod tests {
         let url = hyper::Uri::from_static(FEED_URL);
         let client = StreamingClient::new(url, None).await.unwrap();
 
-        let StreamingClient::Partial(client) = client else {
-            panic!("should get chunking client")
+        match client {
+            StreamingClient::Partial(_) => (),
+            StreamingClient::All(client) => {
+                let mut buf = Vec::new();
+                client.into_reader().read(&mut buf, None).await.unwrap();
+                let len = buf.len();
+                dbg!(len);
+                panic!("should get partial streaming client")
+            }
         };
     }
 
@@ -280,7 +285,7 @@ mod tests {
             match client {
                 StreamingClient::Partial(client_with_stream) => {
                     let mut reader = client_with_stream.into_reader();
-                    tokio::io::copy(&mut reader, &mut buffer).await.unwrap();
+                    reader.read(&mut buffer, Some(1024)).await.unwrap();
                     client = reader
                         .into_client()
                         .try_get_range(buffer.len() as u64, 1024)
@@ -289,7 +294,7 @@ mod tests {
                 }
                 StreamingClient::All(client_with_stream) => {
                     let mut reader = client_with_stream.into_reader();
-                    tokio::io::copy(&mut reader, &mut buffer).await.unwrap();
+                    reader.read(buffer, None).await.unwrap();
                     break;
                 }
             }
