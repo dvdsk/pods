@@ -1,9 +1,7 @@
-use bytes::Bytes;
 use http::header::InvalidHeaderValue;
-use http::method::Method;
 use http::uri::InvalidUri;
-use http::{header, HeaderValue, Request, StatusCode};
-use http_body_util::{BodyExt, Empty};
+use http::{header, HeaderValue, StatusCode};
+use http_body_util::BodyExt;
 use hyper::body::Incoming;
 
 use crate::network::Network;
@@ -157,6 +155,21 @@ pub(crate) struct InnerClient {
     host: HeaderValue,
     url: hyper::Uri,
     conn: Connection,
+    cookies: Cookies,
+}
+
+impl InnerClient {
+    async fn send_range_request(
+        &mut self,
+        range: &str,
+    ) -> Result<hyper::Response<Incoming>, Error> {
+        let response = self
+            .conn
+            .send_range_request(&self.url, &self.host, &self.cookies, range)
+            .await?;
+        self.cookies.get_from(&response);
+        Ok(response)
+    }
 }
 
 pub struct Client {
@@ -201,7 +214,7 @@ impl StreamingClient {
             response = conn
                 .send_initial_request(&url, &cookies, &first_range)
                 .await?;
-            size_hint.update_from_headers(response.headers());
+            size_hint.update_from_headers(&response);
             cookies.get_from(&response);
 
             println!("redirecting to: {url}");
@@ -209,7 +222,7 @@ impl StreamingClient {
         }
 
         let host = url.host().unwrap().parse().unwrap();
-        let inner = InnerClient { host, url, conn };
+        let inner = InnerClient { host, url, conn, cookies };
         match response.status() {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
@@ -242,26 +255,10 @@ impl Client {
         len: u64,
     ) -> Result<StreamingClient, Error> {
         let range = format!("bytes={start}-{}", start + len);
-        let request = Request::builder()
-            .method(Method::GET)
-            .uri(self.inner.url.clone())
-            .header(header::HOST, self.inner.host.clone())
-            .header(header::USER_AGENT, "stream-owl")
-            .header(header::ACCEPT, "*/*")
-            .header(header::CONNECTION, "keep-alive")
-            .header(header::RANGE, range)
-            .body(Empty::<Bytes>::new())?;
+        let response = self.inner.send_range_request(&range).await?;
 
-        let response = self
-            .inner
-            .conn
-            .request_sender
-            .send_request(request)
-            .await
-            .map_err(Error::SendingRequest)
-            .unwrap();
-
-        self.size_hint.update_from_headers(response.headers());
+        // TODO support endless streams
+        self.size_hint.update_from_headers(&response);
         match response.status() {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
