@@ -2,15 +2,17 @@ use std::collections::VecDeque;
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
-use hyper::body::Incoming;
+use hyper::body::{Body, Incoming};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
+use super::size_hint::SizeHint;
 use super::{Client, Error, InnerClient};
 
 pub(crate) struct InnerReader {
     stream: Incoming,
     client: InnerClient,
     buffer: VecDeque<u8>,
+    size_hint: SizeHint,
 }
 
 pub(crate) enum Reader {
@@ -18,18 +20,47 @@ pub(crate) enum Reader {
     AllData(InnerReader),
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Can not turn reader into a client while the server is still sending data to be read")]
+pub struct StreamNotEmpty;
+
 impl Reader {
-    pub(crate) fn into_client(self) -> Client {
-        match self {
-            Reader::PartialData(InnerReader { client, .. }) => Client {
-                should_support_range: true,
-                inner: client,
-            },
-            Reader::AllData(InnerReader { client, .. }) => Client {
-                should_support_range: false,
-                inner: client,
-            },
+    pub(crate) fn try_into_client(mut self) -> Result<Client, StreamNotEmpty> {
+        if !self.inner().stream.is_end_stream() {
+            return Err(StreamNotEmpty);
         }
+
+        Ok(match self {
+            Reader::PartialData(InnerReader {
+                client,
+                stream,
+                size_hint,
+                ..
+            }) => Client {
+                should_support_range: true,
+                size_hint,
+                inner: client,
+            },
+            Reader::AllData(InnerReader {
+                client, size_hint, ..
+            }) => Client {
+                should_support_range: false,
+                size_hint,
+                inner: client,
+            },
+        })
+    }
+
+    pub(crate) async fn into_client(mut self) -> Result<Client, Error> {
+        while let Some(_frame) = self
+            .inner()
+            .stream
+            .frame()
+            .await
+            .transpose()
+            .map_err(Error::EmptyingBody)?
+        {}
+        Ok(self.try_into_client().expect("just emptied the stream"))
     }
 
     fn inner(&mut self) -> &mut InnerReader {
@@ -49,11 +80,12 @@ impl Reader {
 }
 
 impl InnerReader {
-    pub(crate) fn new(stream: Incoming, client: InnerClient) -> Self {
+    pub(crate) fn new(stream: Incoming, client: InnerClient, size_hint: SizeHint) -> Self {
         Self {
             stream,
             client,
             buffer: VecDeque::new(),
+            size_hint,
         }
     }
 
@@ -74,6 +106,7 @@ impl InnerReader {
 
         while n_read < max {
             let Some(data) = get_next_data_frame(&mut self.stream).await? else {
+                dbg!("stream is out of data, ", self.stream.is_end_stream());
                 return Ok(());
             };
 

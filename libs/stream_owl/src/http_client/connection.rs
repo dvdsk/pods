@@ -61,7 +61,7 @@ impl Connection {
         let request = request.body(Empty::<Bytes>::new())?;
         let response = self
             .request_sender
-            .send_request(dbg!(request))
+            .send_request(request)
             .await
             .map_err(Error::SendingRequest)?;
         Ok(response)
@@ -98,7 +98,6 @@ async fn new_tcp_stream(
 
     let socket = TcpSocket::new_v4().map_err(Error::SocketCreation)?;
     socket.bind(bind_addr).map_err(Error::Restricting)?;
-    dbg!(&connect_addr);
     Ok(socket
         .connect(connect_addr)
         .await

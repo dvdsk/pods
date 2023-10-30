@@ -12,7 +12,7 @@ pub(crate) async fn new(
     mut seek_rx: mpsc::Receiver<u64>,
     restriction: Option<Network>,
 ) -> Result<Canceld, Error> {
-    let mut client = StreamingClient::new(url, restriction).await?;
+    let mut client = StreamingClient::new(url, restriction, 0, 1024).await?;
     let Some(_pos) = seek_rx.recv().await else {
         return Ok(Canceld);
     };
@@ -24,7 +24,8 @@ pub(crate) async fn new(
                 let mut reader = client_with_stream.into_reader();
                 reader.read(&mut buffer, Some(1024)).await.unwrap();
                 client = reader
-                    .into_client()
+                    .try_into_client()
+                    .expect("should not read less then we requested")
                     .try_get_range(buffer.len() as u64, 1024)
                     .await
                     .unwrap();

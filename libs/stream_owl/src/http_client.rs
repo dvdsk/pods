@@ -10,6 +10,8 @@ use crate::network::Network;
 mod io;
 mod read;
 use read::Reader;
+mod size_hint;
+use size_hint::SizeHint;
 
 mod connection;
 use connection::Connection;
@@ -63,10 +65,12 @@ pub enum Error {
     SendingRequest(hyper::Error),
     #[error("Could not set up connection to server: {0}")]
     Handshake(hyper::Error),
-    #[error("Could not read response body")]
+    #[error("Could not read response body: {0}")]
     ReadingBody(hyper::Error),
-    #[error("Could now write the recieved data to storage")]
+    #[error("Could now write the recieved data to storage: {0}")]
     WritingData(std::io::Error),
+    #[error("Could not throw away body: {0}")]
+    EmptyingBody(hyper::Error),
 }
 
 impl Error {
@@ -110,24 +114,42 @@ impl Cookies {
 pub(crate) struct ClientStreamingPartial {
     stream: Incoming,
     inner: InnerClient,
+    size_hint: SizeHint,
 }
 
 impl ClientStreamingPartial {
-    pub fn into_reader(self) -> Reader {
-        let Self { stream, inner } = self;
-        Reader::PartialData(InnerReader::new(stream, inner))
+    pub(crate) fn into_reader(self) -> Reader {
+        let Self {
+            stream,
+            inner,
+            size_hint,
+        } = self;
+        Reader::PartialData(InnerReader::new(stream, inner, size_hint))
+    }
+
+    pub(crate) fn size_hint(&self) -> SizeHint {
+        self.size_hint
     }
 }
 
 pub(crate) struct ClientStreamingAll {
     stream: Incoming,
     inner: InnerClient,
+    size_hint: SizeHint,
 }
 
 impl ClientStreamingAll {
-    pub fn into_reader(self) -> Reader {
-        let Self { stream, inner } = self;
-        Reader::AllData(InnerReader::new(stream, inner))
+    pub(crate) fn into_reader(self) -> Reader {
+        let Self {
+            stream,
+            inner,
+            size_hint,
+        } = self;
+        Reader::AllData(InnerReader::new(stream, inner, size_hint))
+    }
+
+    pub(crate) fn size_hint(&self) -> SizeHint {
+        todo!()
     }
 }
 
@@ -139,6 +161,7 @@ pub(crate) struct InnerClient {
 
 pub struct Client {
     should_support_range: bool,
+    size_hint: SizeHint,
     inner: InnerClient,
 }
 
@@ -151,12 +174,15 @@ impl StreamingClient {
     pub(crate) async fn new(
         mut url: hyper::Uri,
         restriction: Option<Network>,
+        init_start: u64,
+        init_len: u64,
     ) -> Result<Self, Error> {
+        let mut size_hint = SizeHint::default();
         let mut conn = Connection::new(&url, &restriction).await?;
         let mut cookies = Cookies(Vec::new());
-        let first_range = "bytes=0-4096";
+        let first_range = format!("bytes={init_start}-{init_len}");
         let mut response = conn
-            .send_initial_request(&url, &cookies, first_range)
+            .send_initial_request(&url, &cookies, &first_range)
             .await?;
         cookies.get_from(&response);
 
@@ -173,8 +199,9 @@ impl StreamingClient {
                 conn = Connection::new(&url, &restriction).await?;
             }
             response = conn
-                .send_initial_request(&url, &cookies, first_range)
+                .send_initial_request(&url, &cookies, &first_range)
                 .await?;
+            size_hint.update_from_headers(response.headers());
             cookies.get_from(&response);
 
             println!("redirecting to: {url}");
@@ -187,13 +214,22 @@ impl StreamingClient {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
                 inner,
+                size_hint,
             })),
             StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
                 stream: response.into_body(),
                 inner,
+                size_hint,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => todo!("redo without range"),
             _ => Err(Error::status_not_ok(response).await),
+        }
+    }
+
+    pub(crate) fn size_hint(&self) -> SizeHint {
+        match self {
+            StreamingClient::Partial(client) => client.size_hint(),
+            StreamingClient::All(client) => client.size_hint(),
         }
     }
 }
@@ -205,7 +241,7 @@ impl Client {
         start: u64,
         len: u64,
     ) -> Result<StreamingClient, Error> {
-        let range = format!("Range: bytes={start}-{}", start + len);
+        let range = format!("bytes={start}-{}", start + len);
         let request = Request::builder()
             .method(Method::GET)
             .uri(self.inner.url.clone())
@@ -225,18 +261,25 @@ impl Client {
             .map_err(Error::SendingRequest)
             .unwrap();
 
+        self.size_hint.update_from_headers(response.headers());
         match response.status() {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
                 inner: self.inner,
+                size_hint: self.size_hint,
             })),
             StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
                 stream: response.into_body(),
                 inner: self.inner,
+                size_hint: self.size_hint,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
             _ => Err(Error::status_not_ok(response).await),
         }
+    }
+
+    pub(crate) fn size_hint(&self) -> SizeHint {
+        self.size_hint
     }
 }
 
@@ -262,7 +305,9 @@ mod tests {
     #[tokio::test]
     async fn get_stream_client() {
         let url = hyper::Uri::from_static(FEED_URL);
-        let client = StreamingClient::new(url, None).await.unwrap();
+        let client = StreamingClient::new(url, None, 0, 1024).await.unwrap();
+        dbg!(client.size_hint());
+        assert!(client.size_hint().highest_estimate().is_some());
 
         match client {
             StreamingClient::Partial(_) => (),
@@ -278,17 +323,30 @@ mod tests {
 
     #[tokio::test]
     async fn state_machine_works() {
+        const RANGE_LEN: u64 = 1_000_000; // 1MB
         let url = hyper::Uri::from_static(FEED_URL);
-        let mut client = StreamingClient::new(url, None).await.unwrap();
+        let mut client = StreamingClient::new(url, None, 0, RANGE_LEN).await.unwrap();
         let mut buffer = Vec::new();
         loop {
+            let content_size = client.size_hint().highest_estimate().unwrap();
+            dbg!(content_size);
+            dbg!(buffer.len());
+            if buffer.len() as u64 >= content_size {
+                return;
+            }
+
             match client {
                 StreamingClient::Partial(client_with_stream) => {
                     let mut reader = client_with_stream.into_reader();
-                    reader.read(&mut buffer, Some(1024)).await.unwrap();
+                    reader
+                        .read(&mut buffer, Some(RANGE_LEN as usize))
+                        .await
+                        .unwrap();
                     client = reader
                         .into_client()
-                        .try_get_range(buffer.len() as u64, 1024)
+                        .await
+                        .unwrap()
+                        .try_get_range(buffer.len() as u64, RANGE_LEN)
                         .await
                         .unwrap();
                 }
@@ -300,24 +358,4 @@ mod tests {
             }
         }
     }
-
-    // #[tokio::test]
-    // async fn basic_http_works() {
-    //     let url = hyper::Uri::from_static("http://www.example.org");
-    //     let (mut client, data) = match Client::new(url, None).await {
-    //         Ok(v) => v,
-    //         Err(Error::RangesNotAccepted) => return,
-    //         Err(e) => panic!("{e:?}"),
-    //     };
-    //     let response = client.get_range(0, 1024).await;
-    //
-    //     match response {
-    //         Ok(Response::All(incoming)) | Ok(Response::Range(incoming)) => {
-    //             incoming.collect().await.unwrap().to_bytes()
-    //         }
-    //         Err(Error::InvalidRange) => todo!(),
-    //         Err(Error::RangesNotAccepted) => todo!(),
-    //         Err(e) => unimplemented!("cant handle error: {e}"),
-    //     };
-    // }
 }
