@@ -5,14 +5,15 @@ use http_body_util::BodyExt;
 use hyper::body::{Body, Incoming};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::size_hint::SizeHint;
-use super::{Client, Error, InnerClient};
+use super::size_hint::Size;
+// todo fix error, should be task stream error?
+use super::{Client, Error, InnerClient, TomatoClient};
 
 pub(crate) struct InnerReader {
     stream: Incoming,
     client: InnerClient,
     buffer: VecDeque<u8>,
-    size_hint: SizeHint,
+    size_hint: Size,
 }
 
 pub(crate) enum Reader {
@@ -25,7 +26,7 @@ pub(crate) enum Reader {
 pub struct StreamNotEmpty;
 
 impl Reader {
-    pub(crate) fn try_into_client(mut self) -> Result<Client, StreamNotEmpty> {
+    pub(crate) fn try_into_client(mut self) -> Result<TomatoClient, StreamNotEmpty> {
         if !self.inner().stream.is_end_stream() {
             return Err(StreamNotEmpty);
         }
@@ -36,22 +37,22 @@ impl Reader {
                 stream,
                 size_hint,
                 ..
-            }) => Client {
+            }) => TomatoClient::Ready(Client {
                 should_support_range: true,
-                size_hint,
+                size: size_hint,
                 inner: client,
-            },
+            }),
             Reader::AllData(InnerReader {
                 client, size_hint, ..
-            }) => Client {
+            }) => TomatoClient::Ready(Client {
                 should_support_range: false,
-                size_hint,
+                size: size_hint,
                 inner: client,
-            },
+            }),
         })
     }
 
-    pub(crate) async fn into_client(mut self) -> Result<Client, Error> {
+    pub(crate) async fn into_client(mut self) -> Result<TomatoClient, Error> {
         while let Some(_frame) = self
             .inner()
             .stream
@@ -70,17 +71,19 @@ impl Reader {
         }
     }
 
-    pub(crate) async fn read(
+    /// async cancel safe, any bytes read will be written or bufferd by the reader
+    /// if you want to track the number of bytes written use a wrapper around the writer
+    pub(crate) async fn read_to_writer(
         &mut self,
-        buffer: impl AsyncWrite + Unpin,
+        writer: &mut (impl AsyncWrite + Unpin),
         max: Option<usize>,
     ) -> Result<(), Error> {
-        self.inner().read(buffer, max).await
+        self.inner().read_to_writer(writer, max).await
     }
 }
 
 impl InnerReader {
-    pub(crate) fn new(stream: Incoming, client: InnerClient, size_hint: SizeHint) -> Self {
+    pub(crate) fn new(stream: Incoming, client: InnerClient, size_hint: Size) -> Self {
         Self {
             stream,
             client,
@@ -89,24 +92,22 @@ impl InnerReader {
         }
     }
 
-    pub(crate) async fn read(
+    /// async cancel safe, any bytes read will be written or bufferd by the reader
+    /// if you want to track the number of bytes written use a wrapper around the writer
+    pub(crate) async fn read_to_writer(
         &mut self,
-        mut output: impl AsyncWrite + Unpin,
+        writer: &mut (impl AsyncWrite + Unpin),
         max: Option<usize>,
     ) -> Result<(), Error> {
         let max = max.unwrap_or(usize::MAX);
         let mut n_read = 0usize;
 
-        let to_take = self.buffer.len().min(max);
-        let from_buffer: Vec<_> = self.buffer.drain(0..to_take).collect();
-        output
-            .write(&from_buffer)
-            .await
-            .map_err(Error::WritingData)?;
+        self.write_from_buffer(max, writer).await?;
 
         while n_read < max {
+            // cancel safe: not a problem if a frame is lost as long as
+            // we do not mark them as written
             let Some(data) = get_next_data_frame(&mut self.stream).await? else {
-                dbg!("stream is out of data, ", self.stream.is_end_stream());
                 return Ok(());
             };
 
@@ -114,15 +115,40 @@ impl InnerReader {
             let split = data.len().min(max - n_read);
             let (to_write, to_store) = data.split_at(split);
 
-            n_read += to_write.len();
-            output
+            writer
                 .write_all(to_write)
                 .await
                 .map_err(Error::WritingData)?;
+            n_read += to_write.len();
             self.buffer.extend(to_store);
         }
 
         Ok(())
+    }
+
+    // Is cancel safe, no bytes will be removed from buffer before
+    // they are written
+    async fn write_from_buffer(
+        &mut self,
+        max: usize,
+        output: &mut (impl AsyncWrite + Unpin),
+    ) -> Result<(), Error> {
+        let to_take = self.buffer.len().min(max);
+        let from_buffer: Vec<_> = self.buffer.range(0..to_take).copied().collect();
+        let mut to_write = from_buffer.as_slice();
+        Ok(loop {
+            let n_written = output
+                .write(&from_buffer)
+                .await
+                .map_err(Error::WritingData)?;
+            // remove only what we wrote to prevent losing data on cancel
+            self.buffer.drain(0..n_written);
+            to_write = &to_write[n_written..];
+
+            if to_write.is_empty() {
+                break;
+            }
+        })
     }
 }
 

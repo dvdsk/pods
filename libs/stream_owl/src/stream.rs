@@ -15,8 +15,10 @@ mod task;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Error making http client")]
+    #[error("Error communicating with server")]
     HttpClient(#[from] http_client::Error),
+    #[error("Error writing to strorage")]
+    Writing(std::io::Error),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]

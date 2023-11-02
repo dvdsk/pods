@@ -1,3 +1,5 @@
+use std::mem;
+
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
@@ -9,7 +11,7 @@ mod io;
 mod read;
 use read::Reader;
 mod size_hint;
-use size_hint::SizeHint;
+use size_hint::Size;
 
 mod connection;
 use connection::Connection;
@@ -112,7 +114,7 @@ impl Cookies {
 pub(crate) struct ClientStreamingPartial {
     stream: Incoming,
     inner: InnerClient,
-    size_hint: SizeHint,
+    size: Size,
 }
 
 impl ClientStreamingPartial {
@@ -120,20 +122,35 @@ impl ClientStreamingPartial {
         let Self {
             stream,
             inner,
-            size_hint,
+            size,
         } = self;
-        Reader::PartialData(InnerReader::new(stream, inner, size_hint))
+        Reader::PartialData(InnerReader::new(stream, inner, size))
     }
 
-    pub(crate) fn size_hint(&self) -> SizeHint {
-        self.size_hint
+    pub(crate) fn content_size(&self) -> Option<u64> {
+        self.size.bytes
     }
 }
 
 pub(crate) struct ClientStreamingAll {
     stream: Incoming,
     inner: InnerClient,
-    size_hint: SizeHint,
+    size: Size,
+}
+
+impl ClientStreamingAll {
+    fn from_tomato(client: &mut Client, stream: Incoming) -> &mut Self {
+        let Client {
+            should_support_range,
+            size,
+            inner,
+        };
+        &mut Self {
+            stream,
+            inner,
+            size,
+        }
+    }
 }
 
 impl ClientStreamingAll {
@@ -141,13 +158,13 @@ impl ClientStreamingAll {
         let Self {
             stream,
             inner,
-            size_hint,
+            size,
         } = self;
-        Reader::AllData(InnerReader::new(stream, inner, size_hint))
+        Reader::AllData(InnerReader::new(stream, inner, size))
     }
 
-    pub(crate) fn size_hint(&self) -> SizeHint {
-        todo!()
+    pub(crate) fn content_size(&self) -> Option<u64> {
+        self.size.bytes
     }
 }
 
@@ -172,9 +189,15 @@ impl InnerClient {
     }
 }
 
+pub enum TomatoClient {
+    Streaming(StreamingClient),
+    Ready(Client),
+    Fake,
+}
+
 pub struct Client {
     should_support_range: bool,
-    size_hint: SizeHint,
+    size: Size,
     inner: InnerClient,
 }
 
@@ -190,7 +213,7 @@ impl StreamingClient {
         init_start: u64,
         init_len: u64,
     ) -> Result<Self, Error> {
-        let mut size_hint = SizeHint::default();
+        let mut size_hint = Size::default();
         let mut conn = Connection::new(&url, &restriction).await?;
         let mut cookies = Cookies(Vec::new());
         let first_range = format!("bytes={init_start}-{init_len}");
@@ -222,61 +245,81 @@ impl StreamingClient {
         }
 
         let host = url.host().unwrap().parse().unwrap();
-        let inner = InnerClient { host, url, conn, cookies };
+        let inner = InnerClient {
+            host,
+            url,
+            conn,
+            cookies,
+        };
         match response.status() {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
                 inner,
-                size_hint,
+                size: size_hint,
             })),
             StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
                 stream: response.into_body(),
                 inner,
-                size_hint,
+                size: size_hint,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => todo!("redo without range"),
             _ => Err(Error::status_not_ok(response).await),
         }
     }
 
-    pub(crate) fn size_hint(&self) -> SizeHint {
+    pub(crate) fn content_size(&self) -> Option<u64> {
         match self {
-            StreamingClient::Partial(client) => client.size_hint(),
-            StreamingClient::All(client) => client.size_hint(),
+            StreamingClient::Partial(client) => client.content_size(),
+            StreamingClient::All(client) => client.content_size(),
         }
     }
 }
 
-impl Client {
+impl TomatoClient {
     /// Panics if pos_1 is smaller then pos_2
-    pub(crate) async fn try_get_range(
-        mut self,
-        start: u64,
-        len: u64,
-    ) -> Result<StreamingClient, Error> {
-        let range = format!("bytes={start}-{}", start + len);
-        let response = self.inner.send_range_request(&range).await?;
+    pub(crate) async fn try_get_range(&mut self, start: u64, len: u64) -> Result<(), Error> {
+        let owned_self = mem::replace(self, TomatoClient::Fake);
+        let TomatoClient::Ready(mut client) = owned_self else {
+            // can not put this into the type system by having this
+            // fn take a ready type self and return a not ready type.
+            // as we need to be able to get self back when the future is
+            // canceld
+            panic!("Client must be in ready state")
+        };
 
-        // TODO support endless streams
-        self.size_hint.update_from_headers(&response);
-        match response.status() {
-            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
-                stream: response.into_body(),
-                inner: self.inner,
-                size_hint: self.size_hint,
-            })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
-                stream: response.into_body(),
-                inner: self.inner,
-                size_hint: self.size_hint,
-            })),
-            StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
-            _ => Err(Error::status_not_ok(response).await),
+        let mut end = start + len;
+        if let Some(max_size) = client.size.bytes {
+            end = end.min(max_size);
         }
+
+        let range = format!("bytes={start}-{end}");
+        let response = client.inner.send_range_request(&dbg!(range)).await?;
+
+        client.size.update_from_headers(&response);
+        let Client { size, inner, .. } = client;
+        *self = TomatoClient::Streaming(match response.status() {
+            StatusCode::OK => StreamingClient::All(ClientStreamingAll {
+                stream: response.into_body(),
+                inner,
+                size,
+            }),
+            StatusCode::PARTIAL_CONTENT => StreamingClient::Partial(ClientStreamingPartial {
+                stream: response.into_body(),
+                inner,
+                size: client.size,
+            }),
+            StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
+            _ => return Err(Error::status_not_ok(response).await),
+        });
+        Ok(())
     }
 
-    pub(crate) fn size_hint(&self) -> SizeHint {
-        self.size_hint
+    pub(crate) fn content_size(&self) -> Option<u64> {
+        match self {
+            TomatoClient::Streaming(c) => c.content_size(),
+            TomatoClient::Ready(c) => c.size.bytes,
+            TomatoClient::Fake => unreachable!(),
+        }
     }
 }
 
@@ -303,14 +346,17 @@ mod tests {
     async fn get_stream_client() {
         let url = hyper::Uri::from_static(FEED_URL);
         let client = StreamingClient::new(url, None, 0, 1024).await.unwrap();
-        dbg!(client.size_hint());
-        assert!(client.size_hint().highest_estimate().is_some());
+        assert!(client.content_size().is_some());
 
         match client {
             StreamingClient::Partial(_) => (),
             StreamingClient::All(client) => {
                 let mut buf = Vec::new();
-                client.into_reader().read(&mut buf, None).await.unwrap();
+                client
+                    .into_reader()
+                    .read_to_writer(&mut buf, None, &mut 0)
+                    .await
+                    .unwrap();
                 let len = buf.len();
                 dbg!(len);
                 panic!("should get partial streaming client")
@@ -325,20 +371,21 @@ mod tests {
         let mut client = StreamingClient::new(url, None, 0, RANGE_LEN).await.unwrap();
         let mut buffer = Vec::new();
         loop {
-            let content_size = client.size_hint().highest_estimate().unwrap();
-            dbg!(content_size);
-            dbg!(buffer.len());
-            if buffer.len() as u64 >= content_size {
-                return;
-            }
-
             match client {
                 StreamingClient::Partial(client_with_stream) => {
+                    let content_size = client_with_stream
+                        .content_size()
+                        .expect("test stream should provide size");
                     let mut reader = client_with_stream.into_reader();
                     reader
-                        .read(&mut buffer, Some(RANGE_LEN as usize))
+                        .read_to_writer(&mut buffer, Some(RANGE_LEN as usize), &mut 0)
                         .await
                         .unwrap();
+
+                    if buffer.len() as u64 >= content_size {
+                        return;
+                    }
+
                     client = reader
                         .into_client()
                         .await
@@ -349,7 +396,7 @@ mod tests {
                 }
                 StreamingClient::All(client_with_stream) => {
                     let mut reader = client_with_stream.into_reader();
-                    reader.read(buffer, None).await.unwrap();
+                    reader.read_to_writer(buffer, None, &mut 0).await.unwrap();
                     break;
                 }
             }
