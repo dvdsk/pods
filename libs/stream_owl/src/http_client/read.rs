@@ -5,9 +5,9 @@ use http_body_util::BodyExt;
 use hyper::body::{Body, Incoming};
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use super::size_hint::Size;
+use super::size::Size;
 // todo fix error, should be task stream error?
-use super::{Client, Error, InnerClient, TomatoClient};
+use super::{Client, Error, InnerClient};
 
 pub(crate) struct InnerReader {
     stream: Incoming,
@@ -26,7 +26,7 @@ pub(crate) enum Reader {
 pub struct StreamNotEmpty;
 
 impl Reader {
-    pub(crate) fn try_into_client(mut self) -> Result<TomatoClient, StreamNotEmpty> {
+    pub(crate) fn try_into_client(mut self) -> Result<Client, StreamNotEmpty> {
         if !self.inner().stream.is_end_stream() {
             return Err(StreamNotEmpty);
         }
@@ -37,22 +37,22 @@ impl Reader {
                 stream,
                 size_hint,
                 ..
-            }) => TomatoClient::Ready(Client {
+            }) => Client {
                 should_support_range: true,
                 size: size_hint,
                 inner: client,
-            }),
+            },
             Reader::AllData(InnerReader {
                 client, size_hint, ..
-            }) => TomatoClient::Ready(Client {
+            }) => Client {
                 should_support_range: false,
                 size: size_hint,
                 inner: client,
-            }),
+            },
         })
     }
 
-    pub(crate) async fn into_client(mut self) -> Result<TomatoClient, Error> {
+    pub(crate) async fn into_client(mut self) -> Result<Client, Error> {
         while let Some(_frame) = self
             .inner()
             .stream

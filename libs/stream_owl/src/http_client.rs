@@ -1,5 +1,3 @@
-use std::mem;
-
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
@@ -10,8 +8,8 @@ use crate::network::Network;
 mod io;
 mod read;
 use read::Reader;
-mod size_hint;
-use size_hint::Size;
+mod size;
+use size::Size;
 
 mod connection;
 use connection::Connection;
@@ -88,8 +86,13 @@ impl Error {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) struct Cookies(Vec<String>);
 impl Cookies {
+    fn new() -> Self {
+        Self(Vec::new())
+    }
+
     fn get_from(&mut self, response: &HyperResponse) {
         let new = response
             .headers()
@@ -130,27 +133,21 @@ impl ClientStreamingPartial {
     pub(crate) fn content_size(&self) -> Option<u64> {
         self.size.bytes
     }
+
+    pub(crate) fn builder(&self) -> ClientBuilder {
+        ClientBuilder {
+            restriction: self.inner.restriction.clone(),
+            url: self.inner.url.clone(),
+            cookies: self.inner.cookies.clone(),
+            size: self.size,
+        }
+    }
 }
 
 pub(crate) struct ClientStreamingAll {
     stream: Incoming,
     inner: InnerClient,
     size: Size,
-}
-
-impl ClientStreamingAll {
-    fn from_tomato(client: &mut Client, stream: Incoming) -> &mut Self {
-        let Client {
-            should_support_range,
-            size,
-            inner,
-        };
-        &mut Self {
-            stream,
-            inner,
-            size,
-        }
-    }
 }
 
 impl ClientStreamingAll {
@@ -170,6 +167,7 @@ impl ClientStreamingAll {
 
 pub(crate) struct InnerClient {
     host: HeaderValue,
+    restriction: Option<Network>,
     url: hyper::Uri,
     conn: Connection,
     cookies: Cookies,
@@ -189,12 +187,6 @@ impl InnerClient {
     }
 }
 
-pub enum TomatoClient {
-    Streaming(StreamingClient),
-    Ready(Client),
-    Fake,
-}
-
 pub struct Client {
     should_support_range: bool,
     size: Size,
@@ -206,17 +198,24 @@ pub(crate) enum StreamingClient {
     All(ClientStreamingAll),
 }
 
-impl StreamingClient {
-    pub(crate) async fn new(
-        mut url: hyper::Uri,
-        restriction: Option<Network>,
-        init_start: u64,
-        init_len: u64,
-    ) -> Result<Self, Error> {
-        let mut size_hint = Size::default();
+#[derive(Debug, Clone)]
+pub(crate) struct ClientBuilder {
+    restriction: Option<Network>,
+    url: hyper::Uri,
+    cookies: Cookies,
+    size: Size,
+}
+
+impl ClientBuilder {
+    pub(crate) async fn connect(self, start: u64, len: u64) -> Result<StreamingClient, Error> {
+        let Self {
+            restriction,
+            mut url,
+            mut cookies,
+            mut size,
+        } = self;
+        let first_range = format!("bytes={start}-{len}");
         let mut conn = Connection::new(&url, &restriction).await?;
-        let mut cookies = Cookies(Vec::new());
-        let first_range = format!("bytes={init_start}-{init_len}");
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
             .await?;
@@ -237,7 +236,7 @@ impl StreamingClient {
             response = conn
                 .send_initial_request(&url, &cookies, &first_range)
                 .await?;
-            size_hint.update_from_headers(&response);
+            size.update_from_headers(&response);
             cookies.get_from(&response);
 
             println!("redirecting to: {url}");
@@ -247,6 +246,7 @@ impl StreamingClient {
         let host = url.host().unwrap().parse().unwrap();
         let inner = InnerClient {
             host,
+            restriction,
             url,
             conn,
             cookies,
@@ -255,16 +255,34 @@ impl StreamingClient {
             StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
                 inner,
-                size: size_hint,
+                size,
             })),
             StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
                 stream: response.into_body(),
                 inner,
-                size: size_hint,
+                size,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => todo!("redo without range"),
             _ => Err(Error::status_not_ok(response).await),
         }
+    }
+}
+
+impl StreamingClient {
+    pub(crate) async fn new(
+        url: hyper::Uri,
+        restriction: Option<Network>,
+        init_start: u64,
+        init_len: u64,
+    ) -> Result<Self, Error> {
+        ClientBuilder {
+            restriction,
+            url,
+            cookies: Cookies::new(),
+            size: Size::default(),
+        }
+        .connect(init_start, init_len)
+        .await
     }
 
     pub(crate) fn content_size(&self) -> Option<u64> {
@@ -275,51 +293,40 @@ impl StreamingClient {
     }
 }
 
-impl TomatoClient {
+impl Client {
     /// Panics if pos_1 is smaller then pos_2
-    pub(crate) async fn try_get_range(&mut self, start: u64, len: u64) -> Result<(), Error> {
-        let owned_self = mem::replace(self, TomatoClient::Fake);
-        let TomatoClient::Ready(mut client) = owned_self else {
-            // can not put this into the type system by having this
-            // fn take a ready type self and return a not ready type.
-            // as we need to be able to get self back when the future is
-            // canceld
-            panic!("Client must be in ready state")
-        };
-
+    pub(crate) async fn try_get_range(
+        mut self,
+        start: u64,
+        len: u64,
+    ) -> Result<StreamingClient, Error> {
         let mut end = start + len;
-        if let Some(max_size) = client.size.bytes {
+        if let Some(max_size) = self.content_size() {
             end = end.min(max_size);
         }
 
         let range = format!("bytes={start}-{end}");
-        let response = client.inner.send_range_request(&dbg!(range)).await?;
+        let response = self.inner.send_range_request(&dbg!(range)).await?;
 
-        client.size.update_from_headers(&response);
-        let Client { size, inner, .. } = client;
-        *self = TomatoClient::Streaming(match response.status() {
-            StatusCode::OK => StreamingClient::All(ClientStreamingAll {
+        self.size.update_from_headers(&response);
+        match response.status() {
+            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
                 stream: response.into_body(),
-                inner,
-                size,
-            }),
-            StatusCode::PARTIAL_CONTENT => StreamingClient::Partial(ClientStreamingPartial {
+                inner: self.inner,
+                size: self.size,
+            })),
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
                 stream: response.into_body(),
-                inner,
-                size: client.size,
-            }),
+                inner: self.inner,
+                size: self.size,
+            })),
             StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
-            _ => return Err(Error::status_not_ok(response).await),
-        });
-        Ok(())
+            _ => Err(Error::status_not_ok(response).await),
+        }
     }
 
     pub(crate) fn content_size(&self) -> Option<u64> {
-        match self {
-            TomatoClient::Streaming(c) => c.content_size(),
-            TomatoClient::Ready(c) => c.size.bytes,
-            TomatoClient::Fake => unreachable!(),
-        }
+        self.size.bytes
     }
 }
 
@@ -354,7 +361,7 @@ mod tests {
                 let mut buf = Vec::new();
                 client
                     .into_reader()
-                    .read_to_writer(&mut buf, None, &mut 0)
+                    .read_to_writer(&mut buf, None)
                     .await
                     .unwrap();
                 let len = buf.len();
