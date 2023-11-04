@@ -82,13 +82,14 @@ pub(crate) fn new(
     restriction: Option<Network>,
 ) -> (Handle, impl Future<Output = StreamEnded> + Send + 'static) {
     let (seek_tx, seek_rx) = mpsc::channel(12);
-    let reader = Reader { seek_tx, prefetch: initial_prefetch };
+    let store = crate::store::SwitchableStore::new_mem_backed();
+    let reader = Reader::new(initial_prefetch, seek_tx, store.clone());
     (
         Handle {
             cmd_tx,
             reader,
             reader_in_use: Arc::new(AtomicBool::new(false)),
         },
-        task::new(url, seek_rx, restriction).map(|res| StreamEnded { res, id }),
+        task::new(url, store, seek_rx, restriction).map(|res| StreamEnded { res, id }),
     )
 }

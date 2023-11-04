@@ -1,7 +1,7 @@
 /// Interface for reading streaming/downloading data
 
 mod reader;
-mod storage;
+mod store;
 mod stream;
 mod manager;
 mod network;

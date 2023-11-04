@@ -160,6 +160,15 @@ impl ClientStreamingAll {
         Reader::AllData(InnerReader::new(stream, inner, size))
     }
 
+    pub(crate) fn builder(&self) -> ClientBuilder {
+        ClientBuilder {
+            restriction: self.inner.restriction.clone(),
+            url: self.inner.url.clone(),
+            cookies: self.inner.cookies.clone(),
+            size: self.size,
+        }
+    }
+
     pub(crate) fn content_size(&self) -> Option<u64> {
         self.size.bytes
     }
