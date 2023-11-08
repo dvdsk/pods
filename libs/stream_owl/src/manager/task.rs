@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use futures::FutureExt;
 use futures_concurrency::future::Race;
@@ -15,6 +16,8 @@ pub(crate) enum Command {
     AddStream {
         url: hyper::Uri,
         handle_tx: oneshot::Sender<stream::Handle>,
+        /// if non use memory store
+        to_disk: Option<PathBuf>,
     },
     CancelStream(StreamId),
 }
@@ -71,10 +74,15 @@ pub(super) async fn run(
         let stream_err = streams.join_next().map(Res::from);
 
         match (new_cmd, stream_err).race().await {
-            Res::NewCmd(AddStream { url, handle_tx }) => add_stream(
+            Res::NewCmd(AddStream {
+                url,
+                handle_tx,
+                to_disk,
+            }) => add_stream(
                 &mut streams,
                 &mut abort_handles,
                 url,
+                to_disk,
                 handle_tx,
                 cmd_tx.clone(),
                 restriction.clone(),
@@ -99,12 +107,20 @@ fn add_stream(
     streams: &mut JoinSet<stream::StreamEnded>,
     abort_handles: &mut HashMap<StreamId, AbortHandle>,
     url: http::Uri,
+    to_disk: Option<PathBuf>,
     handle_tx: oneshot::Sender<stream::Handle>,
     cmd_tx: Sender<Command>,
     restriction: Option<Network>,
     initial_prefetch: usize,
 ) {
-    let (handle, stream_task) = stream::new(url, cmd_tx, initial_prefetch, StreamId::new(), restriction);
+    let (handle, stream_task) = stream::new(
+        url,
+        to_disk,
+        cmd_tx,
+        initial_prefetch,
+        StreamId::new(),
+        restriction,
+    );
     let abort_handle = streams.spawn(stream_task);
     abort_handles.insert(handle.id(), abort_handle);
     if let Err(_) = handle_tx.send(handle) {

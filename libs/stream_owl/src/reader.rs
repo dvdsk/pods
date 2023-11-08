@@ -1,6 +1,7 @@
-use crate::store::SwitchableStore;
 use crate::store::StreamStore;
+use crate::store::SwitchableStore;
 use std::io::{self, Read, Seek};
+use std::sync::MutexGuard;
 
 use tokio::sync::mpsc;
 
@@ -40,7 +41,12 @@ pub struct Reader {
 }
 
 impl Reader {
-    pub(crate) fn new(prefetch: usize, seek_tx: mpsc::Sender<u64>, store: SwitchableStore) -> Self {
+    pub(crate) fn new(
+        guard: MutexGuard<()>,
+        prefetch: usize,
+        seek_tx: mpsc::Sender<u64>,
+        store: SwitchableStore,
+    ) -> Self {
         Self {
             prefetch: Prefetch::new(prefetch),
             seek_tx,

@@ -1,3 +1,4 @@
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use futures::Future;
@@ -13,33 +14,46 @@ pub(crate) use task::Command;
 #[derive(Debug)]
 pub struct Error;
 
+#[derive(Debug, Default, Clone)]
+pub struct ManagerBuilder {
+    initial_prefetch: Option<usize>,
+    interface: Option<Network>,
+}
+
+impl ManagerBuilder {
+    pub fn with_prefetch(self, bytes: usize) -> Self {
+        Self {
+            initial_prefetch: Some(bytes),
+            ..self
+        }
+    }
+    pub fn restrict_to_interface(self, network: Network) -> Self {
+        Self {
+            interface: Some(network),
+            ..self
+        }
+    }
+    pub fn build(
+        self,
+    ) -> (
+        Manager,
+        impl Future<Output = Error>,
+        mpsc::UnboundedReceiver<(stream::Id, stream::Error)>,
+    ) {
+        Manager::new(self.interface, self.initial_prefetch.unwrap_or(0))
+    }
+}
+
 pub struct Manager {
     cmd_tx: mpsc::Sender<task::Command>,
 }
 
 impl Manager {
-    pub fn new(
-        initial_prefetch: usize,
-    ) -> (
-        Self,
-        impl Future<Output = Error>,
-        mpsc::UnboundedReceiver<(stream::Id, stream::Error)>,
-    ) {
-        Self::new_inner(None, initial_prefetch)
+    pub fn builder() -> ManagerBuilder {
+        ManagerBuilder::default()
     }
 
-    pub fn new_restricted(
-        interface: Network,
-        initial_prefetch: usize,
-    ) -> (
-        Self,
-        impl Future<Output = Error>,
-        mpsc::UnboundedReceiver<(stream::Id, stream::Error)>,
-    ) {
-        Self::new_inner(Some(interface), initial_prefetch)
-    }
-
-    fn new_inner(
+    fn new(
         restriction: Option<Network>,
         initial_prefetch: usize,
     ) -> (
@@ -58,19 +72,26 @@ impl Manager {
         )
     }
 
-    pub fn add_stream_to_disk(&mut self, url: &str) -> stream::Handle {
-        self.add_stream(url, true)
+    /// panics if called from an async context
+    pub fn add_stream_to_disk(&mut self, url: &str, path: PathBuf) -> stream::Handle {
+        self.add_stream(url, Some(path))
     }
 
+    /// panics if called from an async context
     pub fn add_stream_to_mem(&mut self, url: &str) -> stream::Handle {
-        self.add_stream(url, false)
+        self.add_stream(url, None)
     }
 
-    pub fn add_stream(&mut self, url: &str, _to_disk: bool) -> stream::Handle {
+    /// panics if called from an async context
+    pub fn add_stream(&mut self, url: &str, to_disk: Option<PathBuf>) -> stream::Handle {
         let url = Uri::from_str(url).unwrap();
         let (tx, rx) = oneshot::channel();
         self.cmd_tx
-            .blocking_send(Command::AddStream { url, handle_tx: tx })
+            .blocking_send(Command::AddStream {
+                url,
+                handle_tx: tx,
+                to_disk,
+            })
             .expect("manager task should still run");
         rx.blocking_recv().unwrap()
     }

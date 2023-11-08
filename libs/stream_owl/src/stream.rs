@@ -1,5 +1,6 @@
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use futures::{Future, FutureExt};
 use tokio::sync::mpsc::{self, Sender};
@@ -8,6 +9,7 @@ use crate::http_client;
 use crate::manager::Command;
 use crate::network::{Bandwith, Network};
 use crate::reader::Reader;
+use crate::store::{StreamStore, SwitchableStore};
 
 use self::task::Canceld;
 
@@ -33,10 +35,15 @@ impl Id {
 }
 
 pub struct Handle {
+    prefetch: usize,
+    seek_tx: mpsc::Sender<u64>,
+    store: SwitchableStore,
     cmd_tx: Sender<Command>,
-    reader: Reader,
-    reader_in_use: Arc<AtomicBool>,
+    reader_in_use: Arc<Mutex<()>>,
 }
+
+#[derive(Debug, Clone)]
+pub struct ReaderInUse;
 
 impl Handle {
     pub fn set_priority(&mut self, _arg: i32) {
@@ -47,8 +54,14 @@ impl Handle {
         todo!();
     }
 
-    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ()> {
-        todo!()
+    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
+        let guard = self.reader_in_use.try_lock().map_err(|_| ReaderInUse)?;
+        Ok(Reader::new(
+            guard,
+            self.prefetch,
+            self.seek_tx.clone(),
+            self.store.clone(),
+        ))
     }
 
     pub fn get_downloaded(&self) -> () {
@@ -57,6 +70,14 @@ impl Handle {
 
     pub fn id(&self) -> Id {
         todo!()
+    }
+
+    pub fn use_mem_backend(&mut self) -> Result<(), ()> {
+        self.store.swith_to_mem_backed()
+    }
+
+    pub fn use_disk_backend(&mut self, path: PathBuf) -> Result<(), ()> {
+        self.store.swith_to_disk_backed(&path)
     }
 }
 
@@ -76,19 +97,25 @@ pub struct StreamEnded {
 
 pub(crate) fn new(
     url: http::Uri,
+    to_disk: Option<PathBuf>,
     cmd_tx: Sender<Command>,
     initial_prefetch: usize,
     id: Id,
     restriction: Option<Network>,
 ) -> (Handle, impl Future<Output = StreamEnded> + Send + 'static) {
     let (seek_tx, seek_rx) = mpsc::channel(12);
-    let store = crate::store::SwitchableStore::new_mem_backed();
-    let reader = Reader::new(initial_prefetch, seek_tx, store.clone());
+    let store = match to_disk {
+        Some(path) => crate::store::SwitchableStore::new_disk_backed(path),
+        None => crate::store::SwitchableStore::new_mem_backed(),
+    };
+
     (
         Handle {
             cmd_tx,
-            reader,
-            reader_in_use: Arc::new(AtomicBool::new(false)),
+            reader_in_use: Arc::new(Mutex::new(())),
+            prefetch: initial_prefetch,
+            seek_tx,
+            store: store.clone(),
         },
         task::new(url, store, seek_rx, restriction).map(|res| StreamEnded { res, id }),
     )

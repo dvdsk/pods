@@ -2,10 +2,12 @@ use futures::FutureExt;
 use futures::StreamExt;
 use futures_concurrency::prelude::*;
 use std::io::Read;
+use std::path::Path;
+use std::path::PathBuf;
 use std::pin::pin;
 use stream_owl::StreamId;
 
-use stream_owl::{ManagerError, StreamError, Manager};
+use stream_owl::{Manager, ManagerError, StreamError};
 
 use tokio::task::{self, JoinError};
 
@@ -32,12 +34,18 @@ impl Res {
 async fn main() {
     let prefetch = 0;
     let mut streams = Vec::new();
-    let (mut manager, manage_task, mut errors) = Manager::new(prefetch);
-    streams.push(manager.add_stream_to_disk(URL1));
+    let (mut manager, manage_task, mut errors) = Manager::builder().with_prefetch(prefetch).build();
+
+    let path = PathBuf::from("file1.data");
+    streams.push(manager.add_stream_to_disk(URL1, path));
     streams.push(manager.add_stream_to_mem(URL2));
 
     streams[0].set_priority(1);
     streams[1].set_priority(0);
+
+    let path = PathBuf::from("file2.data");
+    streams[0].use_mem_backend();
+    streams[1].use_disk_backend(path);
 
     let mut stream = streams.pop().unwrap();
     let do_read = task::spawn_blocking(move || {
