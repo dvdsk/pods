@@ -1,6 +1,5 @@
-use super::StoreTomato;
 use super::disk::Disk;
-use super::switch::StoreVariant;
+use super::StoreVariant;
 use rangemap::set::RangeSet;
 
 #[derive(Debug)]
@@ -11,18 +10,17 @@ impl Memory {
         todo!()
     }
 
-    pub(crate) fn ranges(&self) -> RangeSet<u64> {
+    pub(crate) fn new() -> Result<Self, ()> {
         todo!()
     }
 }
 
-#[async_trait::async_trait]
-impl StoreTomato for Memory {
+impl Memory {
     async fn write_at(&self, buf: &[u8], pos: u64) {
         todo!()
     }
 
-    async fn read_at(&self, buf: &mut [u8], pos: u64) -> usize {
+    fn read_blocking_at(&self, buf: &mut [u8], pos: u64) -> usize {
         todo!()
     }
     fn ranges(&self) -> RangeSet<u64> {
@@ -30,5 +28,11 @@ impl StoreTomato for Memory {
     }
     fn variant(&self) -> StoreVariant {
         StoreVariant::Mem
+    }
+    fn size(&self) -> Option<u64> {
+        todo!()
+    }
+    fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {
+        todo!()
     }
 }

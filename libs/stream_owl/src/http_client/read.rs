@@ -3,11 +3,11 @@ use std::collections::VecDeque;
 use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::{Body, Incoming};
-use tokio::io::{AsyncWrite, AsyncWriteExt};
 
 use super::size::Size;
 // todo fix error, should be task stream error?
 use super::{Client, Error, InnerClient};
+use crate::Appender;
 
 pub(crate) struct InnerReader {
     stream: Incoming,
@@ -75,10 +75,10 @@ impl Reader {
     /// if you want to track the number of bytes written use a wrapper around the writer
     pub(crate) async fn read_to_writer(
         &mut self,
-        writer: &mut (impl AsyncWrite + Unpin),
+        mut appender: impl Appender,
         max: Option<usize>,
     ) -> Result<(), Error> {
-        self.inner().read_to_writer(writer, max).await
+        self.inner().read_to_writer(&mut appender, max).await
     }
 }
 
@@ -96,13 +96,13 @@ impl InnerReader {
     /// if you want to track the number of bytes written use a wrapper around the writer
     pub(crate) async fn read_to_writer(
         &mut self,
-        writer: &mut (impl AsyncWrite + Unpin),
+        output: &mut impl Appender,
         max: Option<usize>,
     ) -> Result<(), Error> {
         let max = max.unwrap_or(usize::MAX);
         let mut n_read = 0usize;
 
-        self.write_from_buffer(max, writer).await?;
+        self.write_from_buffer(max, output).await?;
 
         while n_read < max {
             // cancel safe: not a problem if a frame is lost as long as
@@ -115,8 +115,8 @@ impl InnerReader {
             let split = data.len().min(max - n_read);
             let (to_write, to_store) = data.split_at(split);
 
-            writer
-                .write_all(to_write)
+            output
+                .append(to_write)
                 .await
                 .map_err(Error::WritingData)?;
             n_read += to_write.len();
@@ -131,14 +131,14 @@ impl InnerReader {
     async fn write_from_buffer(
         &mut self,
         max: usize,
-        output: &mut (impl AsyncWrite + Unpin),
+        output: &mut impl Appender,
     ) -> Result<(), Error> {
         let to_take = self.buffer.len().min(max);
         let from_buffer: Vec<_> = self.buffer.range(0..to_take).copied().collect();
         let mut to_write = from_buffer.as_slice();
         Ok(loop {
             let n_written = output
-                .write(&from_buffer)
+                .append(&from_buffer)
                 .await
                 .map_err(Error::WritingData)?;
             // remove only what we wrote to prevent losing data on cancel

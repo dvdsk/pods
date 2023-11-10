@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures::{Future, FutureExt};
@@ -9,7 +9,7 @@ use crate::http_client;
 use crate::manager::Command;
 use crate::network::{Bandwith, Network};
 use crate::reader::Reader;
-use crate::store::{StreamStore, SwitchableStore};
+use crate::store::{MigrationHandle, SwitchableStore};
 
 use self::task::Canceld;
 
@@ -72,12 +72,12 @@ impl Handle {
         todo!()
     }
 
-    pub fn use_mem_backend(&mut self) -> Result<(), ()> {
-        self.store.swith_to_mem_backed()
+    pub async fn use_mem_backend(&mut self) -> Option<MigrationHandle> {
+        self.store.to_mem().await
     }
 
-    pub fn use_disk_backend(&mut self, path: PathBuf) -> Result<(), ()> {
-        self.store.swith_to_disk_backed(&path)
+    pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
+        self.store.to_disk(&path).await
     }
 }
 
@@ -117,6 +117,6 @@ pub(crate) fn new(
             seek_tx,
             store: store.clone(),
         },
-        task::new(url, store, seek_rx, restriction).map(|res| StreamEnded { res, id }),
+        task::new(url, store.clone(), seek_rx, restriction).map(|res| StreamEnded { res, id }),
     )
 }
