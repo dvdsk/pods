@@ -3,7 +3,7 @@ use std::sync::MutexGuard;
 
 use tokio::sync::mpsc;
 
-use crate::store::SwitchableStore;
+use crate::store::{SwitchableStore, InnerSwitchableStore};
 
 #[derive(Debug, Clone)]
 struct Prefetch {
@@ -21,7 +21,7 @@ impl Prefetch {
     }
 
     /// if needed do some prefetching
-    fn perform_if_needed(&mut self, store: &SwitchableStore, curr_pos: u64) {
+    fn perform_if_needed(&mut self, store: &InnerSwitchableStore, curr_pos: u64) {
         if !self.active {
             return;
         }
@@ -85,6 +85,7 @@ impl Seek for Reader {
         };
 
         if !store.gapless_from_till(self.last_seek, pos) {
+            drop(store);
             self.seek_in_stream(pos)?;
             self.last_seek = pos;
             self.prefetch.active = true;

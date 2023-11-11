@@ -10,13 +10,6 @@ use super::disk::Disk;
 use super::mem::Memory;
 use super::{InnerSwitchableStore, StoreVariant, SwitchableStore};
 
-#[derive(Debug)]
-pub(super) enum Switching {
-    No,
-    ToDisk,
-    ToMem,
-}
-
 impl SwitchableStore {
     async fn current(&self) -> StoreVariant {
         match *self.curr.lock().await {
@@ -34,7 +27,8 @@ impl SwitchableStore {
 
         let mem = match Memory::new() {
             Err(e) => {
-                tx.send(Err(MigrationError::MemAllocation(e)));
+                tx.send(Err(MigrationError::MemAllocation(e)))
+                    .expect("cant have dropped rx");
                 return Some(handle);
             }
             Ok(mem) => mem,
@@ -53,7 +47,8 @@ impl SwitchableStore {
         let (handle, tx) = MigrationHandle::new();
         let disk = match Disk::new(path) {
             Err(e) => {
-                tx.send(Err(MigrationError::DiskCreation(e)));
+                tx.send(Err(MigrationError::DiskCreation(e)))
+                    .expect("cant have dropped rx");
                 return Some(handle);
             }
             Ok(disk) => disk,
@@ -64,6 +59,7 @@ impl SwitchableStore {
     }
 }
 
+#[derive(Debug)]
 pub enum MigrationError {
     DiskCreation(()),
     MemAllocation(()),
@@ -94,7 +90,8 @@ async fn migrate(
         Res::Cancelled => return,
         Res::PreMigration(Ok(_)) => (),
         Res::PreMigration(res @ Err(_)) => {
-            tx.send(res);
+            // error is irrelavent if migration is canceld
+            let _ = tx.send(res);
             return;
         }
     }
@@ -102,7 +99,8 @@ async fn migrate(
     let mut src = src.lock().await;
     let res = finish_migration(&mut *src, &mut target).await;
     if res.is_err() {
-        tx.send(res);
+        // error is irrelavent if migration is canceld
+        let _ = tx.send(res);
     } else {
         let src = &mut *src;
         *src = target;
