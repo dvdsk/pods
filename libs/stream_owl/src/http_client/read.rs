@@ -34,7 +34,7 @@ impl Reader {
         Ok(match self {
             Reader::PartialData(InnerReader {
                 client,
-                stream,
+                stream: _,
                 size_hint,
                 ..
             }) => Client {

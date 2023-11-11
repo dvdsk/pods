@@ -50,22 +50,32 @@ impl SwitchableStore {
     }
 }
 
+macro_rules! forward_impl {
+    ($v:vis $fn_name:ident, $($param:ident: $t:ty),*; $returns:ty) => {
+        impl InnerSwitchableStore {
+            $v fn $fn_name(&self, $($param: $t),*) -> $returns {
+                match self {
+                    Self::Disk(inner) => inner.$fn_name($($param),*),
+                    Self::Mem(inner) => inner.$fn_name($($param),*),
+                }
+
+            }
+        }
+    };
+}
+
+forward_impl!(pub(crate) read_blocking_at, buf: &mut [u8], pos: u64; usize);
+forward_impl!(ranges,; RangeSet<u64>);
+forward_impl!(pub(crate) size,; Option<u64>);
+forward_impl!(pub(crate) gapless_from_till, pos: u64, last_seek: u64; bool);
+
 impl InnerSwitchableStore {
     /// might not write everything, returns n bytes written
     pub(crate) async fn write_at(&self, buf: &[u8], pos: u64) -> usize {
-        todo!()
-    }
-    pub(crate) fn read_blocking_at(&self, buf: &mut [u8], pos: u64) -> usize {
-        todo!()
-    }
-    fn ranges(&self) -> RangeSet<u64> {
-        todo!()
-    }
-    pub(crate) fn size(&self) -> Option<u64> {
-        todo!()
-    }
-    pub(crate) fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {
-        todo!()
+        match self {
+            Self::Disk(inner) => inner.write_at(buf, pos).await,
+            Self::Mem(inner) => inner.write_at(buf, pos).await,
+        }
     }
 }
 

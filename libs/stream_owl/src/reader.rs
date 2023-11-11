@@ -42,7 +42,7 @@ pub struct Reader {
 
 impl Reader {
     pub(crate) fn new(
-        guard: MutexGuard<()>,
+        _guard: MutexGuard<()>,
         prefetch: usize,
         seek_tx: mpsc::Sender<u64>,
         store: SwitchableStore,

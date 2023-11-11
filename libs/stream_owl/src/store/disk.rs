@@ -9,33 +9,33 @@ use super::StoreVariant;
 pub(crate) struct Disk;
 
 impl Disk {
-    async fn write_at(&self, buf: &[u8], pos: u64) {
+    pub(super) async fn write_at(&self, _buf: &[u8], _pos: u64) -> usize {
         todo!()
     }
 
-    fn read_blocking_at(&self, buf: &mut [u8], pos: u64) -> usize {
+    pub(super) fn read_blocking_at(&self, _buf: &mut [u8], _pos: u64) -> usize {
         todo!()
     }
-    fn ranges(&self) -> RangeSet<u64> {
+    pub(super) fn ranges(&self) -> RangeSet<u64> {
         todo!()
     }
     fn variant(&self) -> StoreVariant {
         StoreVariant::Disk
     }
-    fn size(&self) -> Option<u64> {
+    pub(super) fn size(&self) -> Option<u64> {
         todo!()
     }
-    fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {
+    pub(super) fn gapless_from_till(&self, _pos: u64, _last_seek: u64) -> bool {
         todo!()
     }
 }
 
 impl Disk {
-    pub(crate) fn from(memory: &mut Memory, path: &Path) -> Result<Self, ()> {
+    pub(crate) fn from(_memory: &mut Memory, _path: &Path) -> Result<Self, ()> {
         todo!()
     }
 
-    pub(crate) fn new(path: &Path) -> Result<Self, ()> {
+    pub(crate) fn new(_path: &Path) -> Result<Self, ()> {
         todo!()
     }
 }

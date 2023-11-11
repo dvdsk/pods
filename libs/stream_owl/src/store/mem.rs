@@ -6,7 +6,7 @@ use rangemap::set::RangeSet;
 pub(crate) struct Memory;
 
 impl Memory {
-    pub(crate) fn from(disk: &mut Disk, pos: u64) -> Result<Self, ()> {
+    pub(crate) fn from(_disk: &mut Disk, _pos: u64) -> Result<Self, ()> {
         todo!()
     }
 
@@ -16,23 +16,23 @@ impl Memory {
 }
 
 impl Memory {
-    async fn write_at(&self, buf: &[u8], pos: u64) {
+    pub(super) async fn write_at(&self, _buf: &[u8], _pos: u64) -> usize {
         todo!()
     }
 
-    fn read_blocking_at(&self, buf: &mut [u8], pos: u64) -> usize {
+    pub(super) fn read_blocking_at(&self, _buf: &mut [u8], _pos: u64) -> usize {
         todo!()
     }
-    fn ranges(&self) -> RangeSet<u64> {
+    pub(super) fn ranges(&self) -> RangeSet<u64> {
         todo!()
     }
     fn variant(&self) -> StoreVariant {
         StoreVariant::Mem
     }
-    fn size(&self) -> Option<u64> {
+    pub(super) fn size(&self) -> Option<u64> {
         todo!()
     }
-    fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {
+    pub(super) fn gapless_from_till(&self, _pos: u64, _last_seek: u64) -> bool {
         todo!()
     }
 }
