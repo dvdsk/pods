@@ -35,10 +35,9 @@ struct StoreAppender {
 #[async_trait::async_trait]
 impl Appender for StoreAppender {
     async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        let store = self.store.lock().await;
         // only this function modifies pos, 
         // only need to read own writes => relaxed ordering
-        let written = store.write_at(buf, self.pos.load(Ordering::Relaxed)).await;
+        let written = self.store.write_at(buf, self.pos.load(Ordering::Relaxed)).await;
         // new data needs to be requested after current pos, it uses aquire Ordering
         self.pos.fetch_add(written as u64, Ordering::Release);
         Ok(written)

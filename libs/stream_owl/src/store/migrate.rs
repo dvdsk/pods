@@ -1,3 +1,4 @@
+use std::collections::TryReserveError;
 use std::ops::Range;
 use std::sync::Arc;
 
@@ -8,18 +9,11 @@ use tokio::sync::{oneshot, Mutex};
 
 use super::disk::Disk;
 use super::mem::Memory;
-use super::{InnerSwitchableStore, StoreVariant, SwitchableStore};
+use super::{Store, StoreVariant, SwitchableStore};
 
 impl SwitchableStore {
-    async fn current(&self) -> StoreVariant {
-        match *self.curr.lock().await {
-            InnerSwitchableStore::Disk(_) => StoreVariant::Disk,
-            InnerSwitchableStore::Mem(_) => StoreVariant::Mem,
-        }
-    }
-
     pub(crate) async fn to_mem(&self) -> Option<MigrationHandle> {
-        if let StoreVariant::Mem = self.current().await {
+        if let StoreVariant::Mem = self.variant().await {
             return None;
         }
 
@@ -33,14 +27,14 @@ impl SwitchableStore {
             }
             Ok(mem) => mem,
         };
-        let migration = migrate(self.curr.clone(), InnerSwitchableStore::Mem(mem), tx);
+        let migration = migrate(self.curr_store.clone(), Store::Mem(mem), tx);
 
         tokio::spawn(migration);
         Some(handle)
     }
 
     pub(crate) async fn to_disk(&self, path: &std::path::Path) -> Option<MigrationHandle> {
-        if let StoreVariant::Disk = self.current().await {
+        if let StoreVariant::Disk = self.variant().await {
             return None;
         }
 
@@ -53,7 +47,7 @@ impl SwitchableStore {
             }
             Ok(disk) => disk,
         };
-        let migration = migrate(self.curr.clone(), InnerSwitchableStore::Disk(disk), tx);
+        let migration = migrate(self.curr_store.clone(), Store::Disk(disk), tx);
         tokio::spawn(migration);
         Some(handle)
     }
@@ -62,7 +56,7 @@ impl SwitchableStore {
 #[derive(Debug)]
 pub enum MigrationError {
     DiskCreation(()),
-    MemAllocation(()),
+    MemAllocation(TryReserveError),
 }
 
 pub struct MigrationHandle(oneshot::Receiver<Result<(), MigrationError>>);
@@ -75,8 +69,8 @@ impl MigrationHandle {
 }
 
 async fn migrate(
-    src: Arc<Mutex<InnerSwitchableStore>>,
-    mut target: InnerSwitchableStore,
+    src: Arc<Mutex<Store>>,
+    mut target: Store,
     mut tx: oneshot::Sender<Result<(), MigrationError>>,
 ) {
     enum Res {
@@ -97,35 +91,34 @@ async fn migrate(
     }
 
     let mut src = src.lock().await;
-    let res = finish_migration(&mut *src, &mut target).await;
+    let res = finish_migration(&mut src, &mut target).await;
     if res.is_err() {
         // error is irrelavent if migration is canceld
         let _ = tx.send(res);
     } else {
-        let src = &mut *src;
         *src = target;
     }
 }
 
 async fn pre_migrate_to_disk(
-    src: &Mutex<InnerSwitchableStore>,
-    target: &mut InnerSwitchableStore,
+    src: &Mutex<Store>,
+    target: &mut Store,
 ) -> Result<(), MigrationError> {
     let mut buf = Vec::with_capacity(4096);
     // nobody needs to read disk while we are migrating to it
     let mut on_disk = RangeSet::new();
     loop {
-        let mem = src.lock().await;
-        let in_mem = mem.ranges();
+        let src = src.lock().await;
+        let in_src = src.ranges();
 
-        let Some(missing_on_disk) = missing(&on_disk, &in_mem) else {
+        let Some(missing_on_disk) = missing(&on_disk, &in_src) else {
             return Ok(());
         };
         let len = missing_on_disk.start - missing_on_disk.end;
         let len = len.min(4096);
         buf.resize(len as usize, 0u8);
-        mem.read_blocking_at(&mut buf, missing_on_disk.start);
-        drop(mem);
+        src.read_blocking_at(&mut buf, missing_on_disk.start);
+        drop(src);
 
         target.write_at(&buf, missing_on_disk.start).await;
         on_disk.insert(missing_on_disk);
@@ -133,8 +126,8 @@ async fn pre_migrate_to_disk(
 }
 
 async fn finish_migration(
-    src: &mut InnerSwitchableStore,
-    target: &mut InnerSwitchableStore,
+    src: &mut Store,
+    target: &mut Store,
 ) -> Result<(), MigrationError> {
     let mut buf = Vec::with_capacity(4096);
     let mut on_disk = RangeSet::new();
