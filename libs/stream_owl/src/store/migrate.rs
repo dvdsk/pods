@@ -187,17 +187,16 @@ fn squishy_window<T>(slice: &[T], center: usize, window: usize) -> &[T] {
 
     let half_window = window.div_ceil(2);
     if center < slice.len() / 2 {
-        // more space in front then behind
-        n_before = usize::min(space_before, dbg!(half_window - 1));
+        // space_before can be limited while there is space_ahead
+        n_before = usize::min(space_before, half_window - 1);
         n_after = usize::min(space_ahead, window - n_before - 1);
     } else {
-        dbg!("LATER");
-        n_after = usize::min(dbg!(space_ahead), half_window - 1);
+        // space_after can be limited while there is space_before
+        n_after = usize::min(space_ahead, half_window - 1);
         n_before = usize::min(space_before, window - n_after - 1);
     }
 
-    dbg!(center);
-    &slice[center - dbg!(n_before)..=center + dbg!(n_after)]
+    &slice[center - n_before..=center + n_after]
 }
 
 #[cfg(test)]
