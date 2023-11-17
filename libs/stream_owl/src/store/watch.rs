@@ -3,7 +3,7 @@ use std::ops::Range;
 #[derive(Debug, Clone)]
 pub(super) struct Receiver {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(super) struct Sender {}
 
 // initial range is 0..0
@@ -18,7 +18,7 @@ impl Receiver {
 }
 
 impl Sender {
-    fn send(&self) -> Range<u64> {
+    pub(super) fn send(&self, range: Range<u64>) {
         todo!()
     }
 }

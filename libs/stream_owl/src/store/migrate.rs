@@ -11,6 +11,8 @@ use super::disk::Disk;
 use super::mem::Memory;
 use super::{watch, Store, StoreVariant, SwitchableStore};
 
+mod range_list;
+
 impl SwitchableStore {
     pub(crate) async fn to_mem(&self) -> Option<MigrationHandle> {
         if let StoreVariant::Mem = self.variant().await {
@@ -109,21 +111,6 @@ async fn migrate(
     }
 }
 
-
-
-fn needed_ranges(src: &Store, target: &Store) -> RangeSet<u64> {
-    let range_list: Vec<Range<u64>> = src.ranges().iter().cloned().collect();
-
-    let search_res = range_list.binary_search_by_key(&src.last_read_pos(), |range| range.start);
-    let idx = match search_res {
-        Ok(pos_is_range_start) => pos_is_range_start,
-        Err(pos_is_after_range_start) => pos_is_after_range_start,
-    };
-
-    let needed_ranges = squishy_window(&range_list, target.n_supported_ranges(), idx);
-    RangeSet::from_iter(needed_ranges.into_iter().cloned())
-}
-
 async fn pre_migrate_to_disk(
     curr: &Mutex<Store>,
     target: &mut Store,
@@ -133,9 +120,10 @@ async fn pre_migrate_to_disk(
     let mut on_target = RangeSet::new();
     loop {
         let src = curr.lock().await;
-        let in_src = needed_ranges(&src, target); //src.ranges();
+        let needed_from_src = range_list::needed_ranges(&src, target);
+        let needed_form_src = range_list::correct_for_capacity(needed_from_src, target);
 
-        let Some(missing_on_disk) = missing(&on_target, &in_src) else {
+        let Some(missing_on_disk) = missing(&on_target, &needed_form_src) else {
             return Ok(());
         };
         let len = missing_on_disk.start - missing_on_disk.end;
@@ -148,6 +136,7 @@ async fn pre_migrate_to_disk(
         on_target.insert(missing_on_disk);
     }
 }
+
 
 async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), MigrationError> {
     let mut buf = Vec::with_capacity(4096);
@@ -178,58 +167,3 @@ fn missing(a: &RangeSet<u64>, b: &RangeSet<u64>) -> Option<Range<u64>> {
     }
 }
 
-fn squishy_window<T>(slice: &[T], center: usize, window: usize) -> &[T] {
-    let space_before = center;
-    let space_ahead = slice.len() - center - 1;
-
-    let n_before;
-    let n_after;
-
-    let half_window = window.div_ceil(2);
-    if center < slice.len() / 2 {
-        // space_before can be limited while there is space_ahead
-        n_before = usize::min(space_before, half_window - 1);
-        n_after = usize::min(space_ahead, window - n_before - 1);
-    } else {
-        // space_after can be limited while there is space_before
-        n_after = usize::min(space_ahead, half_window - 1);
-        n_before = usize::min(space_before, window - n_after - 1);
-    }
-
-    &slice[center - n_before..=center + n_after]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_squishy_window() {
-        let big = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-        let res = squishy_window(&big, 5, 5);
-        assert_eq!(res, &[3, 4, 5, 6, 7]);
-        let res = squishy_window(&big, 0, 5);
-        assert_eq!(res, &[0, 1, 2, 3, 4]);
-        let res = squishy_window(&big, 10, 5);
-        assert_eq!(res, &[6, 7, 8, 9, 10]);
-
-        let res = squishy_window(&big, 10, 1);
-        assert_eq!(res, &[10]);
-        let res = squishy_window(&big, 0, 1);
-        assert_eq!(res, &[0]);
-        let res = squishy_window(&big, 5, 1);
-        assert_eq!(res, &[5]);
-
-        let tiny = [0, 1, 2];
-        let res = squishy_window(&tiny, 1, 1);
-        assert_eq!(res, &[1]);
-        let res = squishy_window(&tiny, 0, 1);
-        assert_eq!(res, &[0]);
-        let res = squishy_window(&tiny, 2, 1);
-        assert_eq!(res, &[2]);
-
-        let res = squishy_window(&tiny, 1, 10);
-        assert_eq!(res, &[0, 1, 2]);
-    }
-}

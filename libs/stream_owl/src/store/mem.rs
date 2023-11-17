@@ -1,52 +1,68 @@
 use std::collections::{TryReserveError, VecDeque};
+use std::num::NonZeroU64;
 use std::ops::Range;
+use std::sync::Arc;
 
 use rangemap::set::RangeSet;
 
-#[derive(Debug, Clone)]
-pub(crate) struct Memory {
-    buffer: VecDeque<u8>,
-    range: Range<u64>,
-    capacity: usize,
-}
+use super::capacity::Capacity;
+use super::watch;
 
 #[derive(Debug)]
-struct Inner {}
+pub(crate) struct Memory {
+    /// space availible because the reader read past data
+    pub(super) capacity: Arc<Capacity>,
+    buffer: VecDeque<u8>,
+    buffer_cap: usize,
+    /// range of positions availible, end non inclusive
+    /// positions are measured from the absolute start of the stream
+    range: Range<u64>,
+    range_tx: watch::Sender,
+}
 
 impl Memory {
-    pub(crate) fn new() -> Result<Self, TryReserveError> {
-        let capacity = 20_000_000;
+    pub(super) fn new(
+        capacity: Arc<Capacity>,
+        range_tx: watch::Sender,
+    ) -> Result<Self, TryReserveError> {
+        let buffer_cap = 20_000_000usize;
+        capacity.set_total(NonZeroU64::new(buffer_cap as u64));
 
         let mut bytes = VecDeque::new();
-        bytes.try_reserve_exact(capacity)?;
+        bytes.try_reserve_exact(buffer_cap)?;
 
         Ok(Self {
-            buffer: bytes,
-            range: 0..0,
             capacity,
+            buffer: bytes,
+            buffer_cap,
+            range: 0..0,
+            range_tx,
         })
     }
 
-    pub(crate) async fn variant(&self) -> super::StoreVariant {
-        todo!()
-    }
-}
-
-enum ReadErr {
-    BufToLarge,
-}
-
-impl Memory {
     // waits until the reader has advanced far enough providing backpressure
     // to the stream
-    pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
-        todo!("deal with pos");
-        todo!("update range locally and send range_tx update");
-        todo!("block if dropping goes past current seek (use read_blocking_at)");
 
-        let to_write = buf.len().min(self.capacity);
-        self.buffer.drain(..to_write);
+    /// `pos` must be the position of the first byte in buf in the stream.
+    /// For the first write at the start this should be 0
+    pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
+        if pos != self.range.end {
+            self.buffer.clear();
+            self.range.start = pos;
+        }
+
+        let to_write = buf.len().min(self.capacity.availible());
+
+        let free_in_buffer = self.buffer_cap - self.buffer.len();
+        let to_remove = to_write.saturating_sub(free_in_buffer);
+        self.buffer.drain(..to_remove);
+
         self.buffer.extend(buf[0..to_write].iter());
+
+        self.capacity.remove(to_write);
+        self.range.start += to_remove as u64;
+        self.range.end += to_write as u64;
+        self.range_tx.send(self.range.clone());
         return to_write;
     }
 
@@ -56,17 +72,30 @@ impl Memory {
 
         let relative_pos = pos - self.range.start;
         let n_copied = fill_with_offset(buf, &self.buffer, relative_pos as usize);
+        self.capacity.add(n_copied);
 
         n_copied
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {
         todo!()
     }
-    pub(super) fn size(&self) -> Option<u64> {
-        todo!()
-    }
     pub(super) fn gapless_from_till(&self, _pos: u64, _last_seek: u64) -> bool {
         todo!()
+    }
+
+    pub(super) fn into_range_tx(self) -> watch::Sender {
+        self.range_tx
+    }
+
+    pub(super) fn set_range_tx(&mut self, tx: watch::Sender) {
+        self.range_tx = tx;
+    }
+
+    pub(super) fn last_read_pos(&self) -> u64 {
+        todo!()
+    }
+    pub(super) fn n_supported_ranges(&self) -> usize {
+        1
     }
 }
 
@@ -99,5 +128,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_fill_with_offset() {}
+    fn test_fill_with_offset() {
+        todo!()
+    }
 }

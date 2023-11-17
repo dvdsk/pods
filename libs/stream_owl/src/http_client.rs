@@ -352,7 +352,17 @@ fn redirect_url<T>(redirect: hyper::Response<T>) -> Result<hyper::Uri, Error> {
 
 #[cfg(test)]
 mod tests {
+    use crate::Appender;
+
     use super::*;
+
+    #[async_trait::async_trait]
+    impl Appender for &mut Vec<u8> {
+        async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
+            self.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+    }
 
     // feed url: 274- The Age of the Algorithm
     const FEED_URL: &str = "https://dts.podtrac.com/redirect.mp3/chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3?aid=rss_feed&awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&feed=BqbsxVfO";
@@ -394,7 +404,7 @@ mod tests {
                         .expect("test stream should provide size");
                     let mut reader = client_with_stream.into_reader();
                     reader
-                        .read_to_writer(&mut buffer, Some(RANGE_LEN as usize), &mut 0)
+                        .read_to_writer(&mut buffer, Some(RANGE_LEN as usize))
                         .await
                         .unwrap();
 
@@ -412,7 +422,7 @@ mod tests {
                 }
                 StreamingClient::All(client_with_stream) => {
                     let mut reader = client_with_stream.into_reader();
-                    reader.read_to_writer(buffer, None, &mut 0).await.unwrap();
+                    reader.read_to_writer(&mut buffer, None).await.unwrap();
                     break;
                 }
             }

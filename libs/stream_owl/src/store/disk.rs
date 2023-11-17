@@ -1,11 +1,27 @@
 use std::path::Path;
+use std::sync::Arc;
 
 use rangemap::RangeSet;
 
+use super::capacity::Capacity;
+use super::watch;
+
 #[derive(Debug)]
-pub(crate) struct Disk;
+pub(crate) struct Disk {
+    pub(super) capacity: Arc<Capacity>,
+}
 
 impl Disk {
+    pub(super) fn new(
+        _path: &Path,
+        capacity: Arc<Capacity>,
+        _range_tx: watch::Sender,
+    ) -> Result<Self, ()> {
+        Self {
+            capacity,
+        };
+        todo!()
+    }
     pub(super) async fn write_at(&self, _buf: &[u8], _pos: u64) -> usize {
         todo!()
     }
@@ -22,10 +38,19 @@ impl Disk {
     pub(super) fn gapless_from_till(&self, _pos: u64, _last_seek: u64) -> bool {
         todo!()
     }
-}
 
-impl Disk {
-    pub(crate) fn new(_path: &Path) -> Result<Self, ()> {
+    pub(super) fn into_range_tx(self) -> watch::Sender {
+        todo!()
+    }
+
+    pub(super) fn set_range_tx(&mut self, tx: watch::Sender) {
+        todo!()
+    }
+
+    pub(super) fn last_read_pos(&self) -> u64 {
+        todo!()
+    }
+    pub(super) fn n_supported_ranges(&self) -> usize {
         todo!()
     }
 }
