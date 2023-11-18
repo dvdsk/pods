@@ -1,37 +1,39 @@
+pub const CAPACITY: Option<std::num::NonZeroU64> = NonZeroU64::new(20_000_000);
+
 use std::collections::{TryReserveError, VecDeque};
 use std::num::NonZeroU64;
 use std::ops::Range;
-use std::sync::Arc;
 
 use rangemap::set::RangeSet;
 
 use super::capacity::Capacity;
-use super::watch;
+use super::range_watch;
 
 #[derive(Debug)]
 pub(crate) struct Memory {
     /// space availible because the reader read past data
-    pub(super) capacity: Arc<Capacity>,
+    pub(super) capacity: Capacity,
     buffer: VecDeque<u8>,
     buffer_cap: usize,
     /// range of positions availible, end non inclusive
     /// positions are measured from the absolute start of the stream
     range: Range<u64>,
-    range_tx: watch::Sender,
+    range_tx: range_watch::Sender,
+    last_read_pos: u64,
 }
 
 impl Memory {
     pub(super) fn new(
-        capacity: Arc<Capacity>,
-        range_tx: watch::Sender,
+        capacity: Capacity,
+        range_tx: range_watch::Sender,
     ) -> Result<Self, TryReserveError> {
-        let buffer_cap = 20_000_000usize;
-        capacity.set_total(NonZeroU64::new(buffer_cap as u64));
 
         let mut bytes = VecDeque::new();
+        let buffer_cap = capacity.total().expect("is Some for mem").get() as usize;
         bytes.try_reserve_exact(buffer_cap)?;
 
         Ok(Self {
+            last_read_pos: 0,
             capacity,
             buffer: bytes,
             buffer_cap,
@@ -67,35 +69,45 @@ impl Memory {
     }
 
     /// we must only get here if there is data in the mem store for us
-    pub(super) fn read_blocking_at(&self, buf: &mut [u8], pos: u64) -> usize {
+    pub(super) fn read_blocking_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
         debug_assert!(self.range.start <= pos);
 
         let relative_pos = pos - self.range.start;
         let n_copied = fill_with_offset(buf, &self.buffer, relative_pos as usize);
         self.capacity.add(n_copied);
 
+        self.last_read_pos = pos;
         n_copied
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {
-        todo!()
+        let mut res = RangeSet::new();
+        res.insert(self.range.clone());
+        res
     }
-    pub(super) fn gapless_from_till(&self, _pos: u64, _last_seek: u64) -> bool {
-        todo!()
-    }
-
-    pub(super) fn into_range_tx(self) -> watch::Sender {
-        self.range_tx
+    pub(super) fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {
+        self.range.contains(&pos) && self.range.contains(&last_seek)
     }
 
-    pub(super) fn set_range_tx(&mut self, tx: watch::Sender) {
+    pub(super) fn set_range_tx(&mut self, tx: range_watch::Sender) {
         self.range_tx = tx;
     }
 
+    pub(super) fn set_capacity(&mut self, capacity: Capacity) {
+        self.capacity = capacity;
+    }
+
     pub(super) fn last_read_pos(&self) -> u64 {
-        todo!()
+        self.last_read_pos
     }
     pub(super) fn n_supported_ranges(&self) -> usize {
         1
+    }
+
+    pub(super) fn into_parts(self) -> (range_watch::Sender, Capacity) {
+        let Self {
+            capacity, range_tx, ..
+        } = self;
+        (range_tx, capacity)
     }
 }
 

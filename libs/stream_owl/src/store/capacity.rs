@@ -1,46 +1,75 @@
 use std::num::NonZeroU64;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+use tokio::sync::Notify;
+
+#[derive(Debug)]
 pub struct Capacity {
-    total: Arc<AtomicU64>,
+    total: Option<NonZeroU64>,
+    free: u64,
+    availible: Arc<Notify>,
 }
 
-impl Capacity {
+#[derive(Debug, Clone)]
+pub struct CapacityWatcher {
+    availible: Arc<Notify>,
+}
+
+impl CapacityWatcher {
     /// blocks till capacity is availible
     /// does not synchronize so only works
     /// with sequential access
     pub(crate) async fn wait_for_space(&self) {
-        todo!()
+        self.availible.notified().await;
     }
+}
 
+impl Capacity {
     pub(crate) fn availible(&self) -> usize {
-        todo!()
-    }
-
-    pub(crate) fn set_total(&self, capacity: Option<NonZeroU64>) {
-        let encoded = match capacity {
-            Some(bytes) => bytes.get(),
-            None => 0u64,
-        };
-        self.total.store(encoded, Ordering::Release)
+        // cast to smaller unsigned saturates at upper bound
+        match self.total {
+            Some(limited) => (limited.get() - self.free) as usize,
+            None => usize::MAX,
+        }
     }
 
     pub(crate) fn total(&self) -> Option<NonZeroU64> {
-        let encoded = self.total.load(Ordering::Acquire);
-        NonZeroU64::new(encoded) // returns None if zero
+        self.total
     }
 
-    pub(crate) fn add(&self, capacity: usize) {
-        todo!()
+    pub(crate) fn add(&mut self, change: usize) {
+        self.free += change as u64;
+        if self.availible() > 0 {
+            self.availible.notify_waiters()
+        }
     }
 
-    pub(crate) fn remove(&self, capacity: usize) {
-        todo!()
+    pub(crate) fn remove(&mut self, change: usize) {
+        self.free = self.free.saturating_sub(change as u64);
     }
 
-    pub(crate) fn new() -> Self {
-        todo!()
+    fn new(capacity: Option<NonZeroU64>, availible: Arc<Notify>) -> Self {
+        match capacity {
+            Some(bytes) => Self {
+                total: Some(bytes),
+                free: bytes.get(),
+                availible,
+            },
+            None => Self {
+                total: None,
+                free: u64::MAX,
+                availible,
+            },
+        }
     }
+}
+
+pub(crate) fn new(capacity: Option<NonZeroU64>) -> (CapacityWatcher, Capacity) {
+    let notify = Arc::new(Notify::new());
+    (
+        CapacityWatcher {
+            availible: notify.clone(),
+        },
+        Capacity::new(capacity, notify),
+    )
 }

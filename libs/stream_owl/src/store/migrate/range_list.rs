@@ -42,7 +42,7 @@ impl RangeLen for Range<u64> {
 }
 
 pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mut Store) -> RangeSet<u64> {
-    let Some(capacity) = target.capacity_handle().total() else {
+    let Some(capacity) = target.capacity().total() else {
         return RangeSet::from_iter(needed_from_src.into_iter());
     };
 

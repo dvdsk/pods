@@ -21,7 +21,7 @@ impl Prefetch {
     }
 
     /// if needed do some prefetching
-    fn perform_if_needed(&mut self, store: &SwitchableStore, curr_pos: u64) {
+    fn perform_if_needed(&mut self, store: &mut SwitchableStore, curr_pos: u64) {
         if !self.active {
             return;
         }
@@ -99,7 +99,7 @@ impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let n_read = self.store.read_blocking_at(buf, self.curr_pos);
 
-        self.prefetch.perform_if_needed(&self.store, self.curr_pos);
+        self.prefetch.perform_if_needed(&mut self.store, self.curr_pos);
         self.curr_pos += n_read as u64;
         Ok(n_read)
     }

@@ -9,7 +9,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use super::disk::Disk;
 use super::mem::Memory;
-use super::{watch, Store, StoreVariant, SwitchableStore};
+use super::{capacity, range_watch, Store, StoreVariant, SwitchableStore};
 
 mod range_list;
 
@@ -22,8 +22,9 @@ impl SwitchableStore {
         let (handle, tx) = MigrationHandle::new();
 
         // is swapped out before migration finishes
-        let (placeholder, _) = watch::channel();
-        let mem = match Memory::new(self.capacity.clone(), placeholder) {
+        let (watch_placeholder, _) = range_watch::channel();
+        let (_, capacity_placeholder) = capacity::new(None);
+        let mem = match Memory::new(capacity_placeholder, watch_placeholder) {
             Err(e) => {
                 tx.send(Err(MigrationError::MemAllocation(e)))
                     .expect("cant have dropped rx");
@@ -45,8 +46,9 @@ impl SwitchableStore {
         let (handle, tx) = MigrationHandle::new();
 
         // is swapped out before migration finishes
-        let (placeholder, _) = watch::channel();
-        let disk = match Disk::new(path, self.capacity.clone(), placeholder) {
+        let (watch_placeholder, _) = range_watch::channel();
+        let (_, capacity_placeholder) = capacity::new(None);
+        let disk = match Disk::new(path, capacity_placeholder, watch_placeholder) {
             Err(e) => {
                 tx.send(Err(MigrationError::DiskCreation(e)))
                     .expect("cant have dropped rx");
@@ -106,8 +108,9 @@ async fn migrate(
         let target_ref = &mut target;
         std::mem::swap(&mut *curr, target_ref);
         let old = target;
-        curr.set_range_tx(old.into_range_tx());
-        curr.capacity_handle().set_total(None);
+        let (range_watch, capacity) = old.into_parts();
+        curr.set_range_tx(range_watch);
+        curr.set_capacity(capacity);
     }
 }
 
@@ -119,7 +122,7 @@ async fn pre_migrate_to_disk(
     // TODO handle target that only support one range
     let mut on_target = RangeSet::new();
     loop {
-        let src = curr.lock().await;
+        let mut src = curr.lock().await;
         let needed_from_src = range_list::needed_ranges(&src, target);
         let needed_form_src = range_list::correct_for_capacity(needed_from_src, target);
 
@@ -136,7 +139,6 @@ async fn pre_migrate_to_disk(
         on_target.insert(missing_on_disk);
     }
 }
-
 
 async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), MigrationError> {
     let mut buf = Vec::with_capacity(4096);
@@ -166,4 +168,3 @@ fn missing(a: &RangeSet<u64>, b: &RangeSet<u64>) -> Option<Range<u64>> {
         }
     }
 }
-
