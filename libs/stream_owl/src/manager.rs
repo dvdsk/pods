@@ -73,17 +73,17 @@ impl Manager {
     }
 
     /// panics if called from an async context
-    pub fn add_stream_to_disk(&mut self, url: &str, path: PathBuf) -> stream::Handle {
+    pub fn add_stream_to_disk(&mut self, url: &str, path: PathBuf) -> stream::ManagedHandle {
         self.add_stream(url, Some(path))
     }
 
     /// panics if called from an async context
-    pub fn add_stream_to_mem(&mut self, url: &str) -> stream::Handle {
+    pub fn add_stream_to_mem(&mut self, url: &str) -> stream::ManagedHandle {
         self.add_stream(url, None)
     }
 
     /// panics if called from an async context
-    pub fn add_stream(&mut self, url: &str, to_disk: Option<PathBuf>) -> stream::Handle {
+    pub fn add_stream(&mut self, url: &str, to_disk: Option<PathBuf>) -> stream::ManagedHandle {
         let url = Uri::from_str(url).unwrap();
         let (tx, rx) = oneshot::channel();
         self.cmd_tx

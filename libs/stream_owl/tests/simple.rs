@@ -1,5 +1,5 @@
-// use stream_owl::
-//
+use stream_owl::testing::server;
+use stream_owl::stream;
 
 #[test]
 fn after_seeking_forward_download_still_completes() {
@@ -16,7 +16,11 @@ fn resume_when_connection_breaks_randomly() {
     todo!()
 }
 
-#[test]
-fn seek_from_all_sides_works() {
-    todo!()
+#[tokio::test]
+async fn seek_from_all_sides_works() {
+    let addr = server();
+
+    stream::new(url, None, )
+
+    todo!();
 }

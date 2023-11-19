@@ -9,13 +9,13 @@ use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tracing::{trace, warn};
 
 use crate::network::Network;
-use crate::stream::StreamEnded;
+use crate::stream::{StreamBuilder, StreamEnded};
 use crate::{stream, StreamError, StreamId};
 
 pub(crate) enum Command {
     AddStream {
         url: hyper::Uri,
-        handle_tx: oneshot::Sender<stream::Handle>,
+        handle_tx: oneshot::Sender<stream::ManagedHandle>,
         /// if non use memory store
         to_disk: Option<PathBuf>,
     },
@@ -108,19 +108,22 @@ fn add_stream(
     abort_handles: &mut HashMap<StreamId, AbortHandle>,
     url: http::Uri,
     to_disk: Option<PathBuf>,
-    handle_tx: oneshot::Sender<stream::Handle>,
+    handle_tx: oneshot::Sender<stream::ManagedHandle>,
     cmd_tx: Sender<Command>,
     restriction: Option<Network>,
     initial_prefetch: usize,
 ) {
-    let (handle, stream_task) = stream::new(
-        url,
-        to_disk,
-        cmd_tx,
-        initial_prefetch,
-        StreamId::new(),
-        restriction,
-    );
+    let mut stream = StreamBuilder::new(url);
+    if let Some(path) = to_disk {
+        stream = stream.to_disk(path);
+    }
+    if let Some(allowed) = restriction {
+        stream = stream.with_network_restriction(allowed)
+    }
+    stream = stream.with_prefetch(initial_prefetch);
+
+    let (handle, stream_task) = stream.start_managed(cmd_tx);
+
     let abort_handle = streams.spawn(stream_task);
     abort_handles.insert(handle.id(), abort_handle);
     if let Err(_) = handle_tx.send(handle) {

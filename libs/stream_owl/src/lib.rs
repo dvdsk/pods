@@ -6,7 +6,11 @@ mod manager;
 mod network;
 mod reader;
 mod store;
-mod stream;
+pub mod stream;
+
+/// internal use only! in time move this to tests/common/common.rs
+/// for now RA needs it here and we need RA
+pub mod testing;
 
 #[async_trait]
 trait Appender {

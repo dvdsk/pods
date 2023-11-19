@@ -2,17 +2,18 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use futures::{Future, FutureExt};
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::http_client;
 use crate::manager::Command;
-use crate::network::{Bandwith, Network};
+use crate::network::Bandwith;
 use crate::reader::Reader;
 use crate::store::{MigrationHandle, SwitchableStore};
 
 use self::task::Canceld;
 
+mod builder;
+pub use builder::StreamBuilder;
 mod task;
 
 #[derive(Debug, thiserror::Error)]
@@ -34,22 +35,51 @@ impl Id {
     }
 }
 
+pub struct ManagedHandle {
+    /// allowes the handle to send a message
+    /// to the manager to drop the streams future
+    /// or increase/decrease priority.
+    cmd_manager: Sender<Command>,
+    handle: Handle,
+}
+
 pub struct Handle {
     prefetch: usize,
     seek_tx: mpsc::Sender<u64>,
     store: SwitchableStore,
-    cmd_tx: Sender<Command>,
     reader_in_use: Arc<Mutex<()>>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ReaderInUse;
 
-impl Handle {
+impl ManagedHandle {
     pub fn set_priority(&mut self, _arg: i32) {
         todo!()
     }
 
+    pub fn id(&self) -> Id {
+        todo!()
+    }
+
+    pub fn limit_bandwith(&mut self, bandwith: Bandwith) {
+        self.handle.limit_bandwith(bandwith)
+    }
+    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
+        self.handle.try_get_reader()
+    }
+    pub fn get_downloaded(&self) -> () {
+        self.handle.get_downloaded()
+    }
+    pub async fn use_mem_backend(&mut self) -> Option<MigrationHandle> {
+        self.handle.use_mem_backend().await
+    }
+    pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
+        self.handle.use_disk_backend(path).await
+    }
+}
+
+impl Handle {
     pub fn limit_bandwith(&mut self, _bandwith: Bandwith) {
         todo!();
     }
@@ -68,10 +98,6 @@ impl Handle {
         todo!()
     }
 
-    pub fn id(&self) -> Id {
-        todo!()
-    }
-
     pub async fn use_mem_backend(&mut self) -> Option<MigrationHandle> {
         self.store.to_mem().await
     }
@@ -81,9 +107,9 @@ impl Handle {
     }
 }
 
-impl Drop for Handle {
+impl Drop for ManagedHandle {
     fn drop(&mut self) {
-        self.cmd_tx // tell the manager task to abort the task
+        self.cmd_manager
             .try_send(Command::CancelStream(self.id()))
             .expect("could not cancel stream task when handle was dropped")
     }
@@ -93,30 +119,4 @@ impl Drop for Handle {
 pub struct StreamEnded {
     pub(super) res: Result<Canceld, Error>,
     pub(super) id: Id,
-}
-
-pub(crate) fn new(
-    url: http::Uri,
-    to_disk: Option<PathBuf>,
-    cmd_tx: Sender<Command>,
-    initial_prefetch: usize,
-    id: Id,
-    restriction: Option<Network>,
-) -> (Handle, impl Future<Output = StreamEnded> + Send + 'static) {
-    let (seek_tx, seek_rx) = mpsc::channel(12);
-    let store = match to_disk {
-        Some(path) => crate::store::SwitchableStore::new_disk_backed(path),
-        None => crate::store::SwitchableStore::new_mem_backed(),
-    };
-
-    (
-        Handle {
-            cmd_tx,
-            reader_in_use: Arc::new(Mutex::new(())),
-            prefetch: initial_prefetch,
-            seek_tx,
-            store: store.clone(),
-        },
-        task::new(url, store.clone(), seek_rx, restriction).map(|res| StreamEnded { res, id }),
-    )
 }
