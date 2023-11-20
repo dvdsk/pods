@@ -14,6 +14,7 @@ use crate::Appender;
 use super::Error;
 use futures_concurrency::future::Race;
 
+#[derive(Debug)]
 pub struct Canceld;
 
 enum Res1 {

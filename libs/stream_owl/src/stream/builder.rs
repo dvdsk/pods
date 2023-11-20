@@ -20,7 +20,7 @@ pub struct StreamBuilder {
 }
 
 impl StreamBuilder {
-    pub(crate) fn new(url: http::Uri) -> Self {
+    pub fn new(url: http::Uri) -> Self {
         Self {
             url,
             to_disk: None,

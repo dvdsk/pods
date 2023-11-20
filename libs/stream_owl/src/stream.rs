@@ -10,11 +10,10 @@ use crate::network::Bandwith;
 use crate::reader::Reader;
 use crate::store::{MigrationHandle, SwitchableStore};
 
-use self::task::Canceld;
-
 mod builder;
 pub use builder::StreamBuilder;
 mod task;
+pub use task::Canceld;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
