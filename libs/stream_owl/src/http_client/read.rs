@@ -9,6 +9,7 @@ use super::size::Size;
 use super::{Client, Error, InnerClient};
 use crate::Appender;
 
+#[derive(Debug)]
 pub(crate) struct InnerReader {
     stream: Incoming,
     client: InnerClient,
@@ -16,6 +17,7 @@ pub(crate) struct InnerReader {
     size_hint: Size,
 }
 
+#[derive(Debug)]
 pub(crate) enum Reader {
     PartialData(InnerReader),
     AllData(InnerReader),
@@ -73,6 +75,7 @@ impl Reader {
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
+    #[tracing::instrument(level = "trace", skip(appender, self), ret)]
     pub(crate) async fn read_to_writer(
         &mut self,
         mut appender: impl Appender,
@@ -94,6 +97,7 @@ impl InnerReader {
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
+    #[tracing::instrument(level = "trace", skip_all, ret)]
     pub(crate) async fn read_to_writer(
         &mut self,
         output: &mut impl Appender,
@@ -102,7 +106,9 @@ impl InnerReader {
         let max = max.unwrap_or(usize::MAX);
         let mut n_read = 0usize;
 
-        self.write_from_buffer(max, output).await?;
+        // if !self.buffer.is_empty() {
+            n_read += self.write_from_buffer(max, output).await?;
+        // }
 
         while n_read < max {
             // cancel safe: not a problem if a frame is lost as long as
@@ -115,10 +121,7 @@ impl InnerReader {
             let split = data.len().min(max - n_read);
             let (to_write, to_store) = data.split_at(split);
 
-            output
-                .append(to_write)
-                .await
-                .map_err(Error::WritingData)?;
+            output.append(to_write).await.map_err(Error::WritingData)?;
             n_read += to_write.len();
             self.buffer.extend(to_store);
         }
@@ -127,34 +130,39 @@ impl InnerReader {
     }
 
     // Is cancel safe, no bytes will be removed from buffer before
-    // they are written
+    // they are written. Returns number of bytes written
+    #[tracing::instrument(level = "trace", skip(output, self), ret)]
     async fn write_from_buffer(
         &mut self,
         max: usize,
         output: &mut impl Appender,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         let to_take = self.buffer.len().min(max);
         let from_buffer: Vec<_> = self.buffer.range(0..to_take).copied().collect();
         let mut to_write = from_buffer.as_slice();
+        let mut total_written = 0;
         Ok(loop {
-            let n_written = output
+            let just_written = output
                 .append(&from_buffer)
                 .await
                 .map_err(Error::WritingData)?;
             // remove only what we wrote to prevent losing data on cancel
-            self.buffer.drain(0..n_written);
-            to_write = &to_write[n_written..];
+            self.buffer.drain(0..just_written);
+            to_write = &to_write[just_written..];
 
+            total_written += just_written;
             if to_write.is_empty() {
-                break;
+                break total_written;
             }
         })
     }
 }
 
+#[tracing::instrument(level="debug", err)]
 async fn get_next_data_frame(stream: &mut Incoming) -> Result<Option<Bytes>, Error> {
     loop {
         let Some(frame) = stream.frame().await else {
+            tracing::trace!("no more data frames");
             return Ok(None);
         };
         let frame = frame.map_err(Error::ReadingBody)?;

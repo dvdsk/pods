@@ -36,6 +36,7 @@ pub(super) enum StoreVariant {
 }
 
 impl SwitchableStore {
+    #[tracing::instrument]
     pub(crate) fn new_disk_backed(path: PathBuf) -> Self {
         let (capacity_watcher, capacity) = capacity::new(None);
         let (tx, rx) = range_watch::channel();
@@ -48,6 +49,7 @@ impl SwitchableStore {
         }
     }
 
+    #[tracing::instrument]
     pub(crate) fn new_mem_backed() -> Self {
         let (capacity_watcher, capacity) = capacity::new(mem::CAPACITY);
         let (tx, rx) = range_watch::channel();
@@ -73,7 +75,9 @@ impl SwitchableStore {
     }
 
     pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
+        tracing::info!("waiting for space");
         self.capacity_watcher.wait_for_space().await;
+        tracing::info!("got_space");
         match &mut *self.curr_store.lock().await {
             Store::Disk(inner) => inner.write_at(buf, pos).await,
             Store::Mem(inner) => inner.write_at(buf, pos).await,

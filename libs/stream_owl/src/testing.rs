@@ -44,7 +44,7 @@ pub async fn server() -> (Uri, JoinHandle<Result<(), std::io::Error>>) {
     let addr = SocketAddr::from(([127, 0, 0, 1], 0));
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     let port = listener.local_addr().unwrap().port();
-    tracing::debug!("listening on {}", listener.local_addr().unwrap());
+    tracing::debug!("testserver listening on on {}", listener.local_addr().unwrap());
     let server = axum::serve(listener, app.layer(TraceLayer::new_for_http()));
     let server = tokio::task::spawn(server);
 
@@ -52,4 +52,24 @@ pub async fn server() -> (Uri, JoinHandle<Result<(), std::io::Error>>) {
         .parse()
         .unwrap();
     (uri, server)
+}
+
+pub fn setup_tracing() {
+    use tracing_subscriber::filter;
+    use tracing_subscriber::fmt;
+    use tracing_subscriber::prelude::*;
+
+    let filter = filter::EnvFilter::builder()
+        .parse("stream_owl=trace,info")
+        .unwrap();
+
+    let fmt = fmt::layer()
+        .pretty()
+        .with_line_number(true)
+        .with_test_writer();
+
+    let _ignore_err = tracing_subscriber::registry()
+        .with(filter)
+        .with(fmt)
+        .try_init();
 }

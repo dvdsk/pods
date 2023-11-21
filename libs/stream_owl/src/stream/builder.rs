@@ -12,6 +12,7 @@ use crate::{manager, StreamId};
 use super::task::Canceld;
 use super::{task, Error, Handle, ManagedHandle, StreamEnded};
 
+#[derive(Debug)]
 pub struct StreamBuilder {
     url: http::Uri,
     to_disk: Option<PathBuf>,
@@ -42,6 +43,7 @@ impl StreamBuilder {
         self
     }
 
+    #[tracing::instrument]
     pub(crate) fn start_managed(
         self,
         manager_tx: mpsc::Sender<manager::Command>,
@@ -59,6 +61,7 @@ impl StreamBuilder {
         (handle, stream_task)
     }
 
+    #[tracing::instrument]
     pub fn start(
         self,
     ) -> (

@@ -9,6 +9,7 @@ use stream_owl::testing::server;
 use stream_owl::StreamBuilder;
 use stream_owl::StreamCanceld;
 use stream_owl::StreamError;
+use stream_owl::testing::setup_tracing;
 use tokio::sync::Notify;
 use tokio::task::JoinError;
 
@@ -41,9 +42,10 @@ async fn tomato(test_done: Arc<Notify>) -> Res {
 
 #[tokio::test]
 async fn seek_from_all_sides_works() {
+    setup_tracing();
     let (uri, server) = server().await;
 
-    let (mut handle, stream) = StreamBuilder::new(dbg!(uri)).start();
+    let (mut handle, stream) = StreamBuilder::new(uri).start();
     let test_done = Arc::new(Notify::new());
 
     let server = server.map(Res::ServerCrashed);

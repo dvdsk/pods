@@ -3,6 +3,7 @@ use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
+use tracing::{debug, Instrument};
 
 use crate::network::Network;
 mod io;
@@ -114,6 +115,7 @@ impl Cookies {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ClientStreamingPartial {
     stream: Incoming,
     inner: InnerClient,
@@ -121,6 +123,7 @@ pub(crate) struct ClientStreamingPartial {
 }
 
 impl ClientStreamingPartial {
+    #[tracing::instrument(level="trace", ret)]
     pub(crate) fn into_reader(self) -> Reader {
         let Self {
             stream,
@@ -144,6 +147,7 @@ impl ClientStreamingPartial {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct ClientStreamingAll {
     stream: Incoming,
     inner: InnerClient,
@@ -174,6 +178,7 @@ impl ClientStreamingAll {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct InnerClient {
     host: HeaderValue,
     restriction: Option<Network>,
@@ -196,12 +201,14 @@ impl InnerClient {
     }
 }
 
+#[derive(Debug)]
 pub struct Client {
     should_support_range: bool,
     size: Size,
     inner: InnerClient,
 }
 
+#[derive(Debug)]
 pub(crate) enum StreamingClient {
     Partial(ClientStreamingPartial),
     All(ClientStreamingAll),
@@ -216,6 +223,7 @@ pub(crate) struct ClientBuilder {
 }
 
 impl ClientBuilder {
+    #[tracing::instrument(level="debug", ret)]
     pub(crate) async fn connect(self, start: u64, len: u64) -> Result<StreamingClient, Error> {
         let Self {
             restriction,
@@ -248,7 +256,7 @@ impl ClientBuilder {
             size.update_from_headers(&response);
             cookies.get_from(&response);
 
-            println!("redirecting to: {url}");
+            debug!("redirecting to: {url}");
             numb_redirect += 1
         }
 
@@ -278,6 +286,7 @@ impl ClientBuilder {
 }
 
 impl StreamingClient {
+    #[tracing::instrument]
     pub(crate) async fn new(
         url: hyper::Uri,
         restriction: Option<Network>,
@@ -304,6 +313,7 @@ impl StreamingClient {
 
 impl Client {
     /// Panics if pos_1 is smaller then pos_2
+    #[tracing::instrument(err)]
     pub(crate) async fn try_get_range(
         mut self,
         start: u64,

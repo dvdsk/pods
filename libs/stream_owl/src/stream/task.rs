@@ -2,14 +2,15 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use futures::FutureExt;
-use tokio::sync::mpsc;
 use crate::http_client::ClientStreamingAll;
 use crate::http_client::Error as HttpError;
 use crate::http_client::StreamingClient;
 use crate::network::Network;
 use crate::store::SwitchableStore;
 use crate::Appender;
+use futures::FutureExt;
+use tokio::sync::mpsc;
+use tracing::instrument;
 
 use super::Error;
 use futures_concurrency::future::Race;
@@ -35,10 +36,14 @@ struct StoreAppender {
 
 #[async_trait::async_trait]
 impl Appender for StoreAppender {
+    #[instrument(level = "trace", skip(self, buf), fields(buf_len = buf.len()), ret)]
     async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        // only this function modifies pos, 
+        // only this function modifies pos,
         // only need to read own writes => relaxed ordering
-        let written = self.store.write_at(buf, self.pos.load(Ordering::Relaxed)).await;
+        let written = self
+            .store
+            .write_at(buf, self.pos.load(Ordering::Relaxed))
+            .await;
         // new data needs to be requested after current pos, it uses aquire Ordering
         self.pos.fetch_add(written as u64, Ordering::Release);
         Ok(written)
@@ -46,6 +51,7 @@ impl Appender for StoreAppender {
 }
 
 // the writer will limit how fast we recieve data using backpressure
+#[instrument(ret, skip_all)]
 pub(crate) async fn new(
     url: http::Uri,
     storage: SwitchableStore,
@@ -139,12 +145,14 @@ enum Res4 {
     GetClient(Result<StreamingClient, HttpError>),
 }
 
+#[derive(Debug)]
 enum StreamRes {
     Canceld,
     Err(Error),
     StreamAllclient(ClientStreamingAll),
 }
 
+#[instrument(level = "debug", skip(client_with_stream, writer, seek_rx), ret)]
 async fn stream_partial(
     mut client_with_stream: crate::http_client::ClientStreamingPartial,
     writer: StoreAppender,
@@ -154,8 +162,8 @@ async fn stream_partial(
     loop {
         let client_builder = client_with_stream.builder();
         let mut next_pos = loop {
-            let stream =
-                handle_partial_stream(client_with_stream, writer.clone(), chunk_size).map(Res3::GetRange);
+            let stream = handle_partial_stream(client_with_stream, writer.clone(), chunk_size)
+                .map(Res3::GetRange);
             let get_seek = seek_rx.recv().map(Res3::Seek);
             match (stream, get_seek).race().await {
                 Res3::Seek(None) => return StreamRes::Canceld,
@@ -188,6 +196,7 @@ async fn stream_partial(
     }
 }
 
+#[instrument(skip_all, ret)]
 async fn handle_partial_stream(
     client_with_stream: crate::http_client::ClientStreamingPartial,
     appender: StoreAppender,
