@@ -26,7 +26,7 @@ pub fn list_interfaces() -> Result<Vec<Network>, network_interface::Error> {
                 addr: n
                     .addr
                     .first()
-                    .expect("filter guarentees this is not empty")
+                    .expect("filter guarantees this is not empty")
                     .ip(),
             })
             .collect()
@@ -34,4 +34,4 @@ pub fn list_interfaces() -> Result<Vec<Network>, network_interface::Error> {
 }
 
 #[derive(Debug)]
-pub struct Bandwith(usize);
+pub struct Bandwidth(usize);

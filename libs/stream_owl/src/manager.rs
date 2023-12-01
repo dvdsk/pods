@@ -1,11 +1,11 @@
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use futures::Future;
 use http::Uri;
 use tokio::sync::{mpsc, oneshot};
 
-use crate::network::{Bandwith, Network};
+use crate::network::{Bandwidth, Network};
 use crate::stream;
 
 mod task;
@@ -96,7 +96,7 @@ impl Manager {
         rx.blocking_recv().unwrap()
     }
 
-    pub fn limit_bandwith(&mut self, _bandwith: Bandwith) {
+    pub fn limit_bandwidth(&mut self, _bandwidth: Bandwidth) {
         todo!();
     }
 }

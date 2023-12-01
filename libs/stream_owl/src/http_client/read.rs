@@ -54,22 +54,17 @@ impl Reader {
         })
     }
 
-    pub(crate) async fn into_client(mut self) -> Result<Client, Error> {
-        while let Some(_frame) = self
-            .inner()
-            .stream
-            .frame()
-            .await
-            .transpose()
-            .map_err(Error::EmptyingBody)?
-        {}
-        Ok(self.try_into_client().expect("just emptied the stream"))
-    }
-
     fn inner(&mut self) -> &mut InnerReader {
         match self {
             Reader::PartialData(inner) => inner,
             Reader::AllData(inner) => inner,
+        }
+    }
+
+    pub(crate) fn size_hint(&self) -> Size {
+        match self {
+            Reader::PartialData(inner) => inner.size_hint,
+            Reader::AllData(inner) => inner.size_hint,
         }
     }
 
@@ -106,9 +101,9 @@ impl InnerReader {
         let max = max.unwrap_or(usize::MAX);
         let mut n_read = 0usize;
 
-        // if !self.buffer.is_empty() {
+        if !self.buffer.is_empty() {
             n_read += self.write_from_buffer(max, output).await?;
-        // }
+        }
 
         while n_read < max {
             // cancel safe: not a problem if a frame is lost as long as

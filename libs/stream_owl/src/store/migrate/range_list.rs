@@ -42,7 +42,8 @@ impl RangeLen for Range<u64> {
 }
 
 pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mut Store) -> RangeSet<u64> {
-    let Some(capacity) = target.capacity().total() else {
+    use crate::store::CapacityBounds;
+    let CapacityBounds::Limited(capacity) = target.capacity().total() else {
         return RangeSet::from_iter(needed_from_src.into_iter());
     };
 
@@ -62,8 +63,8 @@ pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mu
     res
 }
 
-/// List is orderd by range start. The center element, calculated using
-/// normal (flooring) devision by 2 is the current read pos.
+/// List is ordered by range start. The center element, calculated using
+/// normal (flooring) division by 2 is the current read pos.
 pub(super) fn needed_ranges(src: &Store, target: &Store) -> Vec<Range<u64>> {
     let range_list: Vec<Range<u64>> = src.ranges().iter().cloned().collect();
 

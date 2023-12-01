@@ -8,6 +8,7 @@ pub(crate) struct Size {
 }
 
 impl Size {
+    #[tracing::instrument(level = "debug", ret)]
     pub(crate) fn update_from_headers(&mut self, response: &Response<Incoming>) {
         let headers = response.headers();
 

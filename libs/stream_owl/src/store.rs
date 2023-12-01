@@ -1,3 +1,4 @@
+use derivative::Derivative;
 use rangemap::RangeSet;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -10,12 +11,14 @@ mod migrate;
 mod range_watch;
 
 pub use migrate::{MigrationError, MigrationHandle};
+pub(crate) use capacity::Bounds as CapacityBounds;
 
 use capacity::CapacityWatcher;
 
 use self::capacity::Capacity;
 
-#[derive(Debug, Clone)]
+#[derive(Derivative, Clone)]
+#[derivative(Debug)]
 pub(crate) struct SwitchableStore {
     curr_store: Arc<Mutex<Store>>,
     curr_range: range_watch::Receiver,
@@ -31,14 +34,14 @@ pub(crate) enum Store {
 
 #[derive(Debug, Clone)]
 pub(super) enum StoreVariant {
-    Disk = 0,
-    Mem = 1,
+    Disk,
+    Mem,
 }
 
 impl SwitchableStore {
     #[tracing::instrument]
     pub(crate) fn new_disk_backed(path: PathBuf) -> Self {
-        let (capacity_watcher, capacity) = capacity::new(None);
+        let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
         let (tx, rx) = range_watch::channel();
         let disk = disk::Disk::new(&path, capacity, tx).unwrap();
         Self {
@@ -50,8 +53,8 @@ impl SwitchableStore {
     }
 
     #[tracing::instrument]
-    pub(crate) fn new_mem_backed() -> Self {
-        let (capacity_watcher, capacity) = capacity::new(mem::CAPACITY);
+    pub(crate) fn new_mem_backed(max_cap: capacity::Bounds) -> Self {
+        let (capacity_watcher, capacity) = capacity::new(max_cap);
         let (tx, rx) = range_watch::channel();
         let mem = mem::Memory::new(capacity, tx).unwrap();
         Self {
@@ -70,14 +73,14 @@ impl SwitchableStore {
     }
 
     pub(super) fn read_blocking_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
-        self.curr_range.blocking_wait_for(pos + 4096); // read at least 4k
+        // read as soon as position is available for more efficient behaviour
+        // the api client should rely on BufReader.
+        self.curr_range.blocking_wait_for(pos);
         self.curr_store.blocking_lock().read_blocking_at(buf, pos)
     }
 
     pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
-        tracing::info!("waiting for space");
         self.capacity_watcher.wait_for_space().await;
-        tracing::info!("got_space");
         match &mut *self.curr_store.lock().await {
             Store::Disk(inner) => inner.write_at(buf, pos).await,
             Store::Mem(inner) => inner.write_at(buf, pos).await,
@@ -144,7 +147,6 @@ impl Store {
             Self::Disk(inner) => inner.into_parts(),
             Self::Mem(inner) => inner.into_parts(),
         }
-
     }
 
     fn capacity(&self) -> &Capacity {

@@ -3,10 +3,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use tokio::sync::mpsc::{self, Sender};
+use tracing::instrument;
+use derivative::Derivative;
 
 use crate::http_client;
 use crate::manager::Command;
-use crate::network::Bandwith;
+use crate::network::Bandwidth;
 use crate::reader::Reader;
 use crate::store::{MigrationHandle, SwitchableStore};
 
@@ -19,7 +21,7 @@ pub use task::Canceld;
 pub enum Error {
     #[error("Error communicating with server")]
     HttpClient(#[from] http_client::Error),
-    #[error("Error writing to strorage")]
+    #[error("Error writing to storage")]
     Writing(std::io::Error),
 }
 
@@ -35,15 +37,18 @@ impl Id {
 }
 
 pub struct ManagedHandle {
-    /// allowes the handle to send a message
+    /// allows the handle to send a message
     /// to the manager to drop the streams future
     /// or increase/decrease priority.
     cmd_manager: Sender<Command>,
     handle: Handle,
 }
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct Handle {
     prefetch: usize,
+    #[derivative(Debug="ignore")]
     seek_tx: mpsc::Sender<u64>,
     store: SwitchableStore,
     reader_in_use: Arc<Mutex<()>>,
@@ -61,8 +66,8 @@ impl ManagedHandle {
         todo!()
     }
 
-    pub fn limit_bandwith(&mut self, bandwith: Bandwith) {
-        self.handle.limit_bandwith(bandwith)
+    pub fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
+        self.handle.limit_bandwidth(bandwidth)
     }
     pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
         self.handle.try_get_reader()
@@ -79,10 +84,11 @@ impl ManagedHandle {
 }
 
 impl Handle {
-    pub fn limit_bandwith(&mut self, _bandwith: Bandwith) {
+    pub fn limit_bandwidth(&mut self, _bandwidth: Bandwidth) {
         todo!();
     }
 
+    #[instrument(level="debug", ret, err(Debug))]
     pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
         let guard = self.reader_in_use.try_lock().map_err(|_| ReaderInUse)?;
         Ok(Reader::new(

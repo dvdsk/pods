@@ -3,7 +3,8 @@ use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
-use tracing::{debug, Instrument};
+use tracing::debug;
+use derivative::Derivative;
 
 use crate::network::Network;
 mod io;
@@ -123,7 +124,7 @@ pub(crate) struct ClientStreamingPartial {
 }
 
 impl ClientStreamingPartial {
-    #[tracing::instrument(level="trace", ret)]
+    #[tracing::instrument(level = "trace", ret)]
     pub(crate) fn into_reader(self) -> Reader {
         let Self {
             stream,
@@ -178,16 +179,19 @@ impl ClientStreamingAll {
     }
 }
 
-#[derive(Debug)]
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct InnerClient {
     host: HeaderValue,
     restriction: Option<Network>,
     url: hyper::Uri,
+    #[derivative(Debug="ignore")]
     conn: Connection,
     cookies: Cookies,
 }
 
 impl InnerClient {
+    #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn send_range_request(
         &mut self,
         range: &str,
@@ -223,7 +227,7 @@ pub(crate) struct ClientBuilder {
 }
 
 impl ClientBuilder {
-    #[tracing::instrument(level="debug", ret)]
+    #[tracing::instrument(level = "debug")]
     pub(crate) async fn connect(self, start: u64, len: u64) -> Result<StreamingClient, Error> {
         let Self {
             restriction,
@@ -236,6 +240,7 @@ impl ClientBuilder {
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
             .await?;
+        size.update_from_headers(&response);
         cookies.get_from(&response);
 
         let mut numb_redirect = 0;
@@ -286,7 +291,7 @@ impl ClientBuilder {
 }
 
 impl StreamingClient {
-    #[tracing::instrument]
+    #[tracing::instrument(level = "debug", ret)]
     pub(crate) async fn new(
         url: hyper::Uri,
         restriction: Option<Network>,
@@ -312,20 +317,22 @@ impl StreamingClient {
 }
 
 impl Client {
-    /// Panics if pos_1 is smaller then pos_2
-    #[tracing::instrument(err)]
+    #[tracing::instrument(level="debug", err, ret)]
     pub(crate) async fn try_get_range(
         mut self,
         start: u64,
-        len: u64,
+        chunk_size: u64,
     ) -> Result<StreamingClient, Error> {
-        let mut end = start + len;
-        if let Some(max_size) = self.content_size() {
-            end = end.min(max_size);
-        }
+        assert!(Some(start) < self.content_size());
+        let end = start + chunk_size;
 
-        let range = format!("bytes={start}-{end}");
-        let response = self.inner.send_range_request(&dbg!(range)).await?;
+        let range = if Some(end) >= self.content_size() {
+            format!("bytes={start}-") // download till end of stream
+        } else {
+            format!("bytes={start}-{end}")
+        };
+
+        let response = self.inner.send_range_request(&range).await?;
 
         self.size.update_from_headers(&response);
         match response.status() {
@@ -402,9 +409,11 @@ mod tests {
 
     #[tokio::test]
     async fn state_machine_works() {
-        const RANGE_LEN: u64 = 1_000_000; // 1MB
+        const CHUNK_SIZE: u64 = 1_000_000; // 1MB
         let url = hyper::Uri::from_static(FEED_URL);
-        let mut client = StreamingClient::new(url, None, 0, RANGE_LEN).await.unwrap();
+        let mut client = StreamingClient::new(url, None, 0, CHUNK_SIZE)
+            .await
+            .unwrap();
         let mut buffer = Vec::new();
         loop {
             match client {
@@ -414,7 +423,7 @@ mod tests {
                         .expect("test stream should provide size");
                     let mut reader = client_with_stream.into_reader();
                     reader
-                        .read_to_writer(&mut buffer, Some(RANGE_LEN as usize))
+                        .read_to_writer(&mut buffer, Some(CHUNK_SIZE as usize))
                         .await
                         .unwrap();
 
@@ -423,10 +432,9 @@ mod tests {
                     }
 
                     client = reader
-                        .into_client()
-                        .await
+                        .try_into_client()
                         .unwrap()
-                        .try_get_range(buffer.len() as u64, RANGE_LEN)
+                        .try_get_range(buffer.len() as u64, CHUNK_SIZE)
                         .await
                         .unwrap();
                 }

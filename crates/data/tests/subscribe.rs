@@ -137,7 +137,7 @@ async fn testsubs_got_episodes_details(
 }
 
 #[tokio::test]
-async fn recieves_current_state() {
+async fn receives_current_state() {
     let (mut data, _task) = Data::new();
     let mut writer = data.writer();
     writer.add_podcast(test_podcast(1));
@@ -200,7 +200,7 @@ async fn dropped_are_not_updated() {
 }
 
 #[tokio::test]
-async fn recieve_episodes() {
+async fn receive_episodes() {
     let (mut data, _task) = Data::new();
     let mut subs = testsubs(data.reader().as_mut()).await;
 
@@ -219,7 +219,7 @@ async fn recieve_episodes() {
 }
 
 #[tokio::test]
-async fn recieve_episode_details() {
+async fn receive_episode_details() {
     let (mut data, _task) = Data::new();
     let mut subs = testsubs(data.reader().as_mut()).await;
 

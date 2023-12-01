@@ -9,7 +9,7 @@ use tokio::sync::{oneshot, Mutex};
 
 use super::disk::Disk;
 use super::mem::Memory;
-use super::{capacity, range_watch, Store, StoreVariant, SwitchableStore};
+use super::{capacity, range_watch, Store, StoreVariant, SwitchableStore, CapacityBounds};
 
 mod range_list;
 
@@ -23,7 +23,7 @@ impl SwitchableStore {
 
         // is swapped out before migration finishes
         let (watch_placeholder, _) = range_watch::channel();
-        let (_, capacity_placeholder) = capacity::new(None);
+        let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
         let mem = match Memory::new(capacity_placeholder, watch_placeholder) {
             Err(e) => {
                 tx.send(Err(MigrationError::MemAllocation(e)))
@@ -47,7 +47,7 @@ impl SwitchableStore {
 
         // is swapped out before migration finishes
         let (watch_placeholder, _) = range_watch::channel();
-        let (_, capacity_placeholder) = capacity::new(None);
+        let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
         let disk = match Disk::new(path, capacity_placeholder, watch_placeholder) {
             Err(e) => {
                 tx.send(Err(MigrationError::DiskCreation(e)))
@@ -93,7 +93,7 @@ async fn migrate(
         Res::Cancelled => return,
         Res::PreMigration(Ok(_)) => (),
         Res::PreMigration(res @ Err(_)) => {
-            // error is irrelavent if migration is canceld
+            // error is irrelevant if migration is canceld
             let _ = tx.send(res);
             return;
         }
@@ -102,7 +102,7 @@ async fn migrate(
     let mut curr = curr.lock().await;
     let res = finish_migration(&mut curr, &mut target).await;
     if res.is_err() {
-        // error is irrelevent if migration is canceld
+        // error is irrelevant if migration is canceld
         let _ = tx.send(res);
     } else {
         let target_ref = &mut target;

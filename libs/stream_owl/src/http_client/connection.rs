@@ -32,11 +32,15 @@ impl Connection {
         let (request_sender, conn) = http1::handshake(io).await.map_err(Error::Handshake)?;
 
         let mut connection = JoinSet::new();
-        connection.spawn(async move {
-            if let Err(e) = conn.await {
-                eprintln!("Error in connection: {}", e);
-            }
-        });
+        connection
+            // .build_task()
+            // .name("stream tcp connection")
+            .spawn(async move {
+                if let Err(e) = conn.await {
+                    eprintln!("Error in connection: {}", e);
+                }
+            });
+            // .unwrap();
         Ok(Self {
             request_sender,
             _connection: connection,

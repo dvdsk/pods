@@ -1,23 +1,29 @@
 pub const CAPACITY: Option<std::num::NonZeroU64> = NonZeroU64::new(20_000_000);
 
+use derivative::Derivative;
 use std::collections::{TryReserveError, VecDeque};
 use std::num::NonZeroU64;
 use std::ops::Range;
 
 use rangemap::set::RangeSet;
 
-use super::capacity::Capacity;
-use super::range_watch;
+use crate::vecdeque::VecDequeExt;
 
-#[derive(Debug)]
+use super::capacity::Capacity;
+use super::{range_watch, CapacityBounds};
+
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub(crate) struct Memory {
-    /// space availible because the reader read past data
+    /// space available because the reader read past data
     pub(super) capacity: Capacity,
+    #[derivative(Debug = "ignore")]
     buffer: VecDeque<u8>,
     buffer_cap: usize,
-    /// range of positions availible, end non inclusive
+    /// range of positions available, end non inclusive
     /// positions are measured from the absolute start of the stream
     range: Range<u64>,
+    #[derivative(Debug = "ignore")]
     range_tx: range_watch::Sender,
     last_read_pos: u64,
 }
@@ -27,9 +33,11 @@ impl Memory {
         capacity: Capacity,
         range_tx: range_watch::Sender,
     ) -> Result<Self, TryReserveError> {
-
         let mut bytes = VecDeque::new();
-        let buffer_cap = capacity.total().expect("is Some for mem").get() as usize;
+        let buffer_cap = match capacity.total() {
+            CapacityBounds::Unlimited => usize::MAX,
+            CapacityBounds::Limited(bytes) => bytes.get() as usize,
+        };
         bytes.try_reserve_exact(buffer_cap)?;
 
         Ok(Self {
@@ -47,13 +55,15 @@ impl Memory {
 
     /// `pos` must be the position of the first byte in buf in the stream.
     /// For the first write at the start this should be 0
+    #[tracing::instrument(level="trace", skip(self, buf), fields(buf_len = buf.len()))]
     pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
+        assert!(!buf.is_empty());
         if pos != self.range.end {
             self.buffer.clear();
             self.range.start = pos;
         }
 
-        let to_write = buf.len().min(self.capacity.availible());
+        let to_write = buf.len().min(self.capacity.available());
 
         let free_in_buffer = self.buffer_cap - self.buffer.len();
         let to_remove = to_write.saturating_sub(free_in_buffer);
@@ -73,7 +83,7 @@ impl Memory {
         debug_assert!(self.range.start <= pos);
 
         let relative_pos = pos - self.range.start;
-        let n_copied = fill_with_offset(buf, &self.buffer, relative_pos as usize);
+        let n_copied = self.buffer.copy_starting_at(relative_pos as usize, buf);
         self.capacity.add(n_copied);
 
         self.last_read_pos = pos;
@@ -108,39 +118,5 @@ impl Memory {
             capacity, range_tx, ..
         } = self;
         (range_tx, capacity)
-    }
-}
-
-fn fill_with_offset(target: &mut [u8], source: &VecDeque<u8>, start: usize) -> usize {
-    let (front, back) = source.as_slices();
-    if front.len() >= start {
-        let n_to_copy = front.len() - start;
-        let n_to_copy = n_to_copy.min(target.len());
-        target[..n_to_copy].copy_from_slice(&front[start..start + n_to_copy]);
-        let n_copied = n_to_copy;
-
-        // copy remaining needed bytes from back
-        let n_to_copy = target.len().saturating_sub(n_copied);
-        let n_to_copy = n_to_copy.min(back.len());
-        target[n_copied..n_to_copy].copy_from_slice(&back[..n_to_copy]);
-
-        n_copied + n_to_copy
-    } else {
-        let n_to_copy = back.len() - start;
-        let n_to_copy = n_to_copy.min(target.len());
-        target[..n_to_copy].copy_from_slice(&back[start..start + n_to_copy]);
-        let n_copied = n_to_copy;
-
-        n_copied
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_fill_with_offset() {
-        todo!()
     }
 }
