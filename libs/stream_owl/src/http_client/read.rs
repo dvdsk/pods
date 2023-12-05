@@ -14,7 +14,7 @@ pub(crate) struct InnerReader {
     stream: Incoming,
     client: InnerClient,
     buffer: VecDeque<u8>,
-    size_hint: Size,
+    stream_size: Size,
 }
 
 #[derive(Debug)]
@@ -37,18 +37,18 @@ impl Reader {
             Reader::PartialData(InnerReader {
                 client,
                 stream: _,
-                size_hint,
+                stream_size,
                 ..
             }) => Client {
                 should_support_range: true,
-                size: size_hint,
+                size: stream_size,
                 inner: client,
             },
             Reader::AllData(InnerReader {
-                client, size_hint, ..
+                client, stream_size, ..
             }) => Client {
                 should_support_range: false,
-                size: size_hint,
+                size: stream_size,
                 inner: client,
             },
         })
@@ -61,10 +61,10 @@ impl Reader {
         }
     }
 
-    pub(crate) fn size_hint(&self) -> Size {
+    pub(crate) fn stream_size(&self) -> Size {
         match self {
-            Reader::PartialData(inner) => inner.size_hint,
-            Reader::AllData(inner) => inner.size_hint,
+            Reader::PartialData(inner) => inner.stream_size.clone(),
+            Reader::AllData(inner) => inner.stream_size.clone(),
         }
     }
 
@@ -86,7 +86,7 @@ impl InnerReader {
             stream,
             client,
             buffer: VecDeque::new(),
-            size_hint,
+            stream_size: size_hint,
         }
     }
 

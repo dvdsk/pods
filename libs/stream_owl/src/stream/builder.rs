@@ -1,4 +1,4 @@
-use std::num::NonZeroU64;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
@@ -7,6 +7,7 @@ use std::future::Future;
 use futures::FutureExt;
 use tokio::sync::mpsc;
 
+use crate::http_client::Size;
 use crate::network::Network;
 use crate::store::CapacityBounds;
 use crate::store::SwitchableStore;
@@ -22,36 +23,57 @@ enum StorageChoice {
 }
 
 #[derive(Debug)]
-pub struct StreamBuilder {
+pub struct StreamBuilder<const STORAGE_SET: bool> {
     url: http::Uri,
     storage: Option<StorageChoice>,
     initial_prefetch: usize,
     restriction: Option<Network>,
 }
 
-use const_typed_builder::Builder;
-
-impl StreamBuilder {
-    pub fn new(url: http::Uri) -> Self {
-        Self {
+impl StreamBuilder<false> {
+    pub fn new(url: http::Uri) -> StreamBuilder<false> {
+        StreamBuilder {
             url,
             storage: None,
             initial_prefetch: 10_000,
             restriction: None,
         }
     }
-    pub fn to_mem(mut self) -> Self {
+}
+
+impl StreamBuilder<false> {
+    pub fn to_mem(mut self) -> StreamBuilder<true> {
         self.storage = Some(StorageChoice::Mem(CapacityBounds::Unlimited));
-        self
+        StreamBuilder {
+            url: self.url,
+            storage: self.storage,
+            initial_prefetch: self.initial_prefetch,
+            restriction: self.restriction,
+        }
     }
-    pub fn to_limited_mem(mut self, max_size: NonZeroU64) -> Self {
+    pub fn to_limited_mem(mut self, max_size: NonZeroUsize) -> StreamBuilder<true> {
+        let max_size = NonZeroU64::new(max_size.get() as u64)
+            .expect("Is already guaranteed to be nonzero");
         self.storage = Some(StorageChoice::Mem(CapacityBounds::Limited(max_size)));
-        self
+        StreamBuilder {
+            url: self.url,
+            storage: self.storage,
+            initial_prefetch: self.initial_prefetch,
+            restriction: self.restriction,
+        }
     }
-    pub fn to_disk(mut self, path: PathBuf) -> Self {
+    pub fn to_disk(mut self, path: PathBuf) -> StreamBuilder<true> {
         self.storage = Some(StorageChoice::Disk(path));
-        self
+        StreamBuilder {
+            url: self.url,
+            storage: self.storage,
+            initial_prefetch: self.initial_prefetch,
+            restriction: self.restriction,
+        }
     }
+}
+
+impl<const STORAGE_SET: bool> StreamBuilder<STORAGE_SET> {
     /// default is 10_000 bytes
     pub fn with_prefetch(mut self, prefetch: usize) -> Self {
         self.initial_prefetch = prefetch;
@@ -61,7 +83,9 @@ impl StreamBuilder {
         self.restriction = Some(allowed_network);
         self
     }
+}
 
+impl StreamBuilder<true> {
     #[tracing::instrument]
     pub(crate) fn start_managed(
         self,
@@ -88,9 +112,10 @@ impl StreamBuilder {
         impl Future<Output = Result<Canceld, Error>> + Send + 'static,
     ) {
         let (seek_tx, seek_rx) = mpsc::channel(12);
+        let stream_size = Size::default();
         let store = match self.storage.expect("must chose storage option") {
-            StorageChoice::Disk(path) => SwitchableStore::new_disk_backed(path),
-            StorageChoice::Mem(capacity) => SwitchableStore::new_mem_backed(capacity),
+            StorageChoice::Disk(path) => SwitchableStore::new_disk_backed(path, stream_size.clone()),
+            StorageChoice::Mem(capacity) => SwitchableStore::new_mem_backed(capacity, stream_size.clone()),
         };
 
         let handle = Handle {
@@ -99,7 +124,7 @@ impl StreamBuilder {
             seek_tx,
             store: store.clone(),
         };
-        let stream_task = task::new(self.url, store.clone(), seek_rx, self.restriction);
+        let stream_task = task::new(self.url, store.clone(), seek_rx, self.restriction, stream_size);
         (handle, stream_task)
     }
 }

@@ -1,8 +1,5 @@
-pub const CAPACITY: Option<std::num::NonZeroU64> = NonZeroU64::new(20_000_000);
-
 use derivative::Derivative;
 use std::collections::{TryReserveError, VecDeque};
-use std::num::NonZeroU64;
 use std::ops::Range;
 
 use rangemap::set::RangeSet;
@@ -79,7 +76,7 @@ impl Memory {
     }
 
     /// we must only get here if there is data in the mem store for us
-    pub(super) fn read_blocking_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
+    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
         debug_assert!(self.range.start <= pos);
 
         let relative_pos = pos - self.range.start;

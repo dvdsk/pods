@@ -54,7 +54,8 @@ fn seek_from_all_sides_works() {
     let prefetch = 0;
     let test_done = Arc::new(Notify::new());
 
-    let (runtime_thread, mut handle) = setup_reader_test(&test_done, test_file_size);
+    let (runtime_thread, mut handle) =
+        setup_reader_test(&test_done, test_file_size, memory_buffer_size, prefetch);
 
     let mut reader = handle.try_get_reader().unwrap();
     assert_pos(&mut reader, 0);
@@ -71,6 +72,8 @@ fn seek_from_all_sides_works() {
 fn setup_reader_test(
     test_done: &Arc<Notify>,
     test_file_size: u32,
+    memory_buffer_size: usize,
+    prefetch: usize
 ) -> (thread::JoinHandle<()>, StreamHandle) {
     let (runtime_thread, handle) = {
         let test_done = test_done.clone();
@@ -81,7 +84,10 @@ fn setup_reader_test(
                 setup_tracing();
                 let (uri, server) = server(test_file_size as u64).await;
 
-                let (handle, stream) = StreamBuilder::new(uri).start();
+                let (handle, stream) = StreamBuilder::new(uri)
+                    .to_limited_mem(memory_buffer_size.try_into().unwrap())
+                    .with_prefetch(prefetch)
+                    .start();
                 tx.send(handle).unwrap();
 
                 let server = server.map(Res::ServerCrashed);

@@ -132,7 +132,7 @@ async fn pre_migrate_to_disk(
         let len = missing_on_disk.start - missing_on_disk.end;
         let len = len.min(4096);
         buf.resize(len as usize, 0u8);
-        src.read_blocking_at(&mut buf, missing_on_disk.start);
+        src.read_at(&mut buf, missing_on_disk.start).await;
         drop(src);
 
         target.write_at(&buf, missing_on_disk.start).await;
@@ -151,7 +151,7 @@ async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), Mi
         let len = missing_on_disk.start - missing_on_disk.end;
         let len = len.min(4096);
         buf.resize(len as usize, 0u8);
-        curr.read_blocking_at(&mut buf, missing_on_disk.start);
+        curr.read_at(&mut buf, missing_on_disk.start).await;
 
         target.write_at(&buf, missing_on_disk.start).await;
         on_disk.insert(missing_on_disk);

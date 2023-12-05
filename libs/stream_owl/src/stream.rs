@@ -2,14 +2,14 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
+use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::instrument;
-use derivative::Derivative;
 
 use crate::http_client;
 use crate::manager::Command;
 use crate::network::Bandwidth;
-use crate::reader::Reader;
+use crate::reader::{CouldNotCreateRuntime, Reader};
 use crate::store::{MigrationHandle, SwitchableStore};
 
 mod builder;
@@ -48,14 +48,17 @@ pub struct ManagedHandle {
 #[derivative(Debug)]
 pub struct Handle {
     prefetch: usize,
-    #[derivative(Debug="ignore")]
+    #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
     store: SwitchableStore,
     reader_in_use: Arc<Mutex<()>>,
 }
 
-#[derive(Debug, Clone)]
-pub struct ReaderInUse;
+#[derive(Debug)]
+pub enum GetReaderError {
+    ReaderInUse,
+    CreationFailed(CouldNotCreateRuntime),
+}
 
 impl ManagedHandle {
     pub fn set_priority(&mut self, _arg: i32) {
@@ -69,7 +72,7 @@ impl ManagedHandle {
     pub fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
         self.handle.limit_bandwidth(bandwidth)
     }
-    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
+    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
         self.handle.try_get_reader()
     }
     pub fn get_downloaded(&self) -> () {
@@ -88,15 +91,19 @@ impl Handle {
         todo!();
     }
 
-    #[instrument(level="debug", ret, err(Debug))]
-    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, ReaderInUse> {
-        let guard = self.reader_in_use.try_lock().map_err(|_| ReaderInUse)?;
-        Ok(Reader::new(
+    #[instrument(level = "debug", ret, err(Debug))]
+    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
+        let guard = self
+            .reader_in_use
+            .try_lock()
+            .map_err(|_| GetReaderError::ReaderInUse)?;
+        Reader::new(
             guard,
             self.prefetch,
             self.seek_tx.clone(),
             self.store.clone(),
-        ))
+        )
+        .map_err(GetReaderError::CreationFailed)
     }
 
     pub fn get_downloaded(&self) -> () {

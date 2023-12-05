@@ -9,7 +9,9 @@ impl VecDequeExt for VecDeque<u8> {
     /// You can provide an optional start to skip the first n_items in the vecdeque.
     ///
     /// # Panic:
+    /// When `start` is beyond self.
     fn copy_starting_at(&self, start: usize, target: &mut [u8]) -> usize {
+        debug_assert!(start < self.len(), "start should not be beyond self");
         let (front, back) = self.as_slices();
         if front.len() >= start {
             let n_to_copy = front.len() - start;
@@ -36,9 +38,14 @@ impl VecDequeExt for VecDeque<u8> {
 
 #[macro_export]
 macro_rules! vecd {
+    [] => {
+        compile_error!("Use Vecdeque::new()");
+    };
+
     [$elem:expr; $n:expr] => {
         {
-            let mut dvec = VecDeque::with_capacity($n);
+            let mut dvec = VecDeque::new();
+            dvec.try_reserve_exact($n).expect("Could not allocate VecDeque");
             for _ in 0..$n {
                 dvec.push_back($elem);
             }
@@ -138,5 +145,13 @@ mod tests {
             buffer.copy_starting_at(0, &mut target);
             assert_eq!(target, [1, 2]);
         }
+    }
+
+    #[test]
+    #[should_panic]
+    fn empty_vecd() {
+        let mut target = [0u8; 4];
+        let buffer = VecDeque::new();
+        buffer.copy_starting_at(4, &mut target);
     }
 }

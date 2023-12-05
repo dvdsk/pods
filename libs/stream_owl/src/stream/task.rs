@@ -5,10 +5,12 @@ use std::sync::Arc;
 use crate::http_client::ClientStreamingAll;
 use crate::http_client::ClientStreamingPartial;
 use crate::http_client::Error as HttpError;
+use crate::http_client::Size;
 use crate::http_client::StreamingClient;
 use crate::network::Network;
 use crate::store::SwitchableStore;
 use crate::Appender;
+
 use futures::FutureExt;
 use tokio::sync::mpsc;
 use tracing::info;
@@ -68,15 +70,21 @@ pub(crate) async fn new(
     storage: SwitchableStore,
     mut seek_rx: mpsc::Receiver<u64>,
     restriction: Option<Network>,
+    stream_size: Size,
 ) -> Result<Canceld, Error> {
     let mut start_pos = 0;
     let chunk_size = 1_000;
 
     let mut client = loop {
         let receive_seek = seek_rx.recv().map(Res1::Seek);
-        let build_client =
-            StreamingClient::new(url.clone(), restriction.clone(), start_pos, chunk_size)
-                .map(Res1::NewClient);
+        let build_client = StreamingClient::new(
+            url.clone(),
+            restriction.clone(),
+            start_pos,
+            chunk_size,
+            stream_size.clone(),
+        )
+        .map(Res1::NewClient);
 
         match (build_client, receive_seek).race().await {
             Res1::NewClient(client) => break client?,
@@ -85,6 +93,7 @@ pub(crate) async fn new(
         }
     };
 
+    client.stream_size();
     let appender = StoreAppender {
         store: storage,
         pos: Arc::new(AtomicU64::new(start_pos)),
@@ -120,10 +129,14 @@ pub(crate) async fn new(
             Res2::Seek(Some(relevant_pos)) => relevant_pos,
             Res2::Seek(None) => return Ok(Canceld),
             Res2::Write(Err(e)) => return Err(Error::HttpClient(e)),
-            Res2::Write(Ok(())) => match seek_rx.recv().await {
-                Some(pos) => pos,
-                None => return Ok(Canceld),
-            },
+            Res2::Write(Ok(())) => {
+                info!("At end of stream, waiting for seek");
+                stream_size.mark_stream_end(appender.pos());
+                match seek_rx.recv().await {
+                    Some(pos) => pos,
+                    None => return Ok(Canceld),
+                }
+            }
         };
 
         // do not concurrently wait for seeks, since we probably wont
@@ -220,7 +233,7 @@ async fn handle_partial_stream(
         .await
         .map_err(Error::HttpClient)?;
 
-    if Some(appender.pos()) >= reader.size_hint().bytes {
+    if Some(appender.pos()) >= reader.stream_size().known() {
         info!("at end of stream: waiting for next seek");
         let () = std::future::pending().await;
         unreachable!()

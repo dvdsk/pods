@@ -1,17 +1,17 @@
+use derivative::Derivative;
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use tracing::debug;
-use derivative::Derivative;
 
 use crate::network::Network;
 mod io;
 mod read;
 use read::Reader;
 mod size;
-use size::Size;
+pub(crate) use size::Size;
 
 mod connection;
 use connection::Connection;
@@ -36,7 +36,7 @@ pub enum Error {
     Connecting(std::io::Error),
     #[error("Could not resolve dns, resolve error, {0}")]
     DnsResolve(#[from] hickory_resolver::error::ResolveError),
-    #[error("Could not resolve dns, no ip adresses for server")]
+    #[error("Could not resolve dns, no ip addresses for server")]
     DnsEmpty,
     #[error("Url had no server part")]
     UrlWithoutHost,
@@ -67,7 +67,7 @@ pub enum Error {
     Handshake(hyper::Error),
     #[error("Could not read response body: {0}")]
     ReadingBody(hyper::Error),
-    #[error("Could now write the recieved data to storage: {0}")]
+    #[error("Could now write the received data to storage: {0}")]
     WritingData(std::io::Error),
     #[error("Could not throw away body: {0}")]
     EmptyingBody(hyper::Error),
@@ -134,8 +134,8 @@ impl ClientStreamingPartial {
         Reader::PartialData(InnerReader::new(stream, inner, size))
     }
 
-    pub(crate) fn content_size(&self) -> Option<u64> {
-        self.size.bytes
+    pub(crate) fn stream_size(&self) -> Size {
+        self.size.clone()
     }
 
     pub(crate) fn builder(&self) -> ClientBuilder {
@@ -143,7 +143,7 @@ impl ClientStreamingPartial {
             restriction: self.inner.restriction.clone(),
             url: self.inner.url.clone(),
             cookies: self.inner.cookies.clone(),
-            size: self.size,
+            size: self.size.clone(),
         }
     }
 }
@@ -170,12 +170,12 @@ impl ClientStreamingAll {
             restriction: self.inner.restriction.clone(),
             url: self.inner.url.clone(),
             cookies: self.inner.cookies.clone(),
-            size: self.size,
+            size: self.size.clone(),
         }
     }
 
-    pub(crate) fn content_size(&self) -> Option<u64> {
-        self.size.bytes
+    pub(crate) fn stream_size(&self) -> Size {
+        self.size.clone()
     }
 }
 
@@ -185,7 +185,7 @@ pub(crate) struct InnerClient {
     host: HeaderValue,
     restriction: Option<Network>,
     url: hyper::Uri,
-    #[derivative(Debug="ignore")]
+    #[derivative(Debug = "ignore")]
     conn: Connection,
     cookies: Cookies,
 }
@@ -297,36 +297,37 @@ impl StreamingClient {
         restriction: Option<Network>,
         init_start: u64,
         init_len: u64,
+        size: Size,
     ) -> Result<Self, Error> {
         ClientBuilder {
             restriction,
             url,
             cookies: Cookies::new(),
-            size: Size::default(),
+            size,
         }
         .connect(init_start, init_len)
         .await
     }
 
-    pub(crate) fn content_size(&self) -> Option<u64> {
+    pub(crate) fn stream_size(&self) -> Size {
         match self {
-            StreamingClient::Partial(client) => client.content_size(),
-            StreamingClient::All(client) => client.content_size(),
+            StreamingClient::Partial(client) => client.stream_size(),
+            StreamingClient::All(client) => client.stream_size(),
         }
     }
 }
 
 impl Client {
-    #[tracing::instrument(level="debug", err, ret)]
+    #[tracing::instrument(level = "debug", err, ret)]
     pub(crate) async fn try_get_range(
         mut self,
         start: u64,
         chunk_size: u64,
     ) -> Result<StreamingClient, Error> {
-        assert!(Some(start) < self.content_size());
+        assert!(Some(start) < self.stream_size().known());
         let end = start + chunk_size;
 
-        let range = if Some(end) >= self.content_size() {
+        let range = if Some(end) >= self.stream_size().known() {
             format!("bytes={start}-") // download till end of stream
         } else {
             format!("bytes={start}-{end}")
@@ -351,8 +352,8 @@ impl Client {
         }
     }
 
-    pub(crate) fn content_size(&self) -> Option<u64> {
-        self.size.bytes
+    pub(crate) fn stream_size(&self) -> Size {
+        self.size.clone()
     }
 }
 
@@ -388,8 +389,8 @@ mod tests {
     #[tokio::test]
     async fn get_stream_client() {
         let url = hyper::Uri::from_static(FEED_URL);
-        let client = StreamingClient::new(url, None, 0, 1024).await.unwrap();
-        assert!(client.content_size().is_some());
+        let client = StreamingClient::new(url, None, 0, 1024, Size::default()).await.unwrap();
+        assert!(client.stream_size().known().is_some());
 
         match client {
             StreamingClient::Partial(_) => (),
@@ -411,7 +412,7 @@ mod tests {
     async fn state_machine_works() {
         const CHUNK_SIZE: u64 = 1_000_000; // 1MB
         let url = hyper::Uri::from_static(FEED_URL);
-        let mut client = StreamingClient::new(url, None, 0, CHUNK_SIZE)
+        let mut client = StreamingClient::new(url, None, 0, CHUNK_SIZE, Size::default())
             .await
             .unwrap();
         let mut buffer = Vec::new();
@@ -419,7 +420,8 @@ mod tests {
             match client {
                 StreamingClient::Partial(client_with_stream) => {
                     let content_size = client_with_stream
-                        .content_size()
+                        .stream_size()
+                        .known()
                         .expect("test stream should provide size");
                     let mut reader = client_with_stream.into_reader();
                     reader

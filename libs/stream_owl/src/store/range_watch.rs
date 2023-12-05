@@ -17,7 +17,7 @@ pub(super) struct Receiver {
 impl Clone for Receiver {
     fn clone(&self) -> Self {
         Self {
-            // field order matters! its critical that subscribe happens before 
+            // field order matters! its critical that subscribe happens before
             // self.last.clone otherwise we could miss a message
             rx: self.subscribe_handle.subscribe(),
             subscribe_handle: self.subscribe_handle.clone(),
@@ -45,11 +45,12 @@ pub(super) fn channel() -> (Sender, Receiver) {
 }
 
 impl Receiver {
+    /// blocks till at least one byte is available at `needed_pos`.
     #[instrument(level = "trace")]
-    pub(super) fn blocking_wait_for(&mut self, needed_pos: u64) {
-        while self.last.end < needed_pos {
+    pub(super) async fn wait_for(&mut self, needed_pos: u64) {
+        while self.last.end < needed_pos + 1 {
             trace!("blocking until range is available");
-            match self.rx.blocking_recv() {
+            match self.rx.recv().await {
                 Err(RecvError::Closed) => {
                     unreachable!("Receiver and Sender should drop at the same time")
                 }
@@ -64,7 +65,11 @@ impl Receiver {
 }
 
 impl Sender {
+    #[instrument(level = "info", skip(self))]
     pub(super) fn send(&self, range: Range<u64>) {
-        let _ignore_no_receivers = self.tx.send(range);
+        tracing::trace!("sending new range available: {range:?}");
+        if let Err(e) = self.tx.send(range) {
+            tracing::warn!("Could not send new range: {e:?}");
+        }
     }
 }

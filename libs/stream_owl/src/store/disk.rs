@@ -23,7 +23,7 @@ impl Disk {
         todo!()
     }
 
-    pub(super) fn read_blocking_at(&self, _buf: &mut [u8], _pos: u64) -> usize {
+    pub(super) async fn read_at(&self, _buf: &mut [u8], _pos: u64) -> usize {
         todo!()
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {

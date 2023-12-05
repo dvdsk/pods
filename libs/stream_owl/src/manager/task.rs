@@ -113,10 +113,12 @@ fn add_stream(
     restriction: Option<Network>,
     initial_prefetch: usize,
 ) {
-    let mut stream = StreamBuilder::new(url);
-    if let Some(path) = to_disk {
-        stream = stream.to_disk(path);
-    }
+    let stream = StreamBuilder::new(url);
+    let mut stream = if let Some(path) = to_disk {
+        stream.to_disk(path)
+    } else {
+        stream.to_mem()
+    };
     if let Some(allowed) = restriction {
         stream = stream.with_network_restriction(allowed)
     }

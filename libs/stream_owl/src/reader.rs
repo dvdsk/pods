@@ -3,10 +3,11 @@ use std::io::{self, Read, Seek};
 use std::sync::MutexGuard;
 
 use derivative::Derivative;
+use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tracing::{debug, instrument};
 
-use crate::store::SwitchableStore;
+use crate::store::{ReadResult, SwitchableStore};
 use crate::{vecd, vecdeque::VecDequeExt};
 
 #[derive(Derivative, Clone)]
@@ -14,7 +15,9 @@ use crate::{vecd, vecdeque::VecDequeExt};
 struct Prefetch {
     #[derivative(Debug = "ignore")]
     buf: VecDeque<u8>,
-    buf_pos: u64,
+    /// Position in the stream of the last byte 
+    /// in the prefetch buffer
+    buf_ends_at: u64,
     active: bool,
 }
 
@@ -23,39 +26,83 @@ impl Prefetch {
     fn new(amount: usize) -> Self {
         Self {
             buf: vecd![0; amount],
-            buf_pos: 0,
+            buf_ends_at: 0,
             active: true,
         }
     }
 
+    fn reset(&mut self) {
+        self.buf.clear();
+        self.buf_ends_at = 0;
+        self.active = true;
+    }
+
     /// if needed do some prefetching
     #[instrument(level = "debug", ret)]
-    fn perform_if_needed(&mut self, store: &mut SwitchableStore, curr_pos: u64, nread: usize) {
+    async fn perform_if_needed(
+        &mut self,
+        store: &mut SwitchableStore,
+        curr_pos: u64,
+        already_read: usize,
+    ) {
         if !self.active {
             return;
         }
 
-        if nread > self.buf.len() {
+        if already_read >= self.buf.len() {
             return;
         }
 
         debug!("prefetching");
-        let (_used, free) = self.buf.as_mut_slices();
-        store.read_blocking_at(free, curr_pos);
+        assert_eq!(self.buf_ends_at, 0);
+        let mut to_prefetch = self.buf.len() - already_read;
+        if let Some(stream_size) = store.size().known() {
+            to_prefetch = to_prefetch.min((stream_size - curr_pos) as usize);
+        }
+
+        let (a, b) = self.buf.as_mut_slices();
+        while self.buf_ends_at as usize <= a.len() {
+            let start = self.buf_ends_at as usize;
+            let end = start + to_prefetch.min(a.len() - start);
+            let free = &mut a[start..end];
+            let ReadResult::ReadN(bytes) = store.read_at(free, curr_pos + self.buf_ends_at).await
+            else {
+                debug!("Prefetch aborted, end of stream reached");
+                return; // next call to read_at will signal eof
+            };
+
+            self.buf_ends_at += bytes as u64;
+            to_prefetch -= bytes;
+        }
+
+        while !self.buf_ends_at as usize >= a.len() + b.len() {
+            let start = self.buf_ends_at as usize - a.len();
+            let end = start + to_prefetch.min(b.len() - start);
+            let free = &mut b[start..end];
+            let ReadResult::ReadN(bytes) = store.read_at(free, curr_pos + self.buf_ends_at).await
+            else {
+                debug!("Prefetch aborted, end of stream reached");
+                return; // next call to read_at will signal eof
+            };
+
+            self.buf_ends_at += bytes as u64;
+            to_prefetch -= bytes;
+        }
         self.active = false
     }
 
     #[instrument(level = "trace", ret)]
     fn read_from_prefetched(&mut self, buf: &mut [u8], curr_pos: u64) -> usize {
-        let relative_pos = curr_pos - self.buf_pos;
+        let relative_pos = curr_pos + self.buf_ends_at - self.buf.len() as u64;
         let n_copied = self.buf.copy_starting_at(relative_pos as usize, buf);
         n_copied
     }
 }
 
-#[derive(Derivative, Clone)]
+#[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Reader {
+    runtime: Runtime,
     prefetch: Prefetch,
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
@@ -64,20 +111,24 @@ pub struct Reader {
     curr_pos: u64,
 }
 
+#[derive(Debug)]
+pub struct CouldNotCreateRuntime(io::Error);
+
 impl Reader {
     pub(crate) fn new(
         _guard: MutexGuard<()>,
         prefetch: usize,
         seek_tx: mpsc::Sender<u64>,
         store: SwitchableStore,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, CouldNotCreateRuntime> {
+        Ok(Self {
+            runtime: Runtime::new().map_err(CouldNotCreateRuntime)?,
             prefetch: Prefetch::new(prefetch),
             seek_tx,
             last_seek: 0,
             store,
             curr_pos: 0,
-        }
+        })
     }
 
     fn seek_in_stream(&mut self, pos: u64) -> io::Result<()> {
@@ -105,6 +156,7 @@ impl Seek for Reader {
             io::SeekFrom::End(bytes) => self
                 .store
                 .size()
+                .known()
                 .ok_or(size_unknown())?
                 .saturating_sub(bytes as u64),
             io::SeekFrom::Current(bytes) => self.curr_pos + bytes as u64,
@@ -113,7 +165,7 @@ impl Seek for Reader {
         if !self.store.gapless_from_till(self.last_seek, pos) {
             self.seek_in_stream(pos)?;
             self.last_seek = pos;
-            self.prefetch.active = true;
+            self.prefetch.reset();
         }
 
         Ok(pos)
@@ -127,13 +179,19 @@ impl Read for Reader {
         let n_read1 = self.prefetch.read_from_prefetched(buf, self.curr_pos);
         self.curr_pos += n_read1 as u64;
 
-        let n_read2 = self
-            .store
-            .read_blocking_at(&mut buf[n_read1..], self.curr_pos);
-        self.curr_pos += n_read2 as u64;
+        let n_read2 = self.runtime.block_on(async {
+            let res = self.store.read_at(&mut buf[n_read1..], self.curr_pos).await;
+            let ReadResult::ReadN(bytes) = res else {
+                return 0; // returns out of block_on closure, not function
+            };
+            self.curr_pos += bytes as u64;
+            tracing::info!("actual read: {bytes}");
 
-        self.prefetch
-            .perform_if_needed(&mut self.store, self.curr_pos, n_read1 + n_read2);
+            self.prefetch
+                .perform_if_needed(&mut self.store, self.curr_pos, n_read1 + bytes)
+                .await;
+            bytes
+        });
         Ok(n_read1 + n_read2)
     }
 }
