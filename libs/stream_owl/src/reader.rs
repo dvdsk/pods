@@ -1,103 +1,16 @@
-use std::collections::VecDeque;
 use std::io::{self, Read, Seek};
 use std::sync::MutexGuard;
 
 use derivative::Derivative;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
-use tracing::{debug, instrument};
+use tracing::instrument;
 
 use crate::store::{ReadResult, SwitchableStore};
-use crate::{vecd, vecdeque::VecDequeExt};
 
-#[derive(Derivative, Clone)]
-#[derivative(Debug)]
-struct Prefetch {
-    #[derivative(Debug = "ignore")]
-    buf: VecDeque<u8>,
-    /// Position in the stream of the last byte 
-    /// in the prefetch buffer
-    buf_ends_at: u64,
-    active: bool,
-}
+mod prefetch;
+use prefetch::Prefetch;
 
-impl Prefetch {
-    /// active by default, to disable just pass in 0 as amount
-    fn new(amount: usize) -> Self {
-        Self {
-            buf: vecd![0; amount],
-            buf_ends_at: 0,
-            active: true,
-        }
-    }
-
-    fn reset(&mut self) {
-        self.buf.clear();
-        self.buf_ends_at = 0;
-        self.active = true;
-    }
-
-    /// if needed do some prefetching
-    #[instrument(level = "debug", ret)]
-    async fn perform_if_needed(
-        &mut self,
-        store: &mut SwitchableStore,
-        curr_pos: u64,
-        already_read: usize,
-    ) {
-        if !self.active {
-            return;
-        }
-
-        if already_read >= self.buf.len() {
-            return;
-        }
-
-        debug!("prefetching");
-        assert_eq!(self.buf_ends_at, 0);
-        let mut to_prefetch = self.buf.len() - already_read;
-        if let Some(stream_size) = store.size().known() {
-            to_prefetch = to_prefetch.min((stream_size - curr_pos) as usize);
-        }
-
-        let (a, b) = self.buf.as_mut_slices();
-        while self.buf_ends_at as usize <= a.len() {
-            let start = self.buf_ends_at as usize;
-            let end = start + to_prefetch.min(a.len() - start);
-            let free = &mut a[start..end];
-            let ReadResult::ReadN(bytes) = store.read_at(free, curr_pos + self.buf_ends_at).await
-            else {
-                debug!("Prefetch aborted, end of stream reached");
-                return; // next call to read_at will signal eof
-            };
-
-            self.buf_ends_at += bytes as u64;
-            to_prefetch -= bytes;
-        }
-
-        while !self.buf_ends_at as usize >= a.len() + b.len() {
-            let start = self.buf_ends_at as usize - a.len();
-            let end = start + to_prefetch.min(b.len() - start);
-            let free = &mut b[start..end];
-            let ReadResult::ReadN(bytes) = store.read_at(free, curr_pos + self.buf_ends_at).await
-            else {
-                debug!("Prefetch aborted, end of stream reached");
-                return; // next call to read_at will signal eof
-            };
-
-            self.buf_ends_at += bytes as u64;
-            to_prefetch -= bytes;
-        }
-        self.active = false
-    }
-
-    #[instrument(level = "trace", ret)]
-    fn read_from_prefetched(&mut self, buf: &mut [u8], curr_pos: u64) -> usize {
-        let relative_pos = curr_pos + self.buf_ends_at - self.buf.len() as u64;
-        let n_copied = self.buf.copy_starting_at(relative_pos as usize, buf);
-        n_copied
-    }
-}
 
 #[derive(Derivative)]
 #[derivative(Debug)]
