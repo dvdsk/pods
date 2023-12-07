@@ -48,8 +48,8 @@ impl Receiver {
     /// blocks till at least one byte is available at `needed_pos`.
     #[instrument(level = "trace")]
     pub(super) async fn wait_for(&mut self, needed_pos: u64) {
-        while self.last.end < needed_pos + 1 {
-            trace!("blocking until range is available");
+        while !self.last.contains(&needed_pos) {
+            trace!("blocking until range available");
             match self.rx.recv().await {
                 Err(RecvError::Closed) => {
                     unreachable!("Receiver and Sender should drop at the same time")

@@ -35,6 +35,27 @@ fn resume_when_connection_breaks_randomly() {
     todo!()
 }
 
+#[test]
+fn debug() {
+    let test_file_size = 10_000u32;
+    let memory_buffer_size = 1000;
+    let prefetch = 0;
+    let test_done = Arc::new(Notify::new());
+
+    let (runtime_thread, mut handle) =
+        setup_reader_test(&test_done, test_file_size, memory_buffer_size, prefetch);
+
+    let mut buffer = vec![0; 20];
+    let mut reader = handle.try_get_reader().unwrap();
+    // reader.read_exact(&mut buffer).unwrap();
+    // dbg!(&buffer);
+    reader.seek(std::io::SeekFrom::End(40)).unwrap();
+    reader.read_exact(&mut buffer).unwrap();
+    dbg!(buffer);
+    test_done.notify_one();
+    runtime_thread.join().unwrap();
+}
+
 #[derive(Debug)]
 enum Res {
     ServerCrashed(Result<Result<(), std::io::Error>, JoinError>),
@@ -61,7 +82,8 @@ fn seek_from_all_sides_works() {
     assert_pos(&mut reader, 0);
     reader.seek(std::io::SeekFrom::Start(40)).unwrap();
     assert_pos(&mut reader, 40);
-    reader.seek(std::io::SeekFrom::Current(40)).unwrap();
+    // note reading 4 bytes here shift curr poss by 4
+    reader.seek(std::io::SeekFrom::Current(36)).unwrap();
     assert_pos(&mut reader, 80);
     reader.seek(std::io::SeekFrom::End(40)).unwrap();
     assert_pos(&mut reader, test_file_size - 40);
@@ -73,7 +95,7 @@ fn setup_reader_test(
     test_done: &Arc<Notify>,
     test_file_size: u32,
     memory_buffer_size: usize,
-    prefetch: usize
+    prefetch: usize,
 ) -> (thread::JoinHandle<()>, StreamHandle) {
     let (runtime_thread, handle) = {
         let test_done = test_done.clone();
@@ -108,13 +130,11 @@ fn setup_reader_test(
 #[instrument(skip(reader))]
 fn assert_pos(reader: &mut Reader, bytes_from_start: u32) {
     let mut numb_buf = [0, 0, 0, 0];
-    info!("hi");
     reader.read_exact(&mut numb_buf).unwrap();
-    info!("hi");
     let numb = u32::from_ne_bytes(numb_buf);
-    let correct = bytes_from_start / std::mem::size_of::<u32>() as u32;
+    let correct = bytes_from_start;
     assert_eq!(
         numb, correct,
-        "expected: {correct} got {numb} at {bytes_from_start} bytes from start"
+        "expected: {correct} got {numb} at {bytes_from_start} bytes from start.\nRaw bytes: {numb_buf:?}"
     );
 }

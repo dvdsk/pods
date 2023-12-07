@@ -1,3 +1,4 @@
+use futures::FutureExt;
 /// Tracks the size of data send via the http stream.
 ///
 /// No benchmarks motivating these optimizations, they are just for fun.
@@ -10,6 +11,8 @@ use hyper::body::Incoming;
 use hyper::Response;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 
 struct SizeInner {
@@ -78,9 +81,11 @@ impl Default for Size {
     }
 }
 
+pub(crate) struct Timeout;
+
 impl Size {
     fn set(&self, var: SizeVariant) {
-        tracing::debug!("setting stream size to: {var:?}");
+        tracing::debug!("set stream size to: {var:?}");
         let new = var.encode();
         let previous = self.0.value.swap(new, Ordering::Release);
         if previous != new {
@@ -127,12 +132,26 @@ impl Size {
         }
     }
 
-    pub(crate) fn known(&self) -> Option<u64> {
-        if let SizeVariant::Known(bytes) = self.get() {
-            Some(bytes)
-        } else {
-            None
+    pub(crate) fn wait_for_known(&self, rt: &mut Runtime, timeout: Duration) -> Result<u64, Timeout> {
+        let _guard = rt.enter();
+        async fn get_size(size: &Size) -> u64 {
+            size.0.notify.notified().await;
+            size.known().unwrap()
         }
+        let fut = tokio::time::timeout(timeout, get_size(self));
+        rt.block_on(fut).map_err(|_| Timeout)
+    }
+
+    pub(crate) fn known(&self) -> Option<u64> {
+        match self.get() {
+            SizeVariant::Unknown => None,
+            SizeVariant::Known(size) => Some(size),
+            SizeVariant::StreamEnded(size) => Some(size),
+        }
+    }
+
+    pub(crate) fn is_known(&self) -> bool {
+        self.known().is_some()
     }
 
     pub(crate) async fn eof_smaller_then(&self, pos: u64) {

@@ -35,7 +35,6 @@ fn test_data(bytes: u32) -> Vec<u8> {
     (0..bytes)
         .into_iter()
         .step_by(4)
-        .map(|i| i * 4)
         .flat_map(|n| n.to_ne_bytes())
         .collect()
 }

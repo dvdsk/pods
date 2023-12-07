@@ -1,5 +1,6 @@
 use std::io::{self, Read, Seek};
 use std::sync::MutexGuard;
+use std::time::{Duration, Instant};
 
 use derivative::Derivative;
 use tokio::runtime::Runtime;
@@ -11,16 +12,16 @@ use crate::store::{ReadResult, SwitchableStore};
 mod prefetch;
 use prefetch::Prefetch;
 
-
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Reader {
-    runtime: Runtime,
+    rt: Runtime,
     prefetch: Prefetch,
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
     last_seek: u64,
     store: SwitchableStore,
+    created: Instant,
     curr_pos: u64,
 }
 
@@ -33,9 +34,11 @@ impl Reader {
         prefetch: usize,
         seek_tx: mpsc::Sender<u64>,
         store: SwitchableStore,
+        created: Instant,
     ) -> Result<Self, CouldNotCreateRuntime> {
         Ok(Self {
-            runtime: Runtime::new().map_err(CouldNotCreateRuntime)?,
+            rt: Runtime::new().map_err(CouldNotCreateRuntime)?,
+            created,
             prefetch: Prefetch::new(prefetch),
             seek_tx,
             last_seek: 0,
@@ -62,17 +65,26 @@ fn stream_ended(_: tokio::sync::mpsc::error::SendError<u64>) -> io::Error {
 
 impl Seek for Reader {
     // this moves the seek in the stream
-    #[instrument(level = "debug", ret)]
+    #[instrument(level = "debug", ret, err)]
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+        let elapsed = self.created.elapsed();
+        let just_started = elapsed < Duration::from_secs(1);
+
         let pos = match pos {
             io::SeekFrom::Start(bytes) => bytes,
-            io::SeekFrom::End(bytes) => self
-                .store
-                .size()
-                .known()
-                .ok_or(size_unknown())?
-                .saturating_sub(bytes as u64),
             io::SeekFrom::Current(bytes) => self.curr_pos + bytes as u64,
+            io::SeekFrom::End(bytes) => {
+                let size = match self.store.size().known() {
+                    Some(size) => size,
+                    None if just_started => self
+                        .store
+                        .size()
+                        .wait_for_known(&mut self.rt, Duration::from_secs(1) - elapsed)
+                        .map_err(|_timeout| size_unknown())?,
+                    None => Err(size_unknown())?,
+                };
+                size.saturating_sub(bytes as u64)
+            }
         };
 
         if !self.store.gapless_from_till(self.last_seek, pos) {
@@ -81,6 +93,7 @@ impl Seek for Reader {
             self.prefetch.reset();
         }
 
+        self.curr_pos = pos;
         Ok(pos)
     }
 }
@@ -92,7 +105,7 @@ impl Read for Reader {
         let n_read1 = self.prefetch.read_from_prefetched(buf, self.curr_pos);
         self.curr_pos += n_read1 as u64;
 
-        let n_read2 = self.runtime.block_on(async {
+        let n_read2 = self.rt.block_on(async {
             let res = self.store.read_at(&mut buf[n_read1..], self.curr_pos).await;
             let ReadResult::ReadN(bytes) = res else {
                 return 0; // returns out of block_on closure, not function

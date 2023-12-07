@@ -1,6 +1,7 @@
 use derivative::Derivative;
 use std::collections::{TryReserveError, VecDeque};
 use std::ops::Range;
+use tracing::{trace, debug};
 
 use rangemap::set::RangeSet;
 
@@ -52,10 +53,11 @@ impl Memory {
 
     /// `pos` must be the position of the first byte in buf in the stream.
     /// For the first write at the start this should be 0
-    #[tracing::instrument(level="trace", skip(self, buf), fields(buf_len = buf.len()))]
+    #[tracing::instrument(level="trace", skip(buf), fields(buf_len = buf.len()))]
     pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
         assert!(!buf.is_empty());
         if pos != self.range.end {
+            debug!("discontinuity: new write is after end of current data");
             self.buffer.clear();
             self.range.start = pos;
         }
@@ -77,7 +79,7 @@ impl Memory {
 
     /// we must only get here if there is data in the mem store for us
     pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
-        debug_assert!(self.range.start <= pos);
+        debug_assert!(pos >= self.range.start, "No data in store at offset: {pos}");
 
         let relative_pos = pos - self.range.start;
         let n_copied = self.buffer.copy_starting_at(relative_pos as usize, buf);
@@ -109,7 +111,6 @@ impl Memory {
     pub(super) fn n_supported_ranges(&self) -> usize {
         1
     }
-
     pub(super) fn into_parts(self) -> (range_watch::Sender, Capacity) {
         let Self {
             capacity, range_tx, ..

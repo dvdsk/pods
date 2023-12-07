@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
@@ -51,6 +52,7 @@ pub struct Handle {
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
     store: SwitchableStore,
+    created: Instant,
     reader_in_use: Arc<Mutex<()>>,
 }
 
@@ -102,6 +104,7 @@ impl Handle {
             self.prefetch,
             self.seek_tx.clone(),
             self.store.clone(),
+            self.created.clone(),
         )
         .map_err(GetReaderError::CreationFailed)
     }
