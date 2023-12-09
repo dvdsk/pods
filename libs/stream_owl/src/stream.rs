@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
@@ -37,10 +36,13 @@ impl Id {
     }
 }
 
+#[derive(Derivative)]
+#[derivative(Debug)]
 pub struct ManagedHandle {
     /// allows the handle to send a message
     /// to the manager to drop the streams future
     /// or increase/decrease priority.
+    #[derivative(Debug = "ignore")]
     cmd_manager: Sender<Command>,
     handle: Handle,
 }
@@ -52,7 +54,7 @@ pub struct Handle {
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
     store: SwitchableStore,
-    created: Instant,
+    #[derivative(Debug = "ignore")]
     reader_in_use: Arc<Mutex<()>>,
 }
 
@@ -104,7 +106,6 @@ impl Handle {
             self.prefetch,
             self.seek_tx.clone(),
             self.store.clone(),
-            self.created.clone(),
         )
         .map_err(GetReaderError::CreationFailed)
     }

@@ -8,6 +8,7 @@ use hyper::body::Incoming;
 use hyper::client::conn::http1::{self, SendRequest};
 use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinSet;
+use tracing::instrument;
 
 use crate::network::Network;
 
@@ -47,6 +48,7 @@ impl Connection {
         })
     }
 
+    #[instrument(level = "Debug", skip(self), ret, err)]
     pub(crate) async fn send_initial_request(
         &mut self,
         url: &hyper::Uri,

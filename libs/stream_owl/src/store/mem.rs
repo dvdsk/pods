@@ -1,14 +1,15 @@
 use derivative::Derivative;
 use std::collections::{TryReserveError, VecDeque};
+use std::num::NonZeroUsize;
 use std::ops::Range;
-use tracing::{trace, debug};
+use tracing::{debug, instrument};
 
 use rangemap::set::RangeSet;
 
 use crate::vecdeque::VecDequeExt;
 
 use super::capacity::Capacity;
-use super::{range_watch, CapacityBounds};
+use super::{range_watch, CapacityBounds, SeekInProgress};
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -54,12 +55,15 @@ impl Memory {
     /// `pos` must be the position of the first byte in buf in the stream.
     /// For the first write at the start this should be 0
     #[tracing::instrument(level="trace", skip(buf), fields(buf_len = buf.len()))]
-    pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
+    pub(super) async fn write_at(
+        &mut self,
+        buf: &[u8],
+        pos: u64,
+    ) -> Result<NonZeroUsize, SeekInProgress> {
         assert!(!buf.is_empty());
         if pos != self.range.end {
-            debug!("discontinuity: new write is after end of current data");
-            self.buffer.clear();
-            self.range.start = pos;
+            debug!("refusing write: position not at current range end, seek must be in progress");
+            return Err(SeekInProgress);
         }
 
         let to_write = buf.len().min(self.capacity.available());
@@ -74,7 +78,7 @@ impl Memory {
         self.range.start += to_remove as u64;
         self.range.end += to_write as u64;
         self.range_tx.send(self.range.clone());
-        return to_write;
+        return Ok(NonZeroUsize::new(to_write).expect("just checked if there is capacity to write"));
     }
 
     /// we must only get here if there is data in the mem store for us
@@ -116,5 +120,15 @@ impl Memory {
             capacity, range_tx, ..
         } = self;
         (range_tx, capacity)
+    }
+    #[instrument(level = "debug")]
+    pub(super) fn clear_for_seek(&mut self, to_pos: u64) {
+        debug_assert!(!self.range.contains(&to_pos));
+
+        self.buffer.clear();
+        self.capacity.reset();
+        self.range = to_pos..to_pos;
+        self.range_tx.send(to_pos..to_pos);
+        self.last_read_pos = to_pos;
     }
 }

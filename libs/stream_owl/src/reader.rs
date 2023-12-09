@@ -1,13 +1,13 @@
 use std::io::{self, Read, Seek};
 use std::sync::MutexGuard;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use derivative::Derivative;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tracing::instrument;
 
-use crate::store::{ReadResult, SwitchableStore};
+use crate::store::{Gapless, ReadResult, SwitchableStore};
 
 mod prefetch;
 use prefetch::Prefetch;
@@ -15,13 +15,13 @@ use prefetch::Prefetch;
 #[derive(Derivative)]
 #[derivative(Debug)]
 pub struct Reader {
+    #[derivative(Debug = "ignore")]
     rt: Runtime,
     prefetch: Prefetch,
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
     last_seek: u64,
     store: SwitchableStore,
-    created: Instant,
     curr_pos: u64,
 }
 
@@ -34,11 +34,9 @@ impl Reader {
         prefetch: usize,
         seek_tx: mpsc::Sender<u64>,
         store: SwitchableStore,
-        created: Instant,
     ) -> Result<Self, CouldNotCreateRuntime> {
         Ok(Self {
             rt: Runtime::new().map_err(CouldNotCreateRuntime)?,
-            created,
             prefetch: Prefetch::new(prefetch),
             seek_tx,
             last_seek: 0,
@@ -67,8 +65,7 @@ impl Seek for Reader {
     // this moves the seek in the stream
     #[instrument(level = "debug", ret, err)]
     fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
-        let elapsed = self.created.elapsed();
-        let just_started = elapsed < Duration::from_secs(1);
+        let just_started = self.store.size().requests_analyzed() < 1;
 
         let pos = match pos {
             io::SeekFrom::Start(bytes) => bytes,
@@ -79,7 +76,7 @@ impl Seek for Reader {
                     None if just_started => self
                         .store
                         .size()
-                        .wait_for_known(&mut self.rt, Duration::from_secs(1) - elapsed)
+                        .wait_for_known(&mut self.rt, Duration::from_secs(1))
                         .map_err(|_timeout| size_unknown())?,
                     None => Err(size_unknown())?,
                 };
@@ -87,10 +84,12 @@ impl Seek for Reader {
             }
         };
 
-        if !self.store.gapless_from_till(self.last_seek, pos) {
+        let gapless = self.store.gapless_from_till(self.last_seek, pos);
+        if let Gapless::No(mut store) = gapless {
             self.seek_in_stream(pos)?;
             self.last_seek = pos;
             self.prefetch.reset();
+            store.clear_for_seek(pos);
         }
 
         self.curr_pos = pos;

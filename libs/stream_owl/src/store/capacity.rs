@@ -85,6 +85,16 @@ impl Capacity {
             self.can_write.store(false, Ordering::Release);
         }
     }
+
+    #[instrument(level = "trace", skip(self))]
+    pub(crate) fn reset(&mut self) {
+        match self.total() {
+            Bounds::Limited(bytes) => self.free = bytes.get(),
+            Bounds::Unlimited => self.free = u64::MAX ,
+        }
+        self.can_write.store(true, Ordering::Release);
+        self.write_notify.notify_one();
+    }
 }
 
 #[instrument(level = "debug", ret)]

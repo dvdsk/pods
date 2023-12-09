@@ -2,9 +2,11 @@ use derivative::Derivative;
 use futures::FutureExt;
 use futures_concurrency::future::Race;
 use rangemap::RangeSet;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard};
+use tracing::instrument;
 
 mod capacity;
 mod disk;
@@ -102,7 +104,12 @@ impl SwitchableStore {
         }
     }
 
-    pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> usize {
+    #[instrument(level = "trace", skip(self, buf))]
+    pub(crate) async fn write_at(
+        &mut self,
+        buf: &[u8],
+        pos: u64,
+    ) -> Result<NonZeroUsize, SeekInProgress> {
         self.capacity_watcher.wait_for_space().await;
         match &mut *self.curr_store.lock().await {
             Store::Disk(inner) => inner.write_at(buf, pos).await,
@@ -115,11 +122,23 @@ impl SwitchableStore {
         self.stream_size.clone()
     }
 
-    pub(crate) fn gapless_from_till(&self, last_seek: u64, pos: u64) -> bool {
-        self.curr_store
-            .blocking_lock()
-            .gapless_from_till(pos, last_seek)
+    pub(crate) fn gapless_from_till(&self, last_seek: u64, pos: u64) -> Gapless {
+        let store = self.curr_store.clone().blocking_lock_owned();
+        if store.gapless_from_till(pos, last_seek) {
+            Gapless::Yes
+        } else {
+            Gapless::No(store)
+        }
     }
+}
+
+#[derive(Debug)]
+pub(crate) struct SeekInProgress;
+
+#[derive(Debug)]
+pub(crate) enum Gapless {
+    No(OwnedMutexGuard<Store>),
+    Yes,
 }
 
 #[derive(Debug)]
@@ -169,10 +188,11 @@ forward_impl!(pub(crate) gapless_from_till, pos: u64, last_seek: u64; bool);
 forward_impl!(ranges,; RangeSet<u64>);
 forward_impl!(last_read_pos,; u64);
 forward_impl!(n_supported_ranges,; usize);
+forward_impl_mut!(pub(crate) clear_for_seek, to_pos: u64;);
 forward_impl_mut!(set_range_tx, tx: range_watch::Sender;);
 forward_impl_mut!(set_capacity, tx: Capacity;);
 forward_impl_mut!(async read_at, buf: &mut [u8], pos: u64; usize);
-forward_impl_mut!(pub(crate) async write_at, buf: &[u8], pos: u64; usize);
+forward_impl_mut!(pub(crate) async write_at, buf: &[u8], pos: u64; Result<NonZeroUsize, SeekInProgress>);
 
 impl Store {
     fn into_parts(self) -> (range_watch::Sender, Capacity) {

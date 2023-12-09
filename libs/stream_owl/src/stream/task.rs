@@ -8,6 +8,7 @@ use crate::http_client::Error as HttpError;
 use crate::http_client::Size;
 use crate::http_client::StreamingClient;
 use crate::network::Network;
+use crate::store::SeekInProgress;
 use crate::store::SwitchableStore;
 use crate::Appender;
 
@@ -52,14 +53,24 @@ impl Appender for StoreAppender {
     #[instrument(level = "trace", skip(self, buf), fields(buf_len = buf.len()), ret)]
     async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         // only this function modifies pos,
-        // only need to read own writes => relaxed ordering
+        // only need to read threads own writes => relaxed ordering
         let written = self
             .store
             .write_at(buf, self.pos.load(Ordering::Relaxed))
             .await;
+
+        let bytes = match written {
+            Ok(bytes) => bytes.get(),
+            Err(SeekInProgress) => {
+                // 
+                futures::pending!();
+                unreachable!()
+            }
+        };
+
         // new data needs to be requested after current pos, it uses acquire Ordering
-        self.pos.fetch_add(written as u64, Ordering::Release);
-        Ok(written)
+        self.pos.fetch_add(bytes as u64, Ordering::Release);
+        Ok(bytes)
     }
 }
 
@@ -176,23 +187,24 @@ enum StreamRes {
     StreamAllclient(ClientStreamingAll),
 }
 
-#[instrument(level = "debug", skip(client_with_stream, writer, seek_rx), ret)]
+#[instrument(level = "debug", skip(client_with_stream, appender, seek_rx), ret)]
 async fn stream_partial(
     mut client_with_stream: ClientStreamingPartial,
-    writer: StoreAppender,
+    appender: StoreAppender,
     chunk_size: u64,
     seek_rx: &mut mpsc::Receiver<u64>,
 ) -> StreamRes {
     loop {
         let client_builder = client_with_stream.builder();
+
         let mut next_pos = loop {
-            let stream = handle_partial_stream(client_with_stream, writer.clone(), chunk_size)
+            let stream = handle_partial_stream(client_with_stream, appender.clone(), chunk_size)
                 .map(Res3::GetRange);
             let get_seek = seek_rx.recv().map(Res3::Seek);
-            match (stream, get_seek).race().await {
+            client_with_stream = match (stream, get_seek).race().await {
                 Res3::Seek(None) => return StreamRes::Canceld,
                 Res3::Seek(Some(pos)) => break pos,
-                Res3::GetRange(Ok(StreamingClient::Partial(client))) => client_with_stream = client,
+                Res3::GetRange(Ok(StreamingClient::Partial(client))) => client,
                 Res3::GetRange(Ok(StreamingClient::All(client))) => {
                     warn!("Got not seekable stream");
                     return StreamRes::StreamAllclient(client);
@@ -201,6 +213,7 @@ async fn stream_partial(
             }
         };
 
+        appender.pos.store(next_pos, Ordering::Relaxed);
         client_with_stream = loop {
             let get_seek = seek_rx.recv().map(Res4::Seek);
             let get_client_at_new_pos = client_builder
@@ -233,12 +246,17 @@ async fn handle_partial_stream(
         .await
         .map_err(Error::HttpClient)?;
 
-    if Some(appender.pos()) >= reader.stream_size().known() {
+    let size = reader
+        .stream_size()
+        .known()
+        .expect("A partial range must have a valid content-range header");
+    if appender.pos() >= size {
         info!("at end of stream: waiting for next seek");
         let () = std::future::pending().await;
         unreachable!()
     }
 
+    let chunk_size = chunk_size.min(size - appender.pos());
     let res = reader
         .try_into_client()
         .expect("should not read less then we requested")

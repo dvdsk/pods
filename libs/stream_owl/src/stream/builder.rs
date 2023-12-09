@@ -3,8 +3,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use std::future::Future;
-use std::time::Instant;
-
 use futures::FutureExt;
 use tokio::sync::mpsc;
 
@@ -120,7 +118,6 @@ impl StreamBuilder<true> {
         };
 
         let handle = Handle {
-            created: Instant::now(),
             reader_in_use: Arc::new(Mutex::new(())),
             prefetch: self.initial_prefetch,
             seek_tx,

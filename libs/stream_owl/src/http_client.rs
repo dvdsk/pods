@@ -116,6 +116,8 @@ impl Cookies {
     }
 }
 
+/// A client that is currently streaming partial content
+/// (the result of a range request)
 #[derive(Debug)]
 pub(crate) struct ClientStreamingPartial {
     stream: Incoming,
@@ -124,7 +126,7 @@ pub(crate) struct ClientStreamingPartial {
 }
 
 impl ClientStreamingPartial {
-    #[tracing::instrument(level = "trace", ret)]
+    #[tracing::instrument(level = "trace")]
     pub(crate) fn into_reader(self) -> Reader {
         let Self {
             stream,
@@ -235,7 +237,14 @@ impl ClientBuilder {
             mut cookies,
             mut size,
         } = self;
-        let first_range = format!("bytes={start}-{len}");
+
+        let end = if let Some(size) = size.known() {
+            (start + len).min(size)
+        } else {
+            start + len
+        };
+        let first_range = format!("bytes={start}-{end}");
+
         let mut conn = Connection::new(&url, &restriction).await?;
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
@@ -284,7 +293,10 @@ impl ClientBuilder {
                 inner,
                 size,
             })),
-            StatusCode::RANGE_NOT_SATISFIABLE => todo!("redo without range"),
+            StatusCode::RANGE_NOT_SATISFIABLE => {
+                tracing::info!("{response:?}");
+                todo!("redo without range")
+            }
             _ => Err(Error::status_not_ok(response).await),
         }
     }
@@ -384,12 +396,13 @@ mod tests {
 
     // feed url: 274- The Age of the Algorithm
     const FEED_URL: &str = "https://dts.podtrac.com/redirect.mp3/chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3?aid=rss_feed&awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&feed=BqbsxVfO";
-    const REDIR_URL: &str = "http://stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3/default.mp3_ywr3ahjkcgo_c288ef3e9f147075ce20a657c0c05108_20203379.mp3?aid=rss_feed&amp;awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&amp;awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&amp;feed=BqbsxVfO&hash_redirect=1&x-total-bytes=20203379&x-ais-classified=unclassified&listeningSessionID=0CD_382_295__75b258bb6b5c08fb4943101f0901735a80c29237";
 
     #[tokio::test]
     async fn get_stream_client() {
         let url = hyper::Uri::from_static(FEED_URL);
-        let client = StreamingClient::new(url, None, 0, 1024, Size::default()).await.unwrap();
+        let client = StreamingClient::new(url, None, 0, 1024, Size::default())
+            .await
+            .unwrap();
         assert!(client.stream_size().known().is_some());
 
         match client {

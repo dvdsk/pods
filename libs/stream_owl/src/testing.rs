@@ -27,7 +27,7 @@ fn gen_file_if_not_there(len: u64) -> PathBuf {
         }
     }
 
-    std::fs::write(&path, test_data(1_000)).unwrap();
+    std::fs::write(&path, test_data(len as u32)).unwrap();
     path
 }
 

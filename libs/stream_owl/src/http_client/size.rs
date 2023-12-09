@@ -1,4 +1,3 @@
-use futures::FutureExt;
 /// Tracks the size of data send via the http stream.
 ///
 /// No benchmarks motivating these optimizations, they are just for fun.
@@ -7,9 +6,8 @@ use futures::FutureExt;
 /// only reason it is not an Arc<Mutex<Enum>> is because I wanted to write it like this for fun.
 /// Feel free to replace/refactor.
 use http::{self, header, HeaderValue, StatusCode};
-use hyper::body::Incoming;
 use hyper::Response;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::runtime::Runtime;
@@ -17,8 +15,14 @@ use tokio::sync::Notify;
 
 struct SizeInner {
     value: AtomicU64,
-    /// need to check the current value it has changed
+    /// need to check the current value has changed
     notify: Notify,
+    // used to check whether the size might
+    // become known soon
+    //
+    // - Redirects do not count
+    // - Overflow is not realistic.
+    requests_analyzed: AtomicUsize,
 }
 
 #[derive(Clone)]
@@ -77,6 +81,7 @@ impl Default for Size {
         Self(Arc::new(SizeInner {
             value: AtomicU64::new(SizeVariant::Unknown.encode()),
             notify: Notify::new(),
+            requests_analyzed: AtomicUsize::new(0),
         }))
     }
 }
@@ -101,38 +106,48 @@ impl Size {
         self.set(SizeVariant::StreamEnded(pos));
     }
 
-    #[tracing::instrument(level = "debug")]
-    pub(crate) fn update_from_headers(&mut self, response: &Response<Incoming>) {
+    #[tracing::instrument(level = "debug", skip(response), 
+      fields(headers = ?response.headers(), status = %response.status()))]
+    pub(crate) fn update_from_headers<T>(&mut self, response: &Response<T>) {
+        if response.status() != StatusCode::FOUND {
+            self.0.requests_analyzed.fetch_add(1, Ordering::Relaxed);
+        }
         let headers = response.headers();
 
-        if response.status() == StatusCode::OK {
-            if let Some(content_length) = headers
-                .get(header::CONTENT_LENGTH)
-                .map(HeaderValue::to_str)
-                .and_then(Result::ok)
-                .map(|len| u64::from_str_radix(len, 10))
-                .and_then(Result::ok)
-            {
-                self.set(SizeVariant::Known(content_length))
+        match response.status() {
+            StatusCode::OK => {
+                if let Some(content_length) = headers
+                    .get(header::CONTENT_LENGTH)
+                    .map(HeaderValue::to_str)
+                    .and_then(Result::ok)
+                    .map(|len| u64::from_str_radix(len, 10))
+                    .and_then(Result::ok)
+                {
+                    self.set(SizeVariant::Known(content_length))
+                }
             }
-        } else if response.status() == StatusCode::PARTIAL_CONTENT {
-            if let Some(range_total) = headers
-                .get(header::CONTENT_RANGE)
-                .map(HeaderValue::to_str)
-                .and_then(Result::ok)
-                .filter(|range| range.starts_with("bytes"))
-                .and_then(|range| range.rsplit_once("/"))
-                .map(|(_, total)| u64::from_str_radix(total, 10))
-                .and_then(Result::ok)
-            {
-                self.set(SizeVariant::Known(range_total))
+            StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE => {
+                if let Some(range_total) = headers
+                    .get(header::CONTENT_RANGE)
+                    .map(HeaderValue::to_str)
+                    .and_then(Result::ok)
+                    .filter(|range| range.starts_with("bytes"))
+                    .and_then(|range| range.rsplit_once("/"))
+                    .map(|(_, total)| u64::from_str_radix(total, 10))
+                    .and_then(Result::ok)
+                {
+                    self.set(SizeVariant::Known(range_total))
+                }
             }
-        } else {
-            self.set(SizeVariant::Unknown)
+            _ => self.set(SizeVariant::Unknown),
         }
     }
 
-    pub(crate) fn wait_for_known(&self, rt: &mut Runtime, timeout: Duration) -> Result<u64, Timeout> {
+    pub(crate) fn wait_for_known(
+        &self,
+        rt: &mut Runtime,
+        timeout: Duration,
+    ) -> Result<u64, Timeout> {
         let _guard = rt.enter();
         async fn get_size(size: &Size) -> u64 {
             size.0.notify.notified().await;
@@ -142,16 +157,16 @@ impl Size {
         rt.block_on(fut).map_err(|_| Timeout)
     }
 
+    pub(crate) fn requests_analyzed(&self) -> usize {
+        self.0.requests_analyzed.load(Ordering::Relaxed)
+    }
+
     pub(crate) fn known(&self) -> Option<u64> {
         match self.get() {
             SizeVariant::Unknown => None,
             SizeVariant::Known(size) => Some(size),
             SizeVariant::StreamEnded(size) => Some(size),
         }
-    }
-
-    pub(crate) fn is_known(&self) -> bool {
-        self.known().is_some()
     }
 
     pub(crate) async fn eof_smaller_then(&self, pos: u64) {
@@ -198,5 +213,20 @@ mod tests {
             let encoded = broken_input.encode();
             assert_eq!(SizeVariant::decode(encoded), acceptable_output)
         }
+    }
+
+    #[test]
+    fn analyze_headers() {
+        fn test_response<'a>(key: &'static str, val: &'a str) -> Response<&'a str> {
+            let mut input = Response::new("");
+            *input.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
+            let headers = input.headers_mut();
+            headers.insert(key, val.try_into().unwrap());
+            input
+        }
+
+        let mut size = Size::default();
+        size.update_from_headers(&test_response("content-range", "bytes */10000"));
+        assert_eq!(size.get(), SizeVariant::Known(10_000));
     }
 }

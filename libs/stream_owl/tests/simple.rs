@@ -17,7 +17,6 @@ use stream_owl::StreamHandle;
 use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 use tokio::task::JoinError;
-use tracing::info;
 use tracing::instrument;
 
 #[test]
@@ -51,7 +50,6 @@ fn debug() {
     // dbg!(&buffer);
     reader.seek(std::io::SeekFrom::End(40)).unwrap();
     reader.read_exact(&mut buffer).unwrap();
-    dbg!(buffer);
     test_done.notify_one();
     runtime_thread.join().unwrap();
 }
