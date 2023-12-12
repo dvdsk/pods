@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::io::Seek;
+use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
@@ -34,25 +35,25 @@ fn resume_when_connection_breaks_randomly() {
     todo!()
 }
 
-#[test]
-fn debug() {
-    let test_file_size = 10_000u32;
-    let memory_buffer_size = 1000;
-    let prefetch = 0;
-    let test_done = Arc::new(Notify::new());
-
-    let (runtime_thread, mut handle) =
-        setup_reader_test(&test_done, test_file_size, memory_buffer_size, prefetch);
-
-    let mut buffer = vec![0; 20];
-    let mut reader = handle.try_get_reader().unwrap();
-    // reader.read_exact(&mut buffer).unwrap();
-    // dbg!(&buffer);
-    reader.seek(std::io::SeekFrom::End(40)).unwrap();
-    reader.read_exact(&mut buffer).unwrap();
-    test_done.notify_one();
-    runtime_thread.join().unwrap();
-}
+// #[test]
+// fn debug() {
+//     let test_file_size = 10_000u32;
+//     let memory_buffer_size = 1000;
+//     let prefetch = 0;
+//     let test_done = Arc::new(Notify::new());
+//
+//     let (runtime_thread, mut handle) =
+//         setup_reader_test(&test_done, test_file_size, memory_buffer_size, prefetch);
+//
+//     let mut buffer = vec![0; 20];
+//     let mut reader = handle.try_get_reader().unwrap();
+//     // reader.read_exact(&mut buffer).unwrap();
+//     // dbg!(&buffer);
+//     reader.seek(std::io::SeekFrom::End(40)).unwrap();
+//     reader.read_exact(&mut buffer).unwrap();
+//     test_done.notify_one();
+//     runtime_thread.join().unwrap();
+// }
 
 #[derive(Debug)]
 enum Res {
@@ -66,15 +67,39 @@ async fn wait_for_test_done(test_done: Arc<Notify>) -> Res {
     Res::TestDone
 }
 
-#[test]
-fn seek_from_all_sides_works() {
-    let test_file_size = 10_000u32;
-    let memory_buffer_size = 1000;
-    let prefetch = 0;
-    let test_done = Arc::new(Notify::new());
+#[cfg(test)]
+mod memory {
 
-    let (runtime_thread, mut handle) =
-        setup_reader_test(&test_done, test_file_size, memory_buffer_size, prefetch);
+    use super::*;
+
+    #[test]
+    fn seek_from_all_sides_works() {
+        let configure = |b: StreamBuilder<false>| {
+            b.with_prefetch(0)
+                .to_limited_mem(NonZeroUsize::new(1000).unwrap())
+        };
+        seek_test(configure);
+    }
+}
+
+#[cfg(test)]
+mod disk {
+    use super::*;
+
+    #[test]
+    fn seek_from_all_sides_works() {
+        let configure = |b: StreamBuilder<false>| {
+            let path = stream_owl::testing::gen_file_path();
+            b.with_prefetch(0).to_disk(path)
+        };
+        seek_test(configure);
+    }
+}
+
+fn seek_test(configure: fn(StreamBuilder<false>) -> StreamBuilder<true>) {
+    let test_file_size = 10_000u32;
+    let test_done = Arc::new(Notify::new());
+    let (runtime_thread, mut handle) = setup_reader_test(&test_done, test_file_size, configure);
 
     let mut reader = handle.try_get_reader().unwrap();
     assert_pos(&mut reader, 0);
@@ -92,8 +117,7 @@ fn seek_from_all_sides_works() {
 fn setup_reader_test(
     test_done: &Arc<Notify>,
     test_file_size: u32,
-    memory_buffer_size: usize,
-    prefetch: usize,
+    configure: fn(StreamBuilder<false>) -> StreamBuilder<true>,
 ) -> (thread::JoinHandle<()>, StreamHandle) {
     let (runtime_thread, handle) = {
         let test_done = test_done.clone();
@@ -104,10 +128,8 @@ fn setup_reader_test(
                 setup_tracing();
                 let (uri, server) = server(test_file_size as u64).await;
 
-                let (handle, stream) = StreamBuilder::new(uri)
-                    .to_limited_mem(memory_buffer_size.try_into().unwrap())
-                    .with_prefetch(prefetch)
-                    .start();
+                let builder = StreamBuilder::new(uri);
+                let (handle, stream) = configure(builder).start().await;
                 tx.send(handle).unwrap();
 
                 let server = server.map(Res::ServerCrashed);

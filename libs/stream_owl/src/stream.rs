@@ -119,7 +119,7 @@ impl Handle {
     }
 
     pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
-        self.store.to_disk(&path).await
+        self.store.to_disk(path).await
     }
 }
 

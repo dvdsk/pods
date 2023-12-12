@@ -7,6 +7,19 @@ use http::Uri;
 use tokio::task::JoinHandle;
 use tower_http::{services::ServeFile, trace::TraceLayer};
 
+pub fn gen_file_path() -> PathBuf {
+    use rand::distributions::Alphanumeric;
+    use rand::{thread_rng, Rng};
+
+    let mut rng = thread_rng();
+    let mut name = "stream_owl_test_download_".to_owned();
+    name.extend((0..8).map(|_| rng.sample(Alphanumeric) as char));
+
+    let mut dir = std::env::temp_dir();
+    dir.push(name);
+    dir
+}
+
 fn gen_file_if_not_there(len: u64) -> PathBuf {
     static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
 
@@ -17,7 +30,7 @@ fn gen_file_if_not_there(len: u64) -> PathBuf {
     }
 
     let mut dir = std::env::temp_dir();
-    dir.push("stream_owl_test_file.data");
+    dir.push("stream_owl_test_source_.data");
     let path = dir;
     *PATH.lock().unwrap() = Some(path.clone());
 
@@ -53,10 +66,6 @@ pub async fn server(test_file_size: u64) -> (Uri, JoinHandle<Result<(), std::io:
     );
     let server = axum::serve(listener, app.layer(TraceLayer::new_for_http()));
     let server = tokio::task::spawn(server);
-        // Builder::new()
-        // .name("test server")
-        // .spawn(server)
-        // .unwrap();
 
     let uri: Uri = format!("http://localhost:{port}/stream_test")
         .parse()
@@ -68,8 +77,6 @@ pub fn setup_tracing() {
     use tracing_subscriber::filter;
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
-
-    // console_subscriber::init();
 
     let filter = filter::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         filter::EnvFilter::builder()

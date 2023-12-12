@@ -9,7 +9,7 @@ use rangemap::set::RangeSet;
 use crate::vecdeque::VecDequeExt;
 
 use super::capacity::Capacity;
-use super::{range_watch, CapacityBounds, SeekInProgress};
+use super::{range_watch, CapacityBounds};
 
 #[derive(Derivative)]
 #[derivative(Debug)]
@@ -25,6 +25,15 @@ pub(crate) struct Memory {
     #[derivative(Debug = "ignore")]
     range_tx: range_watch::Sender,
     last_read_pos: u64,
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Not critical
+    #[error("Refusing write while in the middle of a seek")]
+    SeekInProgress,
+    #[error("Could not get enough memory from the OS")]
+    CouldNotAllocate(#[from] TryReserveError),
 }
 
 impl Memory {
@@ -55,15 +64,11 @@ impl Memory {
     /// `pos` must be the position of the first byte in buf in the stream.
     /// For the first write at the start this should be 0
     #[tracing::instrument(level="trace", skip(buf), fields(buf_len = buf.len()))]
-    pub(super) async fn write_at(
-        &mut self,
-        buf: &[u8],
-        pos: u64,
-    ) -> Result<NonZeroUsize, SeekInProgress> {
+    pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
         assert!(!buf.is_empty());
         if pos != self.range.end {
             debug!("refusing write: position not at current range end, seek must be in progress");
-            return Err(SeekInProgress);
+            return Err(Error::SeekInProgress);
         }
 
         let to_write = buf.len().min(self.capacity.available());
@@ -71,18 +76,20 @@ impl Memory {
         let free_in_buffer = self.buffer_cap - self.buffer.len();
         let to_remove = to_write.saturating_sub(free_in_buffer);
         self.buffer.drain(..to_remove);
+        let removed = to_remove;
 
         self.buffer.extend(buf[0..to_write].iter());
+        let written = to_write;
 
-        self.capacity.remove(to_write);
-        self.range.start += to_remove as u64;
-        self.range.end += to_write as u64;
+        self.capacity.remove(written);
+        self.range.start += removed as u64;
+        self.range.end += written as u64;
         self.range_tx.send(self.range.clone());
         return Ok(NonZeroUsize::new(to_write).expect("just checked if there is capacity to write"));
     }
 
     /// we must only get here if there is data in the mem store for us
-    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
+    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, ()> {
         debug_assert!(pos >= self.range.start, "No data in store at offset: {pos}");
 
         let relative_pos = pos - self.range.start;
@@ -90,7 +97,7 @@ impl Memory {
         self.capacity.add(n_copied);
 
         self.last_read_pos = pos;
-        n_copied
+        Ok(n_copied)
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {
         let mut res = RangeSet::new();
@@ -122,7 +129,7 @@ impl Memory {
         (range_tx, capacity)
     }
     #[instrument(level = "debug")]
-    pub(super) fn clear_for_seek(&mut self, to_pos: u64) {
+    pub(super) fn writer_jump(&mut self, to_pos: u64) {
         debug_assert!(!self.range.contains(&to_pos));
 
         self.buffer.clear();

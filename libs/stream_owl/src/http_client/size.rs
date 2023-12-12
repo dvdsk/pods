@@ -90,10 +90,14 @@ pub(crate) struct Timeout;
 
 impl Size {
     fn set(&self, var: SizeVariant) {
-        tracing::debug!("set stream size to: {var:?}");
         let new = var.encode();
         let previous = self.0.value.swap(new, Ordering::Release);
         if previous != new {
+            tracing::debug!(
+                "stream size changed: {:?} -> {:?}",
+                SizeVariant::decode(previous),
+                var
+            );
             self.0.notify.notify_waiters();
         }
     }

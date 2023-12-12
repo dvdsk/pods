@@ -49,7 +49,7 @@ impl Receiver {
     #[instrument(level = "trace")]
     pub(super) async fn wait_for(&mut self, needed_pos: u64) {
         while !self.last.contains(&needed_pos) {
-            trace!("blocking until range available");
+            trace!("blocking read until range available");
             match self.rx.recv().await {
                 Err(RecvError::Closed) => {
                     unreachable!("Receiver and Sender should drop at the same time")

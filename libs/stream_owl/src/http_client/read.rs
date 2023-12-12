@@ -70,7 +70,7 @@ impl Reader {
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
-    #[tracing::instrument(level = "trace", skip(appender, self), ret)]
+    #[tracing::instrument(level = "trace", skip(appender, self))]
     pub(crate) async fn read_to_writer(
         &mut self,
         mut appender: impl Appender,
@@ -92,7 +92,7 @@ impl InnerReader {
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
-    #[tracing::instrument(level = "trace", skip_all, ret)]
+    #[tracing::instrument(level = "trace", skip_all)]
     pub(crate) async fn read_to_writer(
         &mut self,
         output: &mut impl Appender,

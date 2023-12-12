@@ -8,7 +8,7 @@ use crate::http_client::Error as HttpError;
 use crate::http_client::Size;
 use crate::http_client::StreamingClient;
 use crate::network::Network;
-use crate::store::SeekInProgress;
+use crate::store;
 use crate::store::SwitchableStore;
 use crate::Appender;
 
@@ -61,10 +61,13 @@ impl Appender for StoreAppender {
 
         let bytes = match written {
             Ok(bytes) => bytes.get(),
-            Err(SeekInProgress) => {
-                // 
+            Err(store::Error::SeekInProgress) => {
+                //
                 futures::pending!();
                 unreachable!()
+            }
+            Err(other) => {
+                todo!("handle other error: {other:?}")
             }
         };
 

@@ -44,12 +44,23 @@ pub(super) enum StoreVariant {
     Mem,
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    /// Not critical
+    #[error("Refusing write while in the middle of a seek")]
+    SeekInProgress,
+    #[error("Error in memory backend")]
+    Memory(mem::Error),
+    #[error("Error in disk backend")]
+    Disk(#[from] disk::Error),
+}
+
 impl SwitchableStore {
     #[tracing::instrument]
-    pub(crate) fn new_disk_backed(path: PathBuf, stream_size: Size) -> Self {
+    pub(crate) async fn new_disk_backed(path: PathBuf, stream_size: Size) -> Self {
         let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
         let (tx, rx) = range_watch::channel();
-        let disk = disk::Disk::new(&path, capacity, tx).unwrap();
+        let disk = disk::Disk::new(path, capacity, tx).await.unwrap();
         Self {
             curr_range: rx,
             capacity_watcher,
@@ -81,7 +92,7 @@ impl SwitchableStore {
     /// Returns number of bytes read, 0 means end of file.
     /// This reads as soon as bytes are available.
     #[tracing::instrument(level = "trace", skip(buf), fields(buf_len = buf.len()), ret)]
-    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> ReadResult {
+    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, ReadError> {
         enum Res {
             RangeReady,
             PosBeyondEOF,
@@ -97,24 +108,17 @@ impl SwitchableStore {
         let res = (wait_for_range, watch_eof_pos).race().await;
 
         if let Res::PosBeyondEOF = res {
-            ReadResult::EndOfStream
+            Err(ReadError::EndOfStream)
         } else {
-            let n_read = self.curr_store.lock().await.read_at(buf, pos).await;
-            ReadResult::ReadN(n_read)
+            let n_read = self.curr_store.lock().await.read_at(buf, pos).await?;
+            Ok(n_read)
         }
     }
 
     #[instrument(level = "trace", skip(self, buf))]
-    pub(crate) async fn write_at(
-        &mut self,
-        buf: &[u8],
-        pos: u64,
-    ) -> Result<NonZeroUsize, SeekInProgress> {
+    pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
         self.capacity_watcher.wait_for_space().await;
-        match &mut *self.curr_store.lock().await {
-            Store::Disk(inner) => inner.write_at(buf, pos).await,
-            Store::Mem(inner) => inner.write_at(buf, pos).await,
-        }
+        self.curr_store.lock().await.write_at(buf, pos).await
     }
 
     /// refers to the size of the stream if it was complete
@@ -141,10 +145,12 @@ pub(crate) enum Gapless {
     Yes,
 }
 
-#[derive(Debug)]
-pub(crate) enum ReadResult {
+#[derive(thiserror::Error, Debug)]
+pub(crate) enum ReadError {
+    #[error(transparent)]
+    Reader(#[from] Error),
+    #[error("End of stream reached")]
     EndOfStream,
-    ReadN(usize),
 }
 
 macro_rules! forward_impl {
@@ -188,13 +194,30 @@ forward_impl!(pub(crate) gapless_from_till, pos: u64, last_seek: u64; bool);
 forward_impl!(ranges,; RangeSet<u64>);
 forward_impl!(last_read_pos,; u64);
 forward_impl!(n_supported_ranges,; usize);
-forward_impl_mut!(pub(crate) clear_for_seek, to_pos: u64;);
+forward_impl_mut!(pub(crate) writer_jump, to_pos: u64;);
 forward_impl_mut!(set_range_tx, tx: range_watch::Sender;);
 forward_impl_mut!(set_capacity, tx: Capacity;);
-forward_impl_mut!(async read_at, buf: &mut [u8], pos: u64; usize);
-forward_impl_mut!(pub(crate) async write_at, buf: &[u8], pos: u64; Result<NonZeroUsize, SeekInProgress>);
 
 impl Store {
+    pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
+        match self {
+            Store::Disk(inner) => inner.write_at(buf, pos).await.map_err(Error::Disk),
+            Store::Mem(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
+                mem::Error::SeekInProgress => Error::SeekInProgress,
+                other => Error::Memory(other),
+            }),
+        }
+    }
+    async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, Error> {
+        match self {
+            Self::Disk(inner) => inner.read_at(buf, pos).await.map_err(Error::Disk),
+            Self::Mem(inner) => Ok(inner
+                .read_at(buf, pos)
+                .await
+                .expect("never runs into an error")),
+        }
+    }
+
     fn into_parts(self) -> (range_watch::Sender, Capacity) {
         match self {
             Self::Disk(inner) => inner.into_parts(),

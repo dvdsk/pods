@@ -7,7 +7,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tracing::instrument;
 
-use crate::store::{Gapless, ReadResult, SwitchableStore};
+use crate::store::{Gapless, ReadError, SwitchableStore, self};
 
 mod prefetch;
 use prefetch::Prefetch;
@@ -89,7 +89,7 @@ impl Seek for Reader {
             self.seek_in_stream(pos)?;
             self.last_seek = pos;
             self.prefetch.reset();
-            store.clear_for_seek(pos);
+            store.writer_jump(pos);
         }
 
         self.curr_pos = pos;
@@ -106,9 +106,13 @@ impl Read for Reader {
 
         let n_read2 = self.rt.block_on(async {
             let res = self.store.read_at(&mut buf[n_read1..], self.curr_pos).await;
-            let ReadResult::ReadN(bytes) = res else {
-                return 0; // returns out of block_on closure, not function
+            let bytes = match res {
+                Err(ReadError::EndOfStream) => return 0,
+                // returns out of block_on closure, not function
+                Err(other) => return handle_read_error(other),
+                Ok(bytes) => bytes,
             };
+
             self.curr_pos += bytes as u64;
             tracing::info!("actual read: {bytes}");
 
@@ -119,4 +123,8 @@ impl Read for Reader {
         });
         Ok(n_read1 + n_read2)
     }
+}
+
+async fn handle_read_error(error: store::Error) -> Result<usize, io::Error> {
+    todo!()
 }

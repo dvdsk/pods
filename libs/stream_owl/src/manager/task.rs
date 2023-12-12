@@ -78,16 +78,19 @@ pub(super) async fn run(
                 url,
                 handle_tx,
                 to_disk,
-            }) => add_stream(
-                &mut streams,
-                &mut abort_handles,
-                url,
-                to_disk,
-                handle_tx,
-                cmd_tx.clone(),
-                restriction.clone(),
-                initial_prefetch,
-            ),
+            }) => {
+                add_stream(
+                    &mut streams,
+                    &mut abort_handles,
+                    url,
+                    to_disk,
+                    handle_tx,
+                    cmd_tx.clone(),
+                    restriction.clone(),
+                    initial_prefetch,
+                )
+                .await
+            }
             Res::NewCmd(CancelStream(id)) => {
                 if let Some(handle) = abort_handles.remove(&id) {
                     handle.abort();
@@ -103,7 +106,7 @@ pub(super) async fn run(
     }
 }
 
-fn add_stream(
+async fn add_stream(
     streams: &mut JoinSet<stream::StreamEnded>,
     abort_handles: &mut HashMap<StreamId, AbortHandle>,
     url: http::Uri,
@@ -124,7 +127,7 @@ fn add_stream(
     }
     stream = stream.with_prefetch(initial_prefetch);
 
-    let (handle, stream_task) = stream.start_managed(cmd_tx);
+    let (handle, stream_task) = stream.start_managed(cmd_tx).await;
 
     let abort_handle = streams.spawn(stream_task);
     abort_handles.insert(handle.id(), abort_handle);

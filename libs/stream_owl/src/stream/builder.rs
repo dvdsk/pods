@@ -2,8 +2,8 @@ use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use std::future::Future;
 use futures::FutureExt;
+use std::future::Future;
 use tokio::sync::mpsc;
 
 use crate::http_client::Size;
@@ -51,8 +51,8 @@ impl StreamBuilder<false> {
         }
     }
     pub fn to_limited_mem(mut self, max_size: NonZeroUsize) -> StreamBuilder<true> {
-        let max_size = NonZeroU64::new(max_size.get() as u64)
-            .expect("Is already guaranteed to be nonzero");
+        let max_size =
+            NonZeroU64::new(max_size.get() as u64).expect("Is already guaranteed to be nonzero");
         self.storage = Some(StorageChoice::Mem(CapacityBounds::Limited(max_size)));
         StreamBuilder {
             url: self.url,
@@ -86,7 +86,7 @@ impl<const STORAGE_SET: bool> StreamBuilder<STORAGE_SET> {
 
 impl StreamBuilder<true> {
     #[tracing::instrument]
-    pub(crate) fn start_managed(
+    pub(crate) async fn start_managed(
         self,
         manager_tx: mpsc::Sender<manager::Command>,
     ) -> (
@@ -94,7 +94,7 @@ impl StreamBuilder<true> {
         impl Future<Output = StreamEnded> + Send + 'static,
     ) {
         let id = StreamId::new();
-        let (handle, stream_task) = self.start();
+        let (handle, stream_task) = self.start().await;
         let stream_task = stream_task.map(|res| StreamEnded { res, id });
         let handle = ManagedHandle {
             cmd_manager: manager_tx,
@@ -104,7 +104,7 @@ impl StreamBuilder<true> {
     }
 
     #[tracing::instrument]
-    pub fn start(
+    pub async fn start(
         self,
     ) -> (
         Handle,
@@ -113,8 +113,12 @@ impl StreamBuilder<true> {
         let (seek_tx, seek_rx) = mpsc::channel(12);
         let stream_size = Size::default();
         let store = match self.storage.expect("must chose storage option") {
-            StorageChoice::Disk(path) => SwitchableStore::new_disk_backed(path, stream_size.clone()),
-            StorageChoice::Mem(capacity) => SwitchableStore::new_mem_backed(capacity, stream_size.clone()),
+            StorageChoice::Disk(path) => {
+                SwitchableStore::new_disk_backed(path, stream_size.clone()).await
+            }
+            StorageChoice::Mem(capacity) => {
+                SwitchableStore::new_mem_backed(capacity, stream_size.clone())
+            }
         };
 
         let handle = Handle {
@@ -123,7 +127,13 @@ impl StreamBuilder<true> {
             seek_tx,
             store: store.clone(),
         };
-        let stream_task = task::new(self.url, store.clone(), seek_rx, self.restriction, stream_size);
+        let stream_task = task::new(
+            self.url,
+            store.clone(),
+            seek_rx,
+            self.restriction,
+            stream_size,
+        );
         (handle, stream_task)
     }
 }

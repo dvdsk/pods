@@ -1,5 +1,6 @@
 use std::collections::TryReserveError;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::FutureExt;
@@ -9,7 +10,8 @@ use tokio::sync::{oneshot, Mutex};
 
 use super::disk::Disk;
 use super::mem::Memory;
-use super::{capacity, range_watch, Store, StoreVariant, SwitchableStore, CapacityBounds};
+use super::{capacity, range_watch, CapacityBounds, Store, StoreVariant, SwitchableStore};
+use super::{disk, Error as StoreError};
 
 mod range_list;
 
@@ -38,7 +40,7 @@ impl SwitchableStore {
         Some(handle)
     }
 
-    pub(crate) async fn to_disk(&self, path: &std::path::Path) -> Option<MigrationHandle> {
+    pub(crate) async fn to_disk(&self, path: PathBuf) -> Option<MigrationHandle> {
         if let StoreVariant::Disk = self.variant().await {
             return None;
         }
@@ -48,7 +50,7 @@ impl SwitchableStore {
         // is swapped out before migration finishes
         let (watch_placeholder, _) = range_watch::channel();
         let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
-        let disk = match Disk::new(path, capacity_placeholder, watch_placeholder) {
+        let disk = match Disk::new(path, capacity_placeholder, watch_placeholder).await {
             Err(e) => {
                 tx.send(Err(MigrationError::DiskCreation(e)))
                     .expect("cant have dropped rx");
@@ -62,10 +64,14 @@ impl SwitchableStore {
     }
 }
 
-#[derive(Debug)]
+#[derive(thiserror::Error, Debug)]
 pub enum MigrationError {
-    DiskCreation(()),
+    #[error("todo")]
+    DiskCreation(disk::Error),
+    #[error("todo")]
     MemAllocation(TryReserveError),
+    #[error("todo")]
+    WritingToDisk(#[from] StoreError),
 }
 
 pub struct MigrationHandle(oneshot::Receiver<Result<(), MigrationError>>);
@@ -111,6 +117,7 @@ async fn migrate(
         let (range_watch, capacity) = old.into_parts();
         curr.set_range_tx(range_watch);
         curr.set_capacity(capacity);
+        todo!("set up capacity for the new store! (also look into moving capacity out of the Store enum into a (Non clone) Store struct maybe? That would clean up disk)")
     }
 }
 
@@ -135,7 +142,7 @@ async fn pre_migrate_to_disk(
         src.read_at(&mut buf, missing_on_disk.start).await;
         drop(src);
 
-        target.write_at(&buf, missing_on_disk.start).await;
+        target.write_at(&buf, missing_on_disk.start).await?;
         on_target.insert(missing_on_disk);
     }
 }
@@ -153,7 +160,7 @@ async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), Mi
         buf.resize(len as usize, 0u8);
         curr.read_at(&mut buf, missing_on_disk.start).await;
 
-        target.write_at(&buf, missing_on_disk.start).await;
+        target.write_at(&buf, missing_on_disk.start).await?;
         on_disk.insert(missing_on_disk);
     }
 }
