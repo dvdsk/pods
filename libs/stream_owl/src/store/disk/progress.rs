@@ -28,6 +28,8 @@ pub enum Error {
     ReadingProgress(io::Error),
     #[error("Could not write progress to file")]
     AppendingSection(io::Error),
+    #[error("Could not flush written progress to disk")]
+    Flushing(io::Error),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -38,7 +40,7 @@ pub(super) struct Progress {
     /// The cursor is where the next append mark should be written
     #[derivative(Debug = "ignore")]
     file: File,
-    last_on_disk: Range<u64>,
+    next_record_start: u64,
     pub(super) ranges: RangeSet<u64>,
     #[derivative(Debug = "ignore")]
     pub(super) range_tx: range_watch::Sender,
@@ -67,31 +69,36 @@ impl Progress {
         Ok(Progress {
             file,
             ranges: ranges_from_file_bytes(&buf),
-            last_on_disk: start_pos..start_pos,
+            next_record_start: start_pos,
             range_tx,
         })
     }
 
+    #[instrument(level = "debug", ret, err)]
     pub(super) async fn finish_section(&mut self, end: u64, new_starts_at: u64) -> Result<()> {
-        let start = self.last_on_disk.start;
-        self.append_section(start, end).await?;
-        self.last_on_disk = new_starts_at..new_starts_at;
+        let start = self.next_record_start;
+        self.record_section(start, end).await?;
+        self.next_record_start = new_starts_at;
         Ok(())
     }
 
+    #[instrument(level = "trace", ret, err)]
     pub(super) async fn update(&mut self, writer_pos: u64) -> Result<()> {
-        self.last_on_disk.end += writer_pos;
-        self.range_tx.send(self.last_on_disk.clone());
+        let new_range = self.next_record_start..writer_pos;
+        self.range_tx.send(new_range);
 
-        if writer_pos - self.last_on_disk.end < 10_000 {
-            return Ok(());
+        let written_since_recorded = writer_pos - self.next_record_start;
+        match written_since_recorded {
+            0..=4_999 => Ok(()),
+            5_000..=9_999 => self.file.flush().await.map_err(Error::Flushing),
+            10_000.. => {
+                let start = self.next_record_start;
+                self.record_section(start, writer_pos).await
+            }
         }
-
-        let start = self.last_on_disk.start;
-        self.append_section(start, writer_pos).await
     }
 
-    async fn append_section(&mut self, start: u64, end: u64) -> Result<()> {
+    async fn record_section(&mut self, start: u64, end: u64) -> Result<()> {
         let mut final_section = [0u8; SECTION_LEN];
         final_section[..8].copy_from_slice(&start.to_le_bytes());
         final_section[8..].copy_from_slice(&end.to_le_bytes());

@@ -52,6 +52,8 @@ pub enum Error {
     SeekForWriting(std::io::Error),
     #[error("Could not seek while preparing read")]
     SeekForReading(std::io::Error),
+    #[error("Could not flush data to disk")]
+    FlushingData(std::io::Error),
 }
 
 impl Disk {
@@ -111,6 +113,10 @@ impl Disk {
             self.writer_seek(pos).await?;
         }
         let written = self.writer.write(buf).await.map_err(Error::WritingData)?;
+        // OPT: should only flush once read needs it. We could even
+        // have a small memory cache that remembers the last unflushed read
+        // that way we can lazily flush.
+        self.writer.flush().await.map_err(Error::FlushingData)?;
         self.writer_pos += written as u64;
         self.progress
             .update(self.writer_pos)

@@ -50,7 +50,7 @@ impl StoreAppender {
 
 #[async_trait::async_trait]
 impl Appender for StoreAppender {
-    #[instrument(level = "trace", skip(self, buf), fields(buf_len = buf.len()), ret)]
+    #[instrument(level = "trace", skip(self, buf), fields(buf_len = buf.len()))]
     async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
         // only this function modifies pos,
         // only need to read threads own writes => relaxed ordering

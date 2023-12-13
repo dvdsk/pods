@@ -7,7 +7,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 use tracing::instrument;
 
-use crate::store::{Gapless, ReadError, SwitchableStore, self};
+use crate::store::{self, Gapless, ReadError, SwitchableStore};
 
 mod prefetch;
 use prefetch::Prefetch;
@@ -63,11 +63,11 @@ fn stream_ended(_: tokio::sync::mpsc::error::SendError<u64>) -> io::Error {
 
 impl Seek for Reader {
     // this moves the seek in the stream
-    #[instrument(level = "debug", ret, err)]
-    fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
+    #[instrument(level = "debug", err)]
+    fn seek(&mut self, rel_pos: io::SeekFrom) -> io::Result<u64> {
         let just_started = self.store.size().requests_analyzed() < 1;
 
-        let pos = match pos {
+        let pos = match rel_pos {
             io::SeekFrom::Start(bytes) => bytes,
             io::SeekFrom::Current(bytes) => self.curr_pos + bytes as u64,
             io::SeekFrom::End(bytes) => {
@@ -84,6 +84,7 @@ impl Seek for Reader {
             }
         };
 
+        tracing::debug!("Seeking to: {rel_pos:?}, absolute pos: {pos:?}");
         let gapless = self.store.gapless_from_till(self.last_seek, pos);
         if let Gapless::No(mut store) = gapless {
             self.seek_in_stream(pos)?;
@@ -107,10 +108,10 @@ impl Read for Reader {
         let n_read2 = self.rt.block_on(async {
             let res = self.store.read_at(&mut buf[n_read1..], self.curr_pos).await;
             let bytes = match res {
-                Err(ReadError::EndOfStream) => return 0,
-                // returns out of block_on closure, not function
-                Err(other) => return handle_read_error(other),
                 Ok(bytes) => bytes,
+                Err(ReadError::EndOfStream) => return Ok(0),
+                // returns out of block_on closure, not function
+                Err(ReadError::Store(other)) => return Err(handle_read_error(other).await),
             };
 
             self.curr_pos += bytes as u64;
@@ -118,13 +119,18 @@ impl Read for Reader {
 
             self.prefetch
                 .perform_if_needed(&mut self.store, self.curr_pos, n_read1 + bytes)
-                .await;
-            bytes
-        });
+                .await?;
+
+            Ok(bytes)
+        })?;
+
         Ok(n_read1 + n_read2)
     }
 }
 
-async fn handle_read_error(error: store::Error) -> Result<usize, io::Error> {
-    todo!()
+async fn handle_read_error(_error: store::Error) -> io::Error {
+    todo!(
+        "notify stream/end stream future with error (some sending required?)
+          and turn into an appropriate io::Error for the reader"
+    )
 }

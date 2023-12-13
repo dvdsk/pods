@@ -8,6 +8,7 @@ use futures_concurrency::future::Race;
 use rangemap::set::RangeSet;
 use tokio::sync::{oneshot, Mutex};
 
+use crate::store;
 use super::disk::Disk;
 use super::mem::Memory;
 use super::{capacity, range_watch, CapacityBounds, Store, StoreVariant, SwitchableStore};
@@ -72,6 +73,14 @@ pub enum MigrationError {
     MemAllocation(TryReserveError),
     #[error("todo")]
     WritingToDisk(#[from] StoreError),
+    #[error("todo")]
+    PreMigrateRead(store::Error),
+    #[error("todo")]
+    PreMigrateWrite(store::Error),
+    #[error("todo")]
+    MigrateRead(store::Error),
+    #[error("todo")]
+    MigrateWrite(store::Error),
 }
 
 pub struct MigrationHandle(oneshot::Receiver<Result<(), MigrationError>>);
@@ -93,7 +102,7 @@ async fn migrate(
         PreMigration(Result<(), MigrationError>),
     }
 
-    let pre_migration = pre_migrate_to_disk(&curr, &mut target).map(Res::PreMigration);
+    let pre_migration = pre_migrate(&curr, &mut target).map(Res::PreMigration);
     let cancelled = tx.closed().map(|_| Res::Cancelled);
     match (pre_migration, cancelled).race().await {
         Res::Cancelled => return,
@@ -121,7 +130,7 @@ async fn migrate(
     }
 }
 
-async fn pre_migrate_to_disk(
+async fn pre_migrate(
     curr: &Mutex<Store>,
     target: &mut Store,
 ) -> Result<(), MigrationError> {
@@ -139,10 +148,12 @@ async fn pre_migrate_to_disk(
         let len = missing_on_disk.start - missing_on_disk.end;
         let len = len.min(4096);
         buf.resize(len as usize, 0u8);
-        src.read_at(&mut buf, missing_on_disk.start).await;
+        src.read_at(&mut buf, missing_on_disk.start)
+            .await
+            .map_err(MigrationError::PreMigrateRead)?;
         drop(src);
 
-        target.write_at(&buf, missing_on_disk.start).await?;
+        target.write_at(&buf, missing_on_disk.start).await.map_err(MigrationError::PreMigrateWrite)?;
         on_target.insert(missing_on_disk);
     }
 }
@@ -158,9 +169,11 @@ async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), Mi
         let len = missing_on_disk.start - missing_on_disk.end;
         let len = len.min(4096);
         buf.resize(len as usize, 0u8);
-        curr.read_at(&mut buf, missing_on_disk.start).await;
+        curr.read_at(&mut buf, missing_on_disk.start)
+            .await
+            .map_err(MigrationError::MigrateRead)?;
 
-        target.write_at(&buf, missing_on_disk.start).await?;
+        target.write_at(&buf, missing_on_disk.start).await.map_err(MigrationError::MigrateWrite)?;
         on_disk.insert(missing_on_disk);
     }
 }

@@ -148,7 +148,7 @@ pub(crate) enum Gapless {
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ReadError {
     #[error(transparent)]
-    Reader(#[from] Error),
+    Store(#[from] Error),
     #[error("End of stream reached")]
     EndOfStream,
 }

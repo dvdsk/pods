@@ -5,7 +5,8 @@ use derivative::Derivative;
 use tracing::debug;
 use tracing::instrument;
 
-use crate::store::ReadResult;
+use crate::reader::handle_read_error;
+use crate::store::ReadError;
 use crate::store::SwitchableStore;
 use crate::vecd;
 use crate::vecdeque::VecDequeExt;
@@ -68,9 +69,9 @@ impl Prefetch {
         store: &mut SwitchableStore,
         reader_pos: u64,
         already_read: usize,
-    ) {
+    ) -> Result<(), std::io::Error> {
         if !self.should_run(already_read) {
-            return;
+            return Ok(());
         }
         self.active = false;
 
@@ -81,14 +82,20 @@ impl Prefetch {
         };
 
         let (a, b) = self.buf.as_mut_slices();
-        if prefetching.read_into_first(a).await.is_ok() {
-            if prefetching.read_into_second(b).await.is_err() {
-                debug!("Prefetch ended_early, end of stream reached");
-            }
-        } else {
-            debug!("Prefetch ended_early, end of stream reached");
+        match prefetching.read_into_first(a).await {
+            Err(ReadError::EndOfStream) => debug!("Prefetch ended_early, end of stream reached"),
+            Err(ReadError::Store(e)) => return Err(handle_read_error(e).await),
+            Ok(_) => match prefetching.read_into_second(b).await {
+                Ok(_) => todo!(),
+                Err(ReadError::EndOfStream) => {
+                    debug!("Prefetch ended_early, end of stream reached")
+                }
+                Err(ReadError::Store(e)) => return Err(handle_read_error(e).await),
+            },
         }
+
         self.in_buffer = prefetching.finish(reader_pos);
+        Ok(())
     }
 
     #[instrument(level = "trace", skip(buf), ret)]
@@ -109,32 +116,26 @@ struct Prefetching<'a> {
     store: &'a mut SwitchableStore,
 }
 
-struct EarlyEOF;
-
 impl<'a> Prefetching<'a> {
     fn account_for_bytes_read(&mut self, bytes: usize) {
         self.still_needed -= bytes;
         self.pos += bytes as u64;
     }
 
-    async fn read_into_first(&mut self, a: &mut [u8]) -> Result<(), EarlyEOF> {
+    async fn read_into_first(&mut self, a: &mut [u8]) -> Result<(), ReadError> {
         let n_read = 0;
         while n_read <= a.len() && self.still_needed > 0 {
             let start = n_read;
             let space_left = a.len() - n_read;
             let end = start + self.still_needed.min(space_left);
             let free = &mut a[start..end];
-            let ReadResult::ReadN(bytes) = self.store.read_at(free, self.pos).await else {
-                return Err(EarlyEOF);
-                // self.in_buffer = reader_pos..reader_pos + n_read as u64;
-                // return; // next call to read_at will signal eof
-            };
+            let bytes = self.store.read_at(free, self.pos).await?;
             self.account_for_bytes_read(bytes);
         }
         Ok(())
     }
 
-    async fn read_into_second(&mut self, b: &mut [u8]) -> Result<(), EarlyEOF> {
+    async fn read_into_second(&mut self, b: &mut [u8]) -> Result<(), ReadError> {
         let n_read = 0;
         while n_read <= b.len() && self.still_needed > 0 {
             let start = n_read;
@@ -142,12 +143,7 @@ impl<'a> Prefetching<'a> {
             // space for the entire prefetch
             let end = start + self.still_needed;
             let free = &mut b[start..end];
-            let ReadResult::ReadN(bytes) = self.store.read_at(free, self.pos).await else {
-                return Err(EarlyEOF);
-                // debug!("Prefetch ended_early, end of stream reached");
-                // self.in_buffer = reader_pos..reader_pos + n_read as u64;
-                // return; // next call to read_at will signal eof
-            };
+            let bytes = self.store.read_at(free, self.pos).await?;
             self.account_for_bytes_read(bytes);
         }
         Ok(())
