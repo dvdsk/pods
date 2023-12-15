@@ -29,7 +29,7 @@ pub fn gen_file_path() -> PathBuf {
     dir
 }
 
-fn test_data(bytes: u32) -> Vec<u8> {
+pub fn test_data(bytes: u32) -> Vec<u8> {
     (0..bytes)
         .into_iter()
         .step_by(4)

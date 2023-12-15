@@ -44,7 +44,7 @@ async fn handler(State(state): State<Arc<PausableServer>>, headers: http::Header
     let range = range
         .to_str()
         .unwrap()
-        .strip_prefix("Range: bytes=")
+        .strip_prefix("bytes=")
         .unwrap()
         .split_once("-")
         .unwrap();
