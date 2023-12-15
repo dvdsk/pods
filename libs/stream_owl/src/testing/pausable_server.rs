@@ -2,10 +2,12 @@ use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::extract::State;
+use axum::response::Response;
 use axum::routing::get;
 use axum::Router;
-use http::Uri;
+use http::{StatusCode, Uri};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tower_http::trace::TraceLayer;
@@ -39,7 +41,10 @@ impl PauseControls {
 
 use axum_macros::debug_handler;
 #[debug_handler]
-async fn handler(State(state): State<Arc<PausableServer>>, headers: http::HeaderMap) -> Vec<u8> {
+async fn handler(
+    State(state): State<Arc<PausableServer>>,
+    headers: http::HeaderMap,
+) -> Response<Body> {
     let range = headers.get("Range").unwrap();
     let range = range
         .to_str()
@@ -48,13 +53,22 @@ async fn handler(State(state): State<Arc<PausableServer>>, headers: http::Header
         .unwrap()
         .split_once("-")
         .unwrap();
-    let range = range.0.parse().unwrap()..range.1.parse().unwrap();
+    let start = range.0.parse().unwrap();
+    let stop = range.1.parse().unwrap();
 
     if state.pause_controls.paused.load(Ordering::Acquire) {
         state.pause_controls.notify.notified().await;
     }
 
-    state.test_data[range].to_owned()
+    let data = state.test_data[start..stop].to_owned();
+    let total = data.len();
+
+    Response::builder()
+        .status(StatusCode::PARTIAL_CONTENT)
+        .header("Content-Range", format!("bytes {start}-{stop}/{total}"))
+        .header("Accept-Ranges", "bytes")
+        .body(Body::from(data))
+        .unwrap()
 }
 
 /// # Panics

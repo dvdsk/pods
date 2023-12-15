@@ -145,6 +145,7 @@ pub(crate) async fn new(
             Res2::Write(Err(e)) => return Err(Error::HttpClient(e)),
             Res2::Write(Ok(())) => {
                 info!("At end of stream, waiting for seek");
+                todo!("Could be missing first part of the stream (very rare) if the server only stopped serving range requests half way through and we miss where seeking beyond the start when starting");
                 stream_size.mark_stream_end(appender.pos());
                 match seek_rx.recv().await {
                     Some(pos) => pos,
