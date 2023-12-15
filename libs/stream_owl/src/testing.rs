@@ -1,11 +1,20 @@
-use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{mpsc, Arc};
+use std::thread;
 
-use axum::{routing::get_service, Router};
-use http::Uri;
-use tokio::task::JoinHandle;
-use tower_http::{services::ServeFile, trace::TraceLayer};
+use futures::FutureExt;
+use futures_concurrency::future::Race;
+use tokio::runtime::Runtime;
+use tokio::sync::Notify;
+use tokio::task::{JoinError, JoinHandle};
+
+use crate::{StreamBuilder, StreamCanceld, StreamError, StreamHandle};
+
+mod pausable_server;
+pub use pausable_server::{pausable_server, PauseControls};
+
+mod static_file_server;
+pub use static_file_server::static_file_server;
 
 pub fn gen_file_path() -> PathBuf {
     use rand::distributions::Alphanumeric;
@@ -20,30 +29,6 @@ pub fn gen_file_path() -> PathBuf {
     dir
 }
 
-fn gen_file_if_not_there(len: u64) -> PathBuf {
-    static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-    if let Some(ref path) = *PATH.lock().unwrap() {
-        if path.metadata().unwrap().len() == len {
-            return path.clone();
-        }
-    }
-
-    let mut dir = std::env::temp_dir();
-    dir.push("stream_owl_test_source_.data");
-    let path = dir;
-    *PATH.lock().unwrap() = Some(path.clone());
-
-    if path.is_file() {
-        if path.metadata().unwrap().len() == len {
-            return path;
-        }
-    }
-
-    std::fs::write(&path, test_data(len as u32)).unwrap();
-    path
-}
-
 fn test_data(bytes: u32) -> Vec<u8> {
     (0..bytes)
         .into_iter()
@@ -52,25 +37,47 @@ fn test_data(bytes: u32) -> Vec<u8> {
         .collect()
 }
 
-pub async fn server(test_file_size: u64) -> (Uri, JoinHandle<Result<(), std::io::Error>>) {
-    let test_data_path = gen_file_if_not_there(test_file_size);
-    let serve_file = ServeFile::new(test_data_path);
-    let app = Router::new().route("/stream_test", get_service(serve_file));
+pub fn setup_reader_test(
+    test_done: &Arc<Notify>,
+    test_file_size: u32,
+    configure: impl FnOnce(StreamBuilder<false>) -> StreamBuilder<true> + Send + 'static,
+    server: impl FnOnce(u64) -> (http::Uri, JoinHandle<Result<(), std::io::Error>>) + Send + 'static,
+) -> (thread::JoinHandle<TestEnded>, StreamHandle) {
+    setup_tracing();
+    let (runtime_thread, handle) = {
+        let test_done = test_done.clone();
+        let (tx, rx) = mpsc::channel();
+        let runtime_thread = thread::spawn(move || {
+            let rt = Runtime::new().unwrap();
+            rt.block_on(async {
+                let (uri, server) = server(test_file_size as u64);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 0));
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    let port = listener.local_addr().unwrap().port();
-    tracing::debug!(
-        "testserver listening on on {}",
-        listener.local_addr().unwrap()
-    );
-    let server = axum::serve(listener, app.layer(TraceLayer::new_for_http()));
-    let server = tokio::task::spawn(server);
+                let builder = StreamBuilder::new(uri);
+                let (handle, stream) = configure(builder).start().await;
+                tx.send(handle).unwrap();
 
-    let uri: Uri = format!("http://localhost:{port}/stream_test")
-        .parse()
-        .unwrap();
-    (uri, server)
+                let server = server.map(TestEnded::ServerCrashed);
+                let stream = stream.map(TestEnded::StreamReturned);
+                let done = wait_for_test_done(test_done);
+                (server, stream, done).race().await
+            })
+        });
+        let handle = rx.recv().unwrap();
+        (runtime_thread, handle)
+    };
+    (runtime_thread, handle)
+}
+
+#[derive(Debug)]
+pub enum TestEnded {
+    ServerCrashed(Result<Result<(), std::io::Error>, JoinError>),
+    StreamReturned(Result<StreamCanceld, StreamError>),
+    TestDone,
+}
+
+async fn wait_for_test_done(test_done: Arc<Notify>) -> TestEnded {
+    test_done.notified().await;
+    TestEnded::TestDone
 }
 
 pub fn setup_tracing() {
@@ -80,7 +87,7 @@ pub fn setup_tracing() {
 
     let filter = filter::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         filter::EnvFilter::builder()
-            .parse("stream_owl=trace,info")
+            .parse("stream_owl=trace,tower=debug,info")
             .unwrap()
     });
 
