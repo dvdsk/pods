@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use derivative::Derivative;
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
@@ -7,6 +9,7 @@ use hyper::body::Incoming;
 use tracing::debug;
 
 use crate::network::Network;
+use crate::target::StreamTarget;
 mod io;
 mod read;
 use read::Reader;
@@ -119,80 +122,71 @@ impl Cookies {
 /// A client that is currently streaming partial content
 /// (the result of a range request)
 #[derive(Debug)]
-pub(crate) struct ClientStreamingPartial {
+pub(crate) struct RangeSupported {
     stream: Incoming,
-    inner: InnerClient,
-    size: Size,
+    client: Client,
 }
 
-impl ClientStreamingPartial {
+impl RangeSupported {
     #[tracing::instrument(level = "trace")]
     pub(crate) fn into_reader(self) -> Reader {
-        let Self {
-            stream,
-            inner,
-            size,
-        } = self;
-        Reader::PartialData(InnerReader::new(stream, inner, size))
+        let Self { stream, client } = self;
+        Reader::PartialData(InnerReader::new(stream, client))
     }
 
     pub(crate) fn stream_size(&self) -> Size {
-        self.size.clone()
+        self.client.size.clone()
     }
 
     pub(crate) fn builder(&self) -> ClientBuilder {
         ClientBuilder {
-            restriction: self.inner.restriction.clone(),
-            url: self.inner.url.clone(),
-            cookies: self.inner.cookies.clone(),
-            size: self.size.clone(),
+            restriction: self.client.restriction.clone(),
+            url: self.client.url.clone(),
+            cookies: self.client.cookies.clone(),
+            size: self.client.size.clone(),
         }
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct ClientStreamingAll {
+pub(crate) struct RangeRefused {
     stream: Incoming,
-    inner: InnerClient,
-    size: Size,
+    client: Client,
 }
 
-impl ClientStreamingAll {
+impl RangeRefused {
     pub(crate) fn into_reader(self) -> Reader {
-        let Self {
-            stream,
-            inner,
-            size,
-        } = self;
-        Reader::AllData(InnerReader::new(stream, inner, size))
+        let Self { stream, client } = self;
+        Reader::AllData(InnerReader::new(stream, client))
     }
 
     pub(crate) fn builder(&self) -> ClientBuilder {
         ClientBuilder {
-            restriction: self.inner.restriction.clone(),
-            url: self.inner.url.clone(),
-            cookies: self.inner.cookies.clone(),
-            size: self.size.clone(),
+            restriction: self.client.restriction.clone(),
+            url: self.client.url.clone(),
+            cookies: self.client.cookies.clone(),
+            size: self.client.size.clone(),
         }
     }
 
     pub(crate) fn stream_size(&self) -> Size {
-        self.size.clone()
+        self.client.size.clone()
     }
 }
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct InnerClient {
+pub(crate) struct Client {
     host: HeaderValue,
     restriction: Option<Network>,
     url: hyper::Uri,
     #[derivative(Debug = "ignore")]
     conn: Connection,
+    size: Size,
     cookies: Cookies,
 }
 
-impl InnerClient {
+impl Client {
     #[tracing::instrument(level = "trace", skip(self), ret)]
     async fn send_range_request(
         &mut self,
@@ -208,16 +202,9 @@ impl InnerClient {
 }
 
 #[derive(Debug)]
-pub struct Client {
-    should_support_range: bool,
-    size: Size,
-    inner: InnerClient,
-}
-
-#[derive(Debug)]
 pub(crate) enum StreamingClient {
-    Partial(ClientStreamingPartial),
-    All(ClientStreamingAll),
+    RangeSupported(RangeSupported),
+    RangeRefused(RangeRefused),
 }
 
 #[derive(Debug, Clone)]
@@ -230,7 +217,10 @@ pub(crate) struct ClientBuilder {
 
 impl ClientBuilder {
     #[tracing::instrument(level = "debug")]
-    pub(crate) async fn connect(self, start: u64, len: u64) -> Result<StreamingClient, Error> {
+    pub(crate) async fn connect(
+        self,
+        target: StreamTarget,
+    ) -> Result<StreamingClient, Error> {
         let Self {
             restriction,
             mut url,
@@ -238,11 +228,7 @@ impl ClientBuilder {
             mut size,
         } = self;
 
-        let end = if let Some(size) = size.known() {
-            (start + len).min(size)
-        } else {
-            start + len
-        };
+        let Range { start, end } = target.next_range(size.known());
         let first_range = format!("bytes={start}-{end}");
 
         let mut conn = Connection::new(&url, &restriction).await?;
@@ -275,23 +261,22 @@ impl ClientBuilder {
         }
 
         let host = url.host().unwrap().parse().unwrap();
-        let inner = InnerClient {
+        let client = Client {
             host,
             restriction,
             url,
             conn,
             cookies,
+            size,
         };
         match response.status() {
-            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
+            StatusCode::OK => Ok(StreamingClient::RangeRefused(RangeRefused {
                 stream: response.into_body(),
-                inner,
-                size,
+                client,
             })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangeSupported(RangeSupported {
                 stream: response.into_body(),
-                inner,
-                size,
+                client,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => {
                 tracing::info!("{response:?}");
@@ -307,9 +292,8 @@ impl StreamingClient {
     pub(crate) async fn new(
         url: hyper::Uri,
         restriction: Option<Network>,
-        init_start: u64,
-        init_len: u64,
         size: Size,
+        target: StreamTarget,
     ) -> Result<Self, Error> {
         ClientBuilder {
             restriction,
@@ -317,14 +301,14 @@ impl StreamingClient {
             cookies: Cookies::new(),
             size,
         }
-        .connect(init_start, init_len)
+        .connect(target)
         .await
     }
 
     pub(crate) fn stream_size(&self) -> Size {
         match self {
-            StreamingClient::Partial(client) => client.stream_size(),
-            StreamingClient::All(client) => client.stream_size(),
+            StreamingClient::RangeSupported(client) => client.stream_size(),
+            StreamingClient::RangeRefused(client) => client.stream_size(),
         }
     }
 }
@@ -333,31 +317,22 @@ impl Client {
     #[tracing::instrument(level = "debug", err, ret)]
     pub(crate) async fn try_get_range(
         mut self,
-        start: u64,
-        chunk_size: u64,
+        Range { start, end }: Range<u64>,
     ) -> Result<StreamingClient, Error> {
         assert!(Some(start) < self.stream_size().known());
-        let end = start + chunk_size;
 
-        let range = if Some(end) >= self.stream_size().known() {
-            format!("bytes={start}-") // download till end of stream
-        } else {
-            format!("bytes={start}-{end}")
-        };
-
-        let response = self.inner.send_range_request(&range).await?;
+        let range = format!("bytes={start}-{end}");
+        let response = self.send_range_request(&range).await?;
 
         self.size.update_from_headers(&response);
         match response.status() {
-            StatusCode::OK => Ok(StreamingClient::All(ClientStreamingAll {
+            StatusCode::OK => Ok(StreamingClient::RangeRefused(RangeRefused {
                 stream: response.into_body(),
-                inner: self.inner,
-                size: self.size,
+                client: self,
             })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::Partial(ClientStreamingPartial {
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangeSupported(RangeSupported {
                 stream: response.into_body(),
-                inner: self.inner,
-                size: self.size,
+                client: self,
             })),
             StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
             _ => Err(Error::status_not_ok(response).await),
@@ -378,87 +353,4 @@ fn redirect_url<T>(redirect: hyper::Response<T>) -> Result<hyper::Uri, Error> {
         .map_err(Error::BrokenRedirectLocation)?
         .parse()
         .map_err(Error::InvalidUriRedirectLocation)
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::Appender;
-
-    use super::*;
-
-    #[async_trait::async_trait]
-    impl Appender for &mut Vec<u8> {
-        async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error> {
-            self.extend_from_slice(buf);
-            Ok(buf.len())
-        }
-    }
-
-    // feed url: 274- The Age of the Algorithm
-    const FEED_URL: &str = "https://dts.podtrac.com/redirect.mp3/chrt.fm/track/288D49/stitcher.simplecastaudio.com/3bb687b0-04af-4257-90f1-39eef4e631b6/episodes/c660ce6b-ced1-459f-9535-113c670e83c9/audio/128/default.mp3?aid=rss_feed&awCollectionId=3bb687b0-04af-4257-90f1-39eef4e631b6&awEpisodeId=c660ce6b-ced1-459f-9535-113c670e83c9&feed=BqbsxVfO";
-
-    #[tokio::test]
-    async fn get_stream_client() {
-        let url = hyper::Uri::from_static(FEED_URL);
-        let client = StreamingClient::new(url, None, 0, 1024, Size::default())
-            .await
-            .unwrap();
-        assert!(client.stream_size().known().is_some());
-
-        match client {
-            StreamingClient::Partial(_) => (),
-            StreamingClient::All(client) => {
-                let mut buf = Vec::new();
-                client
-                    .into_reader()
-                    .read_to_writer(&mut buf, None)
-                    .await
-                    .unwrap();
-                let len = buf.len();
-                dbg!(len);
-                panic!("should get partial streaming client")
-            }
-        };
-    }
-
-    #[tokio::test]
-    async fn state_machine_works() {
-        const CHUNK_SIZE: u64 = 1_000_000; // 1MB
-        let url = hyper::Uri::from_static(FEED_URL);
-        let mut client = StreamingClient::new(url, None, 0, CHUNK_SIZE, Size::default())
-            .await
-            .unwrap();
-        let mut buffer = Vec::new();
-        loop {
-            match client {
-                StreamingClient::Partial(client_with_stream) => {
-                    let content_size = client_with_stream
-                        .stream_size()
-                        .known()
-                        .expect("test stream should provide size");
-                    let mut reader = client_with_stream.into_reader();
-                    reader
-                        .read_to_writer(&mut buffer, Some(CHUNK_SIZE as usize))
-                        .await
-                        .unwrap();
-
-                    if buffer.len() as u64 >= content_size {
-                        return;
-                    }
-
-                    client = reader
-                        .try_into_client()
-                        .unwrap()
-                        .try_get_range(buffer.len() as u64, CHUNK_SIZE)
-                        .await
-                        .unwrap();
-                }
-                StreamingClient::All(client_with_stream) => {
-                    let mut reader = client_with_stream.into_reader();
-                    reader.read_to_writer(&mut buffer, None).await.unwrap();
-                    break;
-                }
-            }
-        }
-    }
 }

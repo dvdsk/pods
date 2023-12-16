@@ -4,17 +4,17 @@ use bytes::Bytes;
 use http_body_util::BodyExt;
 use hyper::body::{Body, Incoming};
 
+use crate::target::StreamTarget;
+
 use super::size::Size;
 // todo fix error, should be task stream error?
-use super::{Client, Error, InnerClient};
-use crate::Appender;
+use super::{Error, Client};
 
 #[derive(Debug)]
 pub(crate) struct InnerReader {
     stream: Incoming,
-    client: InnerClient,
+    client: Client,
     buffer: VecDeque<u8>,
-    stream_size: Size,
 }
 
 #[derive(Debug)]
@@ -35,22 +35,9 @@ impl Reader {
 
         Ok(match self {
             Reader::PartialData(InnerReader {
-                client,
-                stream: _,
-                stream_size,
-                ..
-            }) => Client {
-                should_support_range: true,
-                size: stream_size,
-                inner: client,
-            },
-            Reader::AllData(InnerReader {
-                client, stream_size, ..
-            }) => Client {
-                should_support_range: false,
-                size: stream_size,
-                inner: client,
-            },
+                client, stream: _, ..
+            }) => client,
+            Reader::AllData(InnerReader { client, .. }) => client,
         })
     }
 
@@ -63,39 +50,38 @@ impl Reader {
 
     pub(crate) fn stream_size(&self) -> Size {
         match self {
-            Reader::PartialData(inner) => inner.stream_size.clone(),
-            Reader::AllData(inner) => inner.stream_size.clone(),
+            Reader::PartialData(inner) => inner.client.size.clone(),
+            Reader::AllData(inner) => inner.client.size.clone(),
         }
     }
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
-    #[tracing::instrument(level = "trace", skip(appender, self))]
-    pub(crate) async fn read_to_writer(
+    #[tracing::instrument(level = "trace", skip(target, self))]
+    pub(crate) async fn stream_to_writer(
         &mut self,
-        mut appender: impl Appender,
+        target: &mut StreamTarget,
         max: Option<usize>,
     ) -> Result<(), Error> {
-        self.inner().read_to_writer(&mut appender, max).await
+        self.inner().stream_to_writer(target, max).await
     }
 }
 
 impl InnerReader {
-    pub(crate) fn new(stream: Incoming, client: InnerClient, size_hint: Size) -> Self {
+    pub(crate) fn new(stream: Incoming, client: Client) -> Self {
         Self {
             stream,
             client,
             buffer: VecDeque::new(),
-            stream_size: size_hint,
         }
     }
 
     /// async cancel safe, any bytes read will be written or bufferd by the reader
     /// if you want to track the number of bytes written use a wrapper around the writer
     #[tracing::instrument(level = "trace", skip_all)]
-    pub(crate) async fn read_to_writer(
+    pub(crate) async fn stream_to_writer(
         &mut self,
-        output: &mut impl Appender,
+        output: &mut StreamTarget,
         max: Option<usize>,
     ) -> Result<(), Error> {
         let max = max.unwrap_or(usize::MAX);
@@ -130,7 +116,7 @@ impl InnerReader {
     async fn write_from_buffer(
         &mut self,
         max: usize,
-        output: &mut impl Appender,
+        output: &mut StreamTarget,
     ) -> Result<usize, Error> {
         let to_take = self.buffer.len().min(max);
         let from_buffer: Vec<_> = self.buffer.range(0..to_take).copied().collect();
@@ -153,7 +139,7 @@ impl InnerReader {
     }
 }
 
-#[tracing::instrument(level="debug", err)]
+#[tracing::instrument(level = "debug", err)]
 async fn get_next_data_frame(stream: &mut Incoming) -> Result<Option<Bytes>, Error> {
     loop {
         let Some(frame) = stream.frame().await else {

@@ -1,12 +1,12 @@
-/// Interface for reading streaming/downloading data
-use async_trait::async_trait;
-
-mod http_client;
 mod manager;
 mod network;
 mod reader;
 mod store;
+
+/// Glue between store and stream/http_client
+mod target;
 mod stream;
+mod http_client;
 
 #[macro_use]
 mod vecdeque;
@@ -14,12 +14,6 @@ mod vecdeque;
 /// internal use only! in time move this to tests/common/common.rs
 /// for now RA needs it here and we need RA
 pub mod testing;
-
-#[async_trait]
-trait Appender {
-    // returns amount written, does not guarantee entire buffer is written
-    async fn append(&mut self, buf: &[u8]) -> Result<usize, std::io::Error>;
-}
 
 pub use stream::StreamBuilder;
 
