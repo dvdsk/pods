@@ -10,13 +10,23 @@ use stream_owl::StreamBuilder;
 use tokio::sync::Notify;
 use tracing::instrument;
 
+#[ignore = "not yet implemented"]
 #[test]
 fn resume_when_server_disconnects_during_pause() {
     todo!()
 }
 
+#[ignore = "not yet implemented"]
 #[test]
 fn resume_when_connection_breaks_randomly() {
+    todo!()
+}
+
+#[ignore = "not yet implemented"]
+#[test]
+fn download_front_while_streaming_endless_at_back() {
+    // impl idea: set (timed?) trigger to seek back to
+    // back then jump to front
     todo!()
 }
 

@@ -5,7 +5,7 @@ use rangemap::RangeSet;
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, OwnedMutexGuard};
+use tokio::sync::Mutex;
 use tracing::instrument;
 
 mod capacity;
@@ -26,7 +26,7 @@ use self::capacity::Capacity;
 #[derive(Derivative, Clone)]
 #[derivative(Debug)]
 pub(crate) struct SwitchableStore {
-    curr_store: Arc<Mutex<Store>>,
+    pub(crate) curr_store: Arc<Mutex<Store>>,
     curr_range: range_watch::Receiver,
     capacity_watcher: CapacityWatcher,
     stream_size: Size,
@@ -116,7 +116,7 @@ impl SwitchableStore {
     }
 
     #[instrument(level = "trace", skip(self, buf))]
-    pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
+    pub(crate) async fn write_at(&self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
         self.capacity_watcher.wait_for_space().await;
         self.curr_store.lock().await.write_at(buf, pos).await
     }
@@ -125,25 +125,11 @@ impl SwitchableStore {
     pub(crate) fn size(&self) -> Size {
         self.stream_size.clone()
     }
-
-    pub(crate) fn gapless_from_till(&self, last_seek: u64, pos: u64) -> Gapless {
-        let store = self.curr_store.clone().blocking_lock_owned();
-        if store.gapless_from_till(pos, last_seek) {
-            Gapless::Yes
-        } else {
-            Gapless::No(store)
-        }
-    }
 }
 
 #[derive(Debug)]
 pub(crate) struct SeekInProgress;
 
-#[derive(Debug)]
-pub(crate) enum Gapless {
-    No(OwnedMutexGuard<Store>),
-    Yes,
-}
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ReadError {
@@ -191,7 +177,7 @@ macro_rules! forward_impl_mut {
 }
 
 forward_impl!(pub(crate) gapless_from_till, pos: u64, last_seek: u64; bool);
-forward_impl!(ranges,; RangeSet<u64>);
+forward_impl!(pub(crate) ranges,; RangeSet<u64>);
 forward_impl!(last_read_pos,; u64);
 forward_impl!(n_supported_ranges,; usize);
 forward_impl_mut!(pub(crate) writer_jump, to_pos: u64;);

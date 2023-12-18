@@ -101,7 +101,9 @@ impl Memory {
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {
         let mut res = RangeSet::new();
-        res.insert(self.range.clone());
+        if !self.range.is_empty() {
+            res.insert(self.range.clone());
+        }
         res
     }
     pub(super) fn gapless_from_till(&self, pos: u64, last_seek: u64) -> bool {

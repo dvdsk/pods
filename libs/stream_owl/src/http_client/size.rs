@@ -165,6 +165,7 @@ impl Size {
         self.0.requests_analyzed.load(Ordering::Relaxed)
     }
 
+    /// size can be unknown even for range requests (think live-stream)
     pub(crate) fn known(&self) -> Option<u64> {
         match self.get() {
             SizeVariant::Unknown => None,

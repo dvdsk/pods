@@ -11,6 +11,7 @@ use http::{StatusCode, Uri};
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 use tower_http::trace::TraceLayer;
+use tracing::instrument;
 
 use crate::testing::test_data;
 
@@ -34,13 +35,15 @@ impl PauseControls {
     }
 
     pub fn unpause(&self) {
-        self.paused.store(true, Ordering::Release);
+        tracing::warn!("Unpausing debug server");
+        self.paused.store(false, Ordering::Release);
         self.notify.notify_one();
     }
 }
 
 use axum_macros::debug_handler;
 #[debug_handler]
+#[instrument(level="debug", skip(state))]
 async fn handler(
     State(state): State<Arc<PausableServer>>,
     headers: http::HeaderMap,
@@ -57,11 +60,12 @@ async fn handler(
     let stop = range.1.parse().unwrap();
 
     if state.pause_controls.paused.load(Ordering::Acquire) {
+        tracing::warn!("Test server waiting to be unpaused");
         state.pause_controls.notify.notified().await;
     }
 
     let data = state.test_data[start..stop].to_owned();
-    let total = data.len();
+    let total = state.test_data.len();
 
     Response::builder()
         .status(StatusCode::PARTIAL_CONTENT)

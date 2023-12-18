@@ -203,8 +203,8 @@ impl Client {
 
 #[derive(Debug)]
 pub(crate) enum StreamingClient {
-    RangeSupported(RangeSupported),
-    RangeRefused(RangeRefused),
+    RangesSupported(RangeSupported),
+    RangesRefused(RangeRefused),
 }
 
 #[derive(Debug, Clone)]
@@ -217,10 +217,7 @@ pub(crate) struct ClientBuilder {
 
 impl ClientBuilder {
     #[tracing::instrument(level = "debug")]
-    pub(crate) async fn connect(
-        self,
-        target: StreamTarget,
-    ) -> Result<StreamingClient, Error> {
+    pub(crate) async fn connect(self, target: &StreamTarget) -> Result<StreamingClient, Error> {
         let Self {
             restriction,
             mut url,
@@ -228,7 +225,10 @@ impl ClientBuilder {
             mut size,
         } = self;
 
-        let Range { start, end } = target.next_range(size.known());
+        let Range { start, end } = target
+            .next_range(&size)
+            .await
+            .expect("should be a range to get after seek or on connect");
         let first_range = format!("bytes={start}-{end}");
 
         let mut conn = Connection::new(&url, &restriction).await?;
@@ -270,11 +270,11 @@ impl ClientBuilder {
             size,
         };
         match response.status() {
-            StatusCode::OK => Ok(StreamingClient::RangeRefused(RangeRefused {
+            StatusCode::OK => Ok(StreamingClient::RangesRefused(RangeRefused {
                 stream: response.into_body(),
                 client,
             })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangeSupported(RangeSupported {
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangesSupported(RangeSupported {
                 stream: response.into_body(),
                 client,
             })),
@@ -293,7 +293,7 @@ impl StreamingClient {
         url: hyper::Uri,
         restriction: Option<Network>,
         size: Size,
-        target: StreamTarget,
+        target: &StreamTarget,
     ) -> Result<Self, Error> {
         ClientBuilder {
             restriction,
@@ -307,8 +307,8 @@ impl StreamingClient {
 
     pub(crate) fn stream_size(&self) -> Size {
         match self {
-            StreamingClient::RangeSupported(client) => client.stream_size(),
-            StreamingClient::RangeRefused(client) => client.stream_size(),
+            StreamingClient::RangesSupported(client) => client.stream_size(),
+            StreamingClient::RangesRefused(client) => client.stream_size(),
         }
     }
 }
@@ -326,11 +326,11 @@ impl Client {
 
         self.size.update_from_headers(&response);
         match response.status() {
-            StatusCode::OK => Ok(StreamingClient::RangeRefused(RangeRefused {
+            StatusCode::OK => Ok(StreamingClient::RangesRefused(RangeRefused {
                 stream: response.into_body(),
                 client: self,
             })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangeSupported(RangeSupported {
+            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangesSupported(RangeSupported {
                 stream: response.into_body(),
                 client: self,
             })),
