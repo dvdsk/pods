@@ -1,3 +1,4 @@
+use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -11,7 +12,7 @@ use tokio::task::{JoinError, JoinHandle};
 use crate::{StreamBuilder, StreamDone, StreamError, StreamHandle};
 
 mod pausable_server;
-pub use pausable_server::{pausable_server, PauseControls};
+pub use pausable_server::{pausable_server, Controls, Event, Action};
 
 mod static_file_server;
 pub use static_file_server::static_file_server;
@@ -29,12 +30,15 @@ pub fn gen_file_path() -> PathBuf {
     dir
 }
 
-pub fn test_data(bytes: u32) -> Vec<u8> {
-    (0..bytes)
-        .into_iter()
+pub fn test_data_range(range: Range<u32>) -> Vec<u8> {
+    range.into_iter()
         .step_by(4)
         .flat_map(|n| n.to_ne_bytes())
         .collect()
+}
+
+pub fn test_data(bytes: u32) -> Vec<u8> {
+    test_data_range(0..bytes)
 }
 
 pub fn setup_reader_test(

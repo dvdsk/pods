@@ -131,5 +131,6 @@ fn ranges_from_file_bytes(buf: &[u8]) -> RangeSet<u64> {
             )
         })
         .map(|(start, end)| Range { start, end })
+        .filter(|range| !range.is_empty())
         .collect()
 }

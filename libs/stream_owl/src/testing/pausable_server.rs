@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::ops::Range;
+use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
 use axum::extract::State;
@@ -15,37 +15,96 @@ use tracing::instrument;
 
 use crate::testing::test_data;
 
-struct PausableServer {
+struct ControllableServer {
     test_data: Vec<u8>,
-    pause_controls: PauseControls,
+    pause_controls: Controls,
+}
+
+#[derive(Debug)]
+pub enum Event {
+    Any,
+    ByteRequested(u64),
+}
+
+impl Event {
+    fn active(&self, range: &Range<u64>) -> bool {
+        match self {
+            Event::ByteRequested(n) => range.contains(n),
+            Event::Any => true,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum Action {
+    Cut { at: u64 },
+    Crash,
+    Pause,
+}
+
+impl Action {
+    async fn perform(&self, state: &ControllableServer, range: &mut Range<u64>) {
+        match self {
+            Action::Crash => {
+                panic!("Crash requested from test server")
+            }
+            Action::Cut { at } => range.end = *at,
+            Action::Pause => {
+                tracing::warn!("Test server waiting to be unpaused");
+                state.pause_controls.notify.notified().await;
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+struct InnerControls {
+    on_event: Vec<(Event, Action)>,
+    paused: bool,
 }
 
 #[derive(Debug, Clone)]
-pub struct PauseControls {
-    paused: Arc<AtomicBool>,
+pub struct Controls {
+    inner: Arc<Mutex<InnerControls>>,
     notify: Arc<Notify>,
 }
 
-impl PauseControls {
+impl Controls {
     pub fn new() -> Self {
+        let inner = InnerControls {
+            on_event: Vec::new(),
+            paused: false,
+        };
         Self {
-            paused: Arc::new(AtomicBool::new(false)),
+            inner: Arc::new(Mutex::new(inner)),
             notify: Arc::new(Notify::new()),
         }
     }
 
+    pub fn push(&self, event: Event, action: Action) {
+        self.inner.lock().unwrap().on_event.push((event, action))
+    }
+
+    pub fn push_front(&self, event: Event, action: Action) {
+        self.inner
+            .lock()
+            .unwrap()
+            .on_event
+            .insert(0, (event, action))
+    }
+
     pub fn unpause(&self) {
         tracing::warn!("Unpausing debug server");
-        self.paused.store(false, Ordering::Release);
+        self.inner.lock().unwrap().paused = false;
         self.notify.notify_one();
     }
 }
 
 use axum_macros::debug_handler;
 #[debug_handler]
-#[instrument(level="debug", skip(state))]
+#[instrument(level = "debug", skip(state))]
 async fn handler(
-    State(state): State<Arc<PausableServer>>,
+    State(state): State<Arc<ControllableServer>>,
     headers: http::HeaderMap,
 ) -> Response<Body> {
     let range = headers.get("Range").unwrap();
@@ -59,12 +118,27 @@ async fn handler(
     let start = range.0.parse().unwrap();
     let stop = range.1.parse().unwrap();
 
-    if state.pause_controls.paused.load(Ordering::Acquire) {
-        tracing::warn!("Test server waiting to be unpaused");
-        state.pause_controls.notify.notified().await;
+    let action = {
+        let range = start..stop;
+        let mut inner = state.pause_controls.inner.lock().unwrap();
+        if let Some((idx, (_, _))) = inner
+            .on_event
+            .iter()
+            .enumerate()
+            .find(|(_, (event, _))| event.active(&range))
+        {
+            Some(inner.on_event.remove(idx).1)
+        } else {
+            None
+        }
+    };
+
+    let mut range = start..stop;
+    if let Some(action) = action {
+        action.perform(&state, &mut range).await;
     }
 
-    let data = state.test_data[start..stop].to_owned();
+    let data = state.test_data[range.start as usize..range.end as usize].to_owned();
     let total = state.test_data.len();
 
     Response::builder()
@@ -79,9 +153,9 @@ async fn handler(
 /// Must be run within a tokio runtime, if it does not this fn will panic
 pub fn pausable_server(
     test_file_size: u64,
-    pause_controls: PauseControls,
+    pause_controls: Controls,
 ) -> (Uri, JoinHandle<Result<(), std::io::Error>>) {
-    let shared_state = Arc::new(PausableServer {
+    let shared_state = Arc::new(ControllableServer {
         test_data: test_data(test_file_size as u32),
         pause_controls,
     });

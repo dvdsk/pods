@@ -6,7 +6,7 @@ mod store;
 /// Glue between store and stream/http_client
 mod target;
 mod stream;
-mod http_client;
+pub mod http_client;
 
 #[macro_use]
 mod vecdeque;
