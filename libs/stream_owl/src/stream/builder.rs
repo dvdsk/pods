@@ -10,9 +10,8 @@ use crate::http_client::Size;
 use crate::network::Network;
 use crate::store::CapacityBounds;
 use crate::store::SwitchableStore;
-use crate::{manager, StreamId};
+use crate::{manager, StreamId, StreamDone};
 
-use super::task::Canceld;
 use super::{task, Error, Handle, ManagedHandle, StreamEnded};
 
 #[derive(Debug)]
@@ -108,7 +107,7 @@ impl StreamBuilder<true> {
         self,
     ) -> (
         Handle,
-        impl Future<Output = Result<Canceld, Error>> + Send + 'static,
+        impl Future<Output = Result<StreamDone, Error>> + Send + 'static,
     ) {
         let (seek_tx, seek_rx) = mpsc::channel(12);
         let stream_size = Size::default();

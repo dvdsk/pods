@@ -1,4 +1,5 @@
 use std::collections::VecDeque;
+use std::ops::Range;
 
 use bytes::Bytes;
 use http_body_util::BodyExt;
@@ -8,7 +9,7 @@ use crate::target::StreamTarget;
 
 use super::size::Size;
 // todo fix error, should be task stream error?
-use super::{Error, Client};
+use super::{Client, Error};
 
 #[derive(Debug)]
 pub(crate) struct InnerReader {
@@ -19,8 +20,14 @@ pub(crate) struct InnerReader {
 
 #[derive(Debug)]
 pub(crate) enum Reader {
-    PartialData(InnerReader),
-    AllData(InnerReader),
+    PartialData {
+        inner: InnerReader,
+        range: Range<u64>,
+    },
+    AllData {
+        inner: InnerReader,
+        total_size: u64,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -34,24 +41,30 @@ impl Reader {
         }
 
         Ok(match self {
-            Reader::PartialData(InnerReader {
-                client, stream: _, ..
-            }) => client,
-            Reader::AllData(InnerReader { client, .. }) => client,
+            Reader::PartialData {
+                range,
+                inner: InnerReader {
+                    client, stream: _, ..
+                },
+            } => client,
+            Reader::AllData {
+                total_size,
+                inner: InnerReader { client, .. },
+            } => client,
         })
     }
 
     fn inner(&mut self) -> &mut InnerReader {
         match self {
-            Reader::PartialData(inner) => inner,
-            Reader::AllData(inner) => inner,
+            Reader::PartialData { inner, .. } => inner,
+            Reader::AllData { inner, .. } => inner,
         }
     }
 
     pub(crate) fn stream_size(&self) -> Size {
         match self {
-            Reader::PartialData(inner) => inner.client.size.clone(),
-            Reader::AllData(inner) => inner.client.size.clone(),
+            Reader::PartialData { inner, .. } => inner.client.size.clone(),
+            Reader::AllData { inner, .. } => inner.client.size.clone(),
         }
     }
 
@@ -63,6 +76,9 @@ impl Reader {
         target: &StreamTarget,
         max: Option<usize>,
     ) -> Result<(), Error> {
+        if let Reader::PartialData { range, .. } = self {
+            target.set_pos(range.start)
+        }
         self.inner().stream_to_writer(target, max).await
     }
 }

@@ -20,7 +20,10 @@ mod race_results;
 use race_results::*;
 
 #[derive(Debug)]
-pub struct Canceld;
+pub enum StreamDone {
+    DownloadedAll,
+    Canceld,
+}
 
 // the writer will limit how fast we receive data using backpressure
 #[instrument(ret, skip_all)]
@@ -30,7 +33,7 @@ pub(crate) async fn new(
     mut seek_rx: mpsc::Receiver<u64>,
     restriction: Option<Network>,
     stream_size: Size,
-) -> Result<Canceld, Error> {
+) -> Result<StreamDone, Error> {
     let start_pos = 0;
     let chunk_size = 1_000;
     let target = StreamTarget::new(storage, start_pos, chunk_size);
@@ -47,7 +50,7 @@ pub(crate) async fn new(
 
         match (build_client, receive_seek).race().await {
             Res1::NewClient(client) => break client?,
-            Res1::Seek(None) => return Ok(Canceld),
+            Res1::Seek(None) => return Ok(StreamDone::Canceld),
             Res1::Seek(Some(pos)) => target.set_pos(pos),
         }
     };
@@ -59,7 +62,8 @@ pub(crate) async fn new(
             StreamingClient::RangesSupported(client) => {
                 let res = stream_range(client, &target, &mut seek_rx).await;
                 match res {
-                    StreamRes::Canceld => return Ok(Canceld),
+                    StreamRes::Done => return Ok(StreamDone::DownloadedAll),
+                    StreamRes::Canceld => return Ok(StreamDone::Canceld),
                     StreamRes::Err(e) => return Err(e),
                     StreamRes::RefuseRange(client) => client,
                 }
@@ -74,7 +78,7 @@ pub(crate) async fn new(
 
         let pos = match (write, receive_seek).race().await {
             Res2::Seek(Some(relevant_pos)) => relevant_pos,
-            Res2::Seek(None) => return Ok(Canceld),
+            Res2::Seek(None) => return Ok(StreamDone::Canceld),
             Res2::Write(Err(e)) => return Err(Error::HttpClient(e)),
             Res2::Write(Ok(())) => {
                 info!("At end of stream, waiting for seek");
@@ -82,7 +86,7 @@ pub(crate) async fn new(
                 stream_size.mark_stream_end(target.pos());
                 match seek_rx.recv().await {
                     Some(pos) => pos,
-                    None => return Ok(Canceld),
+                    None => return Ok(StreamDone::Canceld),
                 }
             }
         };
@@ -113,6 +117,7 @@ async fn receive_actionable_seek(
 
 #[derive(Debug)]
 enum StreamRes {
+    Done,
     Canceld,
     Err(Error),
     RefuseRange(RangeRefused),
@@ -138,7 +143,7 @@ async fn stream_range(
                     warn!("Got not seekable stream");
                     return StreamRes::RefuseRange(client);
                 }
-                Res3::StreamDone => todo!(),
+                Res3::StreamDone => return StreamRes::Done,
                 Res3::StreamError(e) => return StreamRes::Err(e),
             }
         };

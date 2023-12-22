@@ -1,3 +1,4 @@
+use super::ValidResponse;
 /// Tracks the size of data send via the http stream.
 ///
 /// No benchmarks motivating these optimizations, they are just for fun.
@@ -5,8 +6,6 @@
 /// This is an overly optimized enum that tracks the size of the date send via the http_stream. The
 /// only reason it is not an Arc<Mutex<Enum>> is because I wanted to write it like this for fun.
 /// Feel free to replace/refactor.
-use http::{self, header, HeaderValue, StatusCode};
-use hyper::Response;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -22,14 +21,14 @@ struct SizeInner {
     //
     // - Redirects do not count
     // - Overflow is not realistic.
-    requests_analyzed: AtomicUsize,
+    pub requests_analyzed: AtomicUsize,
 }
 
 #[derive(Clone)]
 pub(crate) struct Size(Arc<SizeInner>);
 
 #[derive(Debug, PartialEq)]
-enum SizeVariant {
+pub(crate) enum SizeVariant {
     Unknown,
     Known(u64),
     StreamEnded(u64),
@@ -110,40 +109,13 @@ impl Size {
         self.set(SizeVariant::StreamEnded(pos));
     }
 
-    #[tracing::instrument(level = "debug", skip(response), 
-      fields(headers = ?response.headers(), status = %response.status()))]
-    pub(crate) fn update_from_headers<T>(&mut self, response: &Response<T>) {
-        if response.status() != StatusCode::FOUND {
-            self.0.requests_analyzed.fetch_add(1, Ordering::Relaxed);
-        }
-        let headers = response.headers();
-
-        match response.status() {
-            StatusCode::OK => {
-                if let Some(content_length) = headers
-                    .get(header::CONTENT_LENGTH)
-                    .map(HeaderValue::to_str)
-                    .and_then(Result::ok)
-                    .map(|len| u64::from_str_radix(len, 10))
-                    .and_then(Result::ok)
-                {
-                    self.set(SizeVariant::Known(content_length))
-                }
-            }
-            StatusCode::PARTIAL_CONTENT | StatusCode::RANGE_NOT_SATISFIABLE => {
-                if let Some(range_total) = headers
-                    .get(header::CONTENT_RANGE)
-                    .map(HeaderValue::to_str)
-                    .and_then(Result::ok)
-                    .filter(|range| range.starts_with("bytes"))
-                    .and_then(|range| range.rsplit_once("/"))
-                    .map(|(_, total)| u64::from_str_radix(total, 10))
-                    .and_then(Result::ok)
-                {
-                    self.set(SizeVariant::Known(range_total))
-                }
-            }
-            _ => self.set(SizeVariant::Unknown),
+    #[tracing::instrument(level = "debug", skip(response))]
+    pub(crate) fn update(&mut self, response: &ValidResponse) {
+        self.0.requests_analyzed.fetch_add(1, Ordering::Relaxed);
+        if let Some(size) = response.stream_size() {
+            self.set(SizeVariant::Known(size));
+        } else {
+            self.set(SizeVariant::Unknown);
         }
     }
 
@@ -188,6 +160,8 @@ impl Size {
 
 #[cfg(test)]
 mod tests {
+    use http::StatusCode;
+
     use super::*;
 
     #[test]
@@ -218,20 +192,5 @@ mod tests {
             let encoded = broken_input.encode();
             assert_eq!(SizeVariant::decode(encoded), acceptable_output)
         }
-    }
-
-    #[test]
-    fn analyze_headers() {
-        fn test_response<'a>(key: &'static str, val: &'a str) -> Response<&'a str> {
-            let mut input = Response::new("");
-            *input.status_mut() = StatusCode::RANGE_NOT_SATISFIABLE;
-            let headers = input.headers_mut();
-            headers.insert(key, val.try_into().unwrap());
-            input
-        }
-
-        let mut size = Size::default();
-        size.update_from_headers(&test_response("content-range", "bytes */10000"));
-        assert_eq!(size.get(), SizeVariant::Known(10_000));
     }
 }

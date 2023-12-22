@@ -13,6 +13,8 @@ use crate::target::StreamTarget;
 mod io;
 mod read;
 use read::Reader;
+mod headers;
+mod response;
 mod size;
 pub(crate) use size::Size;
 
@@ -21,6 +23,7 @@ use connection::Connection;
 
 use self::connection::HyperResponse;
 use self::read::InnerReader;
+use self::response::ValidResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -29,6 +32,8 @@ pub enum Error {
     //     #[from]
     //     source: hyper::Error,
     // },
+    #[error("")]
+    Response(#[from] response::Error),
     #[error("Error setting up the stream request, {0}")]
     Http(#[from] http::Error),
     #[error("Error creating socket, {0}")]
@@ -64,6 +69,8 @@ pub enum Error {
     TooManyRedirects,
     #[error("Server did not send any data")]
     MissingFrame,
+    #[error("Server send a PARTIAL_CONTENT response without range header or we did not understand the range")]
+    MissingRange,
     #[error("Could not send request to server: {0}")]
     SendingRequest(hyper::Error),
     #[error("Could not set up connection to server: {0}")]
@@ -123,6 +130,7 @@ impl Cookies {
 /// (the result of a range request)
 #[derive(Debug)]
 pub(crate) struct RangeSupported {
+    range: Range<u64>,
     stream: Incoming,
     client: Client,
 }
@@ -130,8 +138,15 @@ pub(crate) struct RangeSupported {
 impl RangeSupported {
     #[tracing::instrument(level = "trace")]
     pub(crate) fn into_reader(self) -> Reader {
-        let Self { stream, client } = self;
-        Reader::PartialData(InnerReader::new(stream, client))
+        let Self {
+            stream,
+            client,
+            range,
+        } = self;
+        Reader::PartialData {
+            inner: InnerReader::new(stream, client),
+            range,
+        }
     }
 
     pub(crate) fn stream_size(&self) -> Size {
@@ -151,13 +166,21 @@ impl RangeSupported {
 #[derive(Debug)]
 pub(crate) struct RangeRefused {
     stream: Incoming,
+    size: u64,
     client: Client,
 }
 
 impl RangeRefused {
     pub(crate) fn into_reader(self) -> Reader {
-        let Self { stream, client } = self;
-        Reader::AllData(InnerReader::new(stream, client))
+        let Self {
+            stream,
+            client,
+            size: total_size,
+        } = self;
+        Reader::AllData {
+            inner: InnerReader::new(stream, client),
+            total_size,
+        }
     }
 
     pub(crate) fn builder(&self) -> ClientBuilder {
@@ -235,7 +258,6 @@ impl ClientBuilder {
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
             .await?;
-        size.update_from_headers(&response);
         cookies.get_from(&response);
 
         let mut numb_redirect = 0;
@@ -253,14 +275,17 @@ impl ClientBuilder {
             response = conn
                 .send_initial_request(&url, &cookies, &first_range)
                 .await?;
-            size.update_from_headers(&response);
             cookies.get_from(&response);
 
             debug!("redirecting to: {url}");
             numb_redirect += 1
         }
 
+        use ValidResponse::*;
+        let response = ValidResponse::try_from(response)?;
         let host = url.host().unwrap().parse().unwrap();
+        size.update(&response);
+
         let client = Client {
             host,
             restriction,
@@ -269,20 +294,25 @@ impl ClientBuilder {
             cookies,
             size,
         };
-        match response.status() {
-            StatusCode::OK => Ok(StreamingClient::RangesRefused(RangeRefused {
-                stream: response.into_body(),
+
+        match response {
+            Ok { stream, size } => Ok(StreamingClient::RangesRefused(RangeRefused {
+                stream,
+                size,
                 client,
             })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangesSupported(RangeSupported {
-                stream: response.into_body(),
-                client,
-            })),
-            StatusCode::RANGE_NOT_SATISFIABLE => {
+            PartialContent { stream, range, .. } => {
+                Ok(StreamingClient::RangesSupported(RangeSupported {
+                    range,
+                    stream,
+                    client,
+                }))
+            }
+
+            RangeNotSatisfiable { size } => {
                 tracing::info!("{response:?}");
                 todo!("redo without range")
             }
-            _ => Err(Error::status_not_ok(response).await),
         }
     }
 }
@@ -323,19 +353,25 @@ impl Client {
 
         let range = format!("bytes={start}-{end}");
         let response = self.send_range_request(&range).await?;
+        let response = ValidResponse::try_from(response)?;
 
-        self.size.update_from_headers(&response);
-        match response.status() {
-            StatusCode::OK => Ok(StreamingClient::RangesRefused(RangeRefused {
-                stream: response.into_body(),
-                client: self,
-            })),
-            StatusCode::PARTIAL_CONTENT => Ok(StreamingClient::RangesSupported(RangeSupported {
-                stream: response.into_body(),
-                client: self,
-            })),
-            StatusCode::RANGE_NOT_SATISFIABLE => return Err(Error::InvalidRange),
-            _ => Err(Error::status_not_ok(response).await),
+        self.size.update(&response);
+        match response {
+            ValidResponse::Ok { stream, size } => {
+                Ok(StreamingClient::RangesRefused(RangeRefused {
+                    stream,
+                    size,
+                    client: self,
+                }))
+            }
+            ValidResponse::PartialContent { stream, range, .. } => {
+                Ok(StreamingClient::RangesSupported(RangeSupported {
+                    range,
+                    stream,
+                    client: self,
+                }))
+            }
+            ValidResponse::RangeNotSatisfiable { .. } => todo!(),
         }
     }
 

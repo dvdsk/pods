@@ -98,7 +98,12 @@ impl Progress {
         }
     }
 
+    #[instrument(level="debug", skip(self))]
     async fn record_section(&mut self, start: u64, end: u64) -> Result<()> {
+        if start != end {
+            self.ranges.insert(start..end);
+        }
+
         let mut final_section = [0u8; SECTION_LEN];
         final_section[..8].copy_from_slice(&start.to_le_bytes());
         final_section[8..].copy_from_slice(&end.to_le_bytes());

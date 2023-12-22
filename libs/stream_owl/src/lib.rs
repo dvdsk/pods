@@ -19,7 +19,7 @@ pub use stream::StreamBuilder;
 
 pub use manager::Error as ManagerError;
 pub use manager::Manager;
-pub use stream::Canceld as StreamCanceld;
+pub use stream::StreamDone as StreamDone;
 pub use stream::Error as StreamError;
 pub use stream::Id as StreamId;
 pub use stream::Handle as StreamHandle;

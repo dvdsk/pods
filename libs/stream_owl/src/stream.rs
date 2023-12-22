@@ -14,8 +14,8 @@ use crate::store::{MigrationHandle, SwitchableStore};
 
 mod builder;
 pub use builder::StreamBuilder;
+pub use task::StreamDone;
 mod task;
-pub use task::Canceld;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -133,6 +133,6 @@ impl Drop for ManagedHandle {
 
 #[must_use]
 pub struct StreamEnded {
-    pub(super) res: Result<Canceld, Error>,
+    pub(super) res: Result<StreamDone, Error>,
     pub(super) id: Id,
 }

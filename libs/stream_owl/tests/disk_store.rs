@@ -2,7 +2,7 @@ use std::io::Seek;
 use std::sync::Arc;
 
 use stream_owl::testing::PauseControls;
-use stream_owl::{testing, StreamBuilder, StreamCanceld};
+use stream_owl::{testing, StreamBuilder, StreamDone};
 use tokio::sync::Notify;
 
 #[test]
@@ -30,7 +30,7 @@ fn after_seeking_forward_download_still_completes() {
 
     let test_ended = runtime_thread.join().unwrap();
     match test_ended {
-        testing::TestEnded::StreamReturned(Ok(StreamCanceld)) => (),
+        testing::TestEnded::StreamReturned(Ok(StreamDone::DownloadedAll)) => (),
         other => panic!("runtime should return with StreamReturned, it returned with {other:?}"),
     }
 
