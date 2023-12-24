@@ -6,7 +6,7 @@ use futures_concurrency::future::Race;
 use tokio::sync::mpsc::{error::SendError, Receiver, Sender, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, JoinError, JoinSet};
-use tracing::{trace, warn};
+use tracing::{trace, warn, info};
 
 use crate::network::Network;
 use crate::stream::{StreamBuilder, StreamEnded};
@@ -98,10 +98,13 @@ pub(super) async fn run(
             }
             Res::StreamError { id, error } => {
                 if let Err(SendError((id, error))) = err_tx.send((id, error)) {
-                    warn!("stream {id:?} ran into an error, it could not be send to API user as the error stream recieve part has been dropped. Error was: {error:?}")
+                    warn!("stream {id:?} ran into an error, it could not be send to API user as the error stream receive part has been dropped. Error was: {error:?}")
                 }
             }
-            Res::StreamComplete { .. } | Res::Dropped => (),
+            Res::StreamComplete { id } => {
+                info!("stream: {id:?} completed")
+            }
+            Res::Dropped => (),
         }
     }
 }

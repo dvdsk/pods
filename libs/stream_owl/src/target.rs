@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tracing::{instrument, info};
+use tracing::{info, instrument};
 
 macro_rules! tracing_record {
     ($range:ident) => {
@@ -105,19 +105,20 @@ impl StreamTarget {
             .write_at(buf, self.pos.load(Ordering::Relaxed))
             .await;
 
-        let bytes = match written {
+        let written = match written {
             Ok(bytes) => bytes.get(),
             Err(store::Error::SeekInProgress) => {
-                // this future will be canceld very very soon, so just block
-                futures::pending!();
-                unreachable!()
+                // this future will be canceld very soon, so just wait here
+                loop {
+                    futures::pending!();
+                }
             }
             Err(other) => {
                 todo!("handle other error: {other:?}")
             }
         };
 
-        self.increase_pos(bytes);
-        Ok(bytes)
+        self.increase_pos(written);
+        Ok(written)
     }
 }

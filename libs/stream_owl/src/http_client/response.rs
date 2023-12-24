@@ -11,7 +11,9 @@ use super::headers::content_length;
 pub(crate) enum ValidResponse {
     Ok {
         stream: Incoming,
-        size: u64,
+        /// servers are allowed to leave out Content-Length :(
+        /// a livestream could leave it out for example
+        size: Option<u64>,
     },
     PartialContent {
         stream: Incoming,
@@ -53,7 +55,7 @@ impl TryFrom<hyper::Response<Incoming>> for ValidResponse {
 impl ValidResponse {
     pub(crate) fn stream_size(&self) -> Option<u64> {
         match self {
-            ValidResponse::Ok { size, .. } => Some(*size),
+            ValidResponse::Ok { size, .. } => *size,
             ValidResponse::PartialContent { size, .. } => *size,
             ValidResponse::RangeNotSatisfiable { size } => *size,
         }

@@ -26,7 +26,6 @@ pub(crate) enum Reader {
     },
     AllData {
         inner: InnerReader,
-        total_size: u64,
     },
 }
 
@@ -42,14 +41,14 @@ impl Reader {
 
         Ok(match self {
             Reader::PartialData {
-                range,
                 inner: InnerReader {
                     client, stream: _, ..
                 },
+                ..
             } => client,
             Reader::AllData {
-                total_size,
                 inner: InnerReader { client, .. },
+                ..
             } => client,
         })
     }

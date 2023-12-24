@@ -4,9 +4,8 @@ use derivative::Derivative;
 use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
-use http_body_util::BodyExt;
 use hyper::body::Incoming;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::network::Network;
 use crate::target::StreamTarget;
@@ -27,11 +26,6 @@ use self::response::ValidResponse;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    // #[error("Error in connection to stream server, {source}")]
-    // Hyper {
-    //     #[from]
-    //     source: hyper::Error,
-    // },
     #[error("")]
     Response(#[from] response::Error),
     #[error("Error setting up the stream request, {0}")]
@@ -81,21 +75,6 @@ pub enum Error {
     WritingData(std::io::Error),
     #[error("Could not throw away body: {0}")]
     EmptyingBody(hyper::Error),
-}
-
-impl Error {
-    async fn status_not_ok(response: hyper::Response<Incoming>) -> Self {
-        let code = response.status();
-        let body = response
-            .into_body()
-            .collect()
-            .await
-            .ok()
-            .map(|body| body.to_bytes().to_vec())
-            .map(|bytes| String::from_utf8(bytes).ok())
-            .flatten();
-        return Self::StatusNotOk { code, body };
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -166,7 +145,7 @@ impl RangeSupported {
 #[derive(Debug)]
 pub(crate) struct RangeRefused {
     stream: Incoming,
-    size: u64,
+    size: Option<u64>,
     client: Client,
 }
 
@@ -175,11 +154,14 @@ impl RangeRefused {
         let Self {
             stream,
             client,
-            size: total_size,
+            size,
         } = self;
+        info!("Seeking not supported by server, receiving all data in one stream.");
+        if let Some(size) = size {
+            info!("Total stream size: {size}");
+        }
         Reader::AllData {
             inner: InnerReader::new(stream, client),
-            total_size,
         }
     }
 
@@ -310,7 +292,7 @@ impl ClientBuilder {
             }
 
             RangeNotSatisfiable { size } => {
-                tracing::info!("{response:?}");
+                tracing::info!("{response:?}, {size:?}");
                 todo!("redo without range")
             }
         }

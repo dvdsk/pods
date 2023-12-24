@@ -10,9 +10,7 @@ pub enum Error {
     #[error("")]
     CorruptHeader(ToStrError),
     #[error("")]
-    MissingContentLength,
-    #[error("")]
-    ContentLengthNotNumberNorStar(ParseIntError),
+    ContentLengthNotNumber(ParseIntError),
     #[error("")]
     MissingContentRange,
     #[error("")]
@@ -29,15 +27,18 @@ pub enum Error {
     RangeStartSmallerThenEnd,
 }
 
-pub fn content_length<T>(response: &Response<T>) -> Result<u64, Error> {
+pub fn content_length<T>(response: &Response<T>) -> Result<Option<u64>, Error> {
     let headers = response.headers();
     headers
         .get(header::CONTENT_LENGTH)
-        .ok_or(Error::MissingContentLength)?
-        .to_str()
-        .map_err(Error::CorruptHeader)?
-        .parse()
-        .map_err(Error::ContentLengthNotNumberNorStar)
+        .map(|header| {
+            header
+                .to_str()
+                .map_err(Error::CorruptHeader)?
+                .parse()
+                .map_err(Error::ContentLengthNotNumber)
+        })
+        .transpose()
 }
 
 fn range_and_total<T>(response: &Response<T>) -> Result<(&str, &str), Error> {
@@ -61,7 +62,7 @@ pub fn range_content_length<T>(response: &Response<T>) -> Result<Option<u64>, Er
         content_length
             .parse()
             .map(Some)
-            .map_err(Error::ContentLengthNotNumberNorStar)
+            .map_err(Error::ContentLengthNotNumber)
     }
 }
 
