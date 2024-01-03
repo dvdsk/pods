@@ -53,12 +53,11 @@ impl RangeStore {
             return 0;
         };
 
-        dbg!(entry.start, pos);
         let offset_in_entry = (pos - entry.start) as usize;
         let available = entry.data[offset_in_entry..].len();
         let to_copy = available.min(buf.len());
         let to_copy = &entry.data[offset_in_entry..offset_in_entry + to_copy];
-        buf.copy_from_slice(to_copy);
+        buf[0..to_copy.len()].copy_from_slice(to_copy);
         to_copy.len()
     }
 
