@@ -6,7 +6,7 @@ use futures_concurrency::future::Race;
 use tokio::sync::mpsc::{error::SendError, Receiver, Sender, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::{AbortHandle, JoinError, JoinSet};
-use tracing::{trace, warn, info};
+use tracing::{info, trace, warn};
 
 use crate::network::Network;
 use crate::stream::{StreamBuilder, StreamEnded};
@@ -78,19 +78,18 @@ pub(super) async fn run(
                 url,
                 handle_tx,
                 to_disk,
-            }) => {
-                add_stream(
-                    &mut streams,
-                    &mut abort_handles,
-                    url,
-                    to_disk,
-                    handle_tx,
-                    cmd_tx.clone(),
-                    restriction.clone(),
-                    initial_prefetch,
-                )
-                .await
-            }
+            }) => add_stream(
+                &mut streams,
+                &mut abort_handles,
+                url,
+                to_disk,
+                handle_tx,
+                cmd_tx.clone(),
+                restriction.clone(),
+                initial_prefetch,
+            )
+            .await
+            .unwrap(),
             Res::NewCmd(CancelStream(id)) => {
                 if let Some(handle) = abort_handles.remove(&id) {
                     handle.abort();
@@ -118,19 +117,19 @@ async fn add_stream(
     cmd_tx: Sender<Command>,
     restriction: Option<Network>,
     initial_prefetch: usize,
-) {
+) -> Result<(), crate::store::Error> {
     let stream = StreamBuilder::new(url);
     let mut stream = if let Some(path) = to_disk {
         stream.to_disk(path)
     } else {
-        stream.to_mem()
+        stream.to_unlimited_mem()
     };
     if let Some(allowed) = restriction {
         stream = stream.with_network_restriction(allowed)
     }
     stream = stream.with_prefetch(initial_prefetch);
 
-    let (handle, stream_task) = stream.start_managed(cmd_tx).await;
+    let (handle, stream_task) = stream.start_managed(cmd_tx).await?;
 
     let abort_handle = streams.spawn(stream_task);
     abort_handles.insert(handle.id(), abort_handle);
@@ -138,4 +137,6 @@ async fn add_stream(
         trace!("add_stream canceld on user side");
         // dropping the handle here will cancel the streams task
     }
+
+    Ok(())
 }

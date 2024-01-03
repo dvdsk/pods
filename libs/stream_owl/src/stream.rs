@@ -76,6 +76,9 @@ impl ManagedHandle {
     pub fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
         self.handle.limit_bandwidth(bandwidth)
     }
+    pub fn unlimit_bandwidth(&self) {
+        self.handle.remove_bandwidth_limit()
+    }
     pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
         self.handle.try_get_reader()
     }
@@ -93,6 +96,10 @@ impl ManagedHandle {
 impl Handle {
     pub fn limit_bandwidth(&mut self, _bandwidth: Bandwidth) {
         todo!();
+    }
+
+    pub fn remove_bandwidth_limit(&self) {
+        todo!()
     }
 
     #[instrument(level = "debug", ret, err(Debug))]
@@ -121,6 +128,7 @@ impl Handle {
     pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
         self.store.to_disk(path).await
     }
+
 }
 
 impl Drop for ManagedHandle {

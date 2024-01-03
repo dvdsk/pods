@@ -20,7 +20,7 @@ struct ControllableServer {
     pause_controls: Controls,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Event {
     Any,
     ByteRequested(u64),
@@ -35,7 +35,7 @@ impl Event {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Cut { at: u64 },
     Crash,
@@ -60,7 +60,6 @@ impl Action {
 #[derive(Debug)]
 struct InnerControls {
     on_event: Vec<(Event, Action)>,
-    paused: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +72,6 @@ impl Controls {
     pub fn new() -> Self {
         let inner = InnerControls {
             on_event: Vec::new(),
-            paused: false,
         };
         Self {
             inner: Arc::new(Mutex::new(inner)),
@@ -93,9 +91,21 @@ impl Controls {
             .insert(0, (event, action))
     }
 
+    /// unpauses and remove any future plain pauses
     pub fn unpause(&self) {
         tracing::warn!("Unpausing debug server");
-        self.inner.lock().unwrap().paused = false;
+        let mut inner = self.inner.lock().unwrap();
+        let to_remove: Vec<_> = inner
+            .on_event
+            .iter()
+            .enumerate()
+            .filter(|(_, (_, action))| *action == Action::Pause)
+            .map(|(idx, _)| idx)
+            .collect();
+        for to_remove in to_remove.into_iter().rev() {
+            inner.on_event.remove(to_remove);
+        }
+
         self.notify.notify_one();
     }
 }
@@ -120,14 +130,14 @@ async fn handler(
 
     let action = {
         let range = start..stop;
-        let mut inner = state.pause_controls.inner.lock().unwrap();
+        let inner = state.pause_controls.inner.lock().unwrap();
         if let Some((idx, (_, _))) = inner
             .on_event
             .iter()
             .enumerate()
             .find(|(_, (event, _))| event.active(&range))
         {
-            Some(inner.on_event.remove(idx).1)
+            Some(inner.on_event.get(idx).unwrap().1.clone())
         } else {
             None
         }

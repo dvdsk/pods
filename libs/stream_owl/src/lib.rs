@@ -24,4 +24,4 @@ pub use stream::Error as StreamError;
 pub use stream::Id as StreamId;
 pub use stream::Handle as StreamHandle;
 pub use reader::Reader;
-pub use network::list_interfaces;
+pub use network::{list_interfaces, Bandwidth};

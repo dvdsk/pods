@@ -31,7 +31,7 @@ fn download_front_while_streaming_endless_at_back() {
 }
 
 #[cfg(test)]
-mod memory {
+mod limited_memory {
     use super::*;
 
     #[test]
@@ -40,6 +40,17 @@ mod memory {
             b.with_prefetch(0)
                 .to_limited_mem(NonZeroUsize::new(1000).unwrap())
         };
+        seek_test(configure);
+    }
+}
+
+#[cfg(test)]
+mod unlimited_memory {
+    use super::*;
+
+    #[test]
+    fn seek_from_all_sides_works() {
+        let configure = |b: StreamBuilder<false>| b.with_prefetch(0).to_unlimited_mem();
         seek_test(configure);
     }
 }

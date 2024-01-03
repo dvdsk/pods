@@ -2,7 +2,7 @@ use derivative::Derivative;
 use futures::FutureExt;
 use futures_concurrency::future::Race;
 use rangemap::RangeSet;
-use std::num::NonZeroUsize;
+use std::num::{NonZeroU64, NonZeroUsize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -10,9 +10,10 @@ use tracing::instrument;
 
 mod capacity;
 mod disk;
-mod mem;
+mod limited_mem;
 mod migrate;
 mod range_watch;
+mod unlimited_mem;
 
 pub(crate) use capacity::Bounds as CapacityBounds;
 pub use migrate::{MigrationError, MigrationHandle};
@@ -35,13 +36,15 @@ pub(crate) struct SwitchableStore {
 #[derive(Debug)]
 pub(crate) enum Store {
     Disk(disk::Disk),
-    Mem(mem::Memory),
+    MemLimited(limited_mem::Memory),
+    MemUnlimited(unlimited_mem::Memory),
 }
 
 #[derive(Debug, Clone)]
 pub(super) enum StoreVariant {
     Disk,
-    Mem,
+    MemLimited,
+    MemUnlimited,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -50,42 +53,62 @@ pub enum Error {
     #[error("Refusing write while in the middle of a seek")]
     SeekInProgress,
     #[error("Error in memory backend")]
-    Memory(mem::Error),
+    MemoryLimited(#[from] limited_mem::Error),
+    #[error("Error in memory backend")]
+    MemoryUnlimited(#[from] unlimited_mem::Error),
     #[error("Error in disk backend")]
     Disk(#[from] disk::Error),
 }
 
 impl SwitchableStore {
     #[tracing::instrument]
-    pub(crate) async fn new_disk_backed(path: PathBuf, stream_size: Size) -> Self {
+    pub(crate) async fn new_disk_backed(path: PathBuf, stream_size: Size) -> Result<Self, Error> {
         let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
         let (tx, rx) = range_watch::channel();
-        let disk = disk::Disk::new(path, capacity, tx).await.unwrap();
-        Self {
+        let disk = disk::Disk::new(path, capacity, tx).await?;
+        Ok(Self {
             curr_range: rx,
             capacity_watcher,
             curr_store: Arc::new(Mutex::new(Store::Disk(disk))),
             stream_size,
-        }
+        })
     }
 
     #[tracing::instrument]
-    pub(crate) fn new_mem_backed(max_cap: capacity::Bounds, stream_size: Size) -> Self {
-        let (capacity_watcher, capacity) = capacity::new(max_cap);
+    pub(crate) fn new_limited_mem_backed(
+        max_cap: NonZeroUsize,
+        stream_size: Size,
+    ) -> Result<Self, Error> {
+        let max_cap = NonZeroU64::new(max_cap.get() as u64).expect("already nonzero");
+        let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Limited(max_cap));
         let (tx, rx) = range_watch::channel();
-        let mem = mem::Memory::new(capacity, tx).unwrap();
-        Self {
+        let mem = limited_mem::Memory::new(capacity, tx)?;
+        Ok(Self {
             curr_range: rx,
             capacity_watcher,
-            curr_store: Arc::new(Mutex::new(Store::Mem(mem))),
+            curr_store: Arc::new(Mutex::new(Store::MemLimited(mem))),
             stream_size,
-        }
+        })
+    }
+
+    #[tracing::instrument]
+    pub(crate) fn new_unlimited_mem_backed(stream_size: Size) -> Result<Self, Error> {
+        let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Unlimited);
+        let (tx, rx) = range_watch::channel();
+        let mem = unlimited_mem::Memory::new(capacity, tx)?;
+        Ok(Self {
+            curr_range: rx,
+            capacity_watcher,
+            curr_store: Arc::new(Mutex::new(Store::MemUnlimited(mem))),
+            stream_size,
+        })
     }
 
     pub(crate) async fn variant(&self) -> StoreVariant {
         match *self.curr_store.lock().await {
             Store::Disk(_) => StoreVariant::Disk,
-            Store::Mem(_) => StoreVariant::Mem,
+            Store::MemLimited(_) => StoreVariant::MemLimited,
+            Store::MemUnlimited(_) => StoreVariant::MemUnlimited,
         }
     }
 
@@ -130,7 +153,6 @@ impl SwitchableStore {
 #[derive(Debug)]
 pub(crate) struct SeekInProgress;
 
-
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ReadError {
     #[error(transparent)]
@@ -145,7 +167,8 @@ macro_rules! forward_impl {
             $v fn $fn_name(&self, $($param: $t),*) -> $returns {
                 match self {
                     Self::Disk(inner) => inner.$fn_name($($param),*),
-                    Self::Mem(inner) => inner.$fn_name($($param),*),
+                    Self::MemUnlimited(inner) => inner.$fn_name($($param),*),
+                    Self::MemLimited(inner) => inner.$fn_name($($param),*),
                 }
             }
         }
@@ -158,7 +181,8 @@ macro_rules! forward_impl_mut {
             $v fn $fn_name(&mut self, $($param: $t),*) $(-> $returns)? {
                 match self {
                     Self::Disk(inner) => inner.$fn_name($($param),*),
-                    Self::Mem(inner) => inner.$fn_name($($param),*),
+                    Self::MemUnlimited(inner) => inner.$fn_name($($param),*),
+                    Self::MemLimited(inner) => inner.$fn_name($($param),*),
                 }
             }
         }
@@ -169,7 +193,8 @@ macro_rules! forward_impl_mut {
             $v async fn $fn_name(&mut self, $($param: $t),*) $(-> $returns)? {
                 match self {
                     Self::Disk(inner) => inner.$fn_name($($param),*).await,
-                    Self::Mem(inner) => inner.$fn_name($($param),*).await,
+                    Self::MemUnlimited(inner) => inner.$fn_name($($param),*).await,
+                    Self::MemLimited(inner) => inner.$fn_name($($param),*).await,
                 }
             }
         }
@@ -188,33 +213,37 @@ impl Store {
     pub(crate) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
         match self {
             Store::Disk(inner) => inner.write_at(buf, pos).await.map_err(Error::Disk),
-            Store::Mem(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
-                mem::Error::SeekInProgress => Error::SeekInProgress,
-                other => Error::Memory(other),
+            Store::MemLimited(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
+                limited_mem::Error::SeekInProgress => Error::SeekInProgress,
+                other => Error::MemoryLimited(other),
+            }),
+            Store::MemUnlimited(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
+                unlimited_mem::Error::SeekInProgress => Error::SeekInProgress,
+                other => Error::MemoryUnlimited(other),
             }),
         }
     }
     async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, Error> {
         match self {
             Self::Disk(inner) => inner.read_at(buf, pos).await.map_err(Error::Disk),
-            Self::Mem(inner) => Ok(inner
-                .read_at(buf, pos)
-                .await
-                .expect("never runs into an error")),
+            Self::MemLimited(inner) => Ok(inner.read_at(buf, pos)),
+            Self::MemUnlimited(inner) => Ok(inner.read_at(buf, pos)),
         }
     }
 
     fn into_parts(self) -> (range_watch::Sender, Capacity) {
         match self {
             Self::Disk(inner) => inner.into_parts(),
-            Self::Mem(inner) => inner.into_parts(),
+            Self::MemLimited(inner) => inner.into_parts(),
+            Self::MemUnlimited(inner) => inner.into_parts(),
         }
     }
 
     fn capacity(&self) -> &Capacity {
         match self {
             Self::Disk(inner) => &inner.capacity,
-            Self::Mem(inner) => &inner.capacity,
+            Self::MemLimited(inner) => &inner.capacity,
+            Self::MemUnlimited(inner) => &inner.capacity,
         }
     }
 }

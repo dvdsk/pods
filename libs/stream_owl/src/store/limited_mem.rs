@@ -37,21 +37,21 @@ pub enum Error {
 }
 
 impl Memory {
-    pub(super) fn new(
-        capacity: Capacity,
-        range_tx: range_watch::Sender,
-    ) -> Result<Self, TryReserveError> {
-        let mut bytes = VecDeque::new();
+    pub(super) fn new(capacity: Capacity, range_tx: range_watch::Sender) -> Result<Self, Error> {
+        let mut buffer = VecDeque::new();
         let buffer_cap = match capacity.total() {
-            CapacityBounds::Unlimited => usize::MAX,
+            CapacityBounds::Unlimited => 0,
             CapacityBounds::Limited(bytes) => bytes.get() as usize,
         };
-        bytes.try_reserve_exact(buffer_cap)?;
+
+        if let CapacityBounds::Limited(bytes) = capacity.total() {
+            buffer.try_reserve_exact(bytes.get() as usize)?;
+        }
 
         Ok(Self {
             last_read_pos: 0,
             capacity,
-            buffer: bytes,
+            buffer,
             buffer_cap,
             range: 0..0,
             range_tx,
@@ -89,7 +89,7 @@ impl Memory {
     }
 
     /// we must only get here if there is data in the mem store for us
-    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, ()> {
+    pub(super) fn read_at(&mut self, buf: &mut [u8], pos: u64) -> usize {
         debug_assert!(pos >= self.range.start, "No data in store at offset: {pos}");
 
         let relative_pos = pos - self.range.start;
@@ -97,7 +97,7 @@ impl Memory {
         self.capacity.add(n_copied);
 
         self.last_read_pos = pos;
-        Ok(n_copied)
+        n_copied
     }
     pub(super) fn ranges(&self) -> RangeSet<u64> {
         let mut res = RangeSet::new();

@@ -13,26 +13,26 @@ use crate::testing::test_data;
 
 fn gen_file_if_not_there(len: u64) -> PathBuf {
     static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+    let mut path = PATH.lock().unwrap();
 
-    if let Some(ref path) = *PATH.lock().unwrap() {
+    if let Some(ref path) = *path {
         if path.metadata().unwrap().len() == len {
             return path.clone();
         }
     }
 
-    let mut dir = std::env::temp_dir();
-    dir.push("stream_owl_test_source_.data");
-    let path = dir;
-    *PATH.lock().unwrap() = Some(path.clone());
+    let mut new_path = std::env::temp_dir();
+    new_path.push("stream_owl_test_source_.data");
 
-    if path.is_file() {
-        if path.metadata().unwrap().len() == len {
-            return path;
+    if new_path.is_file() {
+        if new_path.metadata().unwrap().len() == len {
+            return new_path;
         }
     }
 
-    std::fs::write(&path, test_data(len as u32)).unwrap();
-    path
+    std::fs::write(&new_path, test_data(len as u32)).unwrap();
+    *path = Some(new_path.clone());
+    new_path
 }
 
 /// # Panics

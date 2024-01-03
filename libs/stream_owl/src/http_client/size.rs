@@ -160,8 +160,6 @@ impl Size {
 
 #[cfg(test)]
 mod tests {
-    use http::StatusCode;
-
     use super::*;
 
     #[test]

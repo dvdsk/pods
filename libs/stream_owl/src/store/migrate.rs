@@ -1,4 +1,3 @@
-use std::collections::TryReserveError;
 use std::ops::Range;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -8,17 +7,17 @@ use futures_concurrency::future::Race;
 use rangemap::set::RangeSet;
 use tokio::sync::{oneshot, Mutex};
 
-use crate::store;
 use super::disk::Disk;
-use super::mem::Memory;
+use super::limited_mem::{Memory, self};
 use super::{capacity, range_watch, CapacityBounds, Store, StoreVariant, SwitchableStore};
 use super::{disk, Error as StoreError};
+use crate::store;
 
 mod range_list;
 
 impl SwitchableStore {
     pub(crate) async fn to_mem(&self) -> Option<MigrationHandle> {
-        if let StoreVariant::Mem = self.variant().await {
+        if let StoreVariant::MemLimited = self.variant().await {
             return None;
         }
 
@@ -29,13 +28,13 @@ impl SwitchableStore {
         let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
         let mem = match Memory::new(capacity_placeholder, watch_placeholder) {
             Err(e) => {
-                tx.send(Err(MigrationError::MemAllocation(e)))
+                tx.send(Err(MigrationError::MemLimited(e)))
                     .expect("cant have dropped rx");
                 return Some(handle);
             }
             Ok(mem) => mem,
         };
-        let migration = migrate(self.curr_store.clone(), Store::Mem(mem), tx);
+        let migration = migrate(self.curr_store.clone(), Store::MemLimited(mem), tx);
 
         tokio::spawn(migration);
         Some(handle)
@@ -70,7 +69,7 @@ pub enum MigrationError {
     #[error("todo")]
     DiskCreation(disk::Error),
     #[error("todo")]
-    MemAllocation(TryReserveError),
+    MemLimited(limited_mem::Error),
     #[error("todo")]
     WritingToDisk(#[from] StoreError),
     #[error("todo")]
@@ -89,6 +88,12 @@ impl MigrationHandle {
     fn new() -> (Self, oneshot::Sender<Result<(), MigrationError>>) {
         let (tx, rx) = oneshot::channel();
         (Self(rx), tx)
+    }
+
+    pub async fn done(self) -> Result<(), MigrationError> {
+        self.0
+            .await
+            .expect("Migration should not crash, therefore never drop the transmit handle")
     }
 }
 
@@ -130,10 +135,7 @@ async fn migrate(
     }
 }
 
-async fn pre_migrate(
-    curr: &Mutex<Store>,
-    target: &mut Store,
-) -> Result<(), MigrationError> {
+async fn pre_migrate(curr: &Mutex<Store>, target: &mut Store) -> Result<(), MigrationError> {
     let mut buf = Vec::with_capacity(4096);
     // TODO handle target that only support one range
     let mut on_target = RangeSet::new();
@@ -153,7 +155,10 @@ async fn pre_migrate(
             .map_err(MigrationError::PreMigrateRead)?;
         drop(src);
 
-        target.write_at(&buf, missing_on_disk.start).await.map_err(MigrationError::PreMigrateWrite)?;
+        target
+            .write_at(&buf, missing_on_disk.start)
+            .await
+            .map_err(MigrationError::PreMigrateWrite)?;
         on_target.insert(missing_on_disk);
     }
 }
@@ -173,7 +178,10 @@ async fn finish_migration(curr: &mut Store, target: &mut Store) -> Result<(), Mi
             .await
             .map_err(MigrationError::MigrateRead)?;
 
-        target.write_at(&buf, missing_on_disk.start).await.map_err(MigrationError::MigrateWrite)?;
+        target
+            .write_at(&buf, missing_on_disk.start)
+            .await
+            .map_err(MigrationError::MigrateWrite)?;
         on_disk.insert(missing_on_disk);
     }
 }

@@ -3,6 +3,7 @@ use crate::http_client::RangeRefused;
 use crate::http_client::RangeSupported;
 use crate::http_client::Size;
 use crate::http_client::StreamingClient;
+use crate::network::Bandwidth;
 use crate::network::Network;
 use crate::store::SwitchableStore;
 use crate::target::StreamTarget;
@@ -32,6 +33,7 @@ pub(crate) async fn new(
     storage: SwitchableStore,
     mut seek_rx: mpsc::Receiver<u64>,
     restriction: Option<Network>,
+    bandwidth_limit: Option<Bandwidth>,
     stream_size: Size,
 ) -> Result<StreamDone, Error> {
     let start_pos = 0;
@@ -43,6 +45,7 @@ pub(crate) async fn new(
         let build_client = StreamingClient::new(
             url.clone(),
             restriction.clone(),
+            bandwidth_limit,
             stream_size.clone(),
             &target,
         )

@@ -33,5 +33,11 @@ pub fn list_interfaces() -> Result<Vec<Network>, network_interface::Error> {
     })
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Bandwidth(usize);
+
+impl Bandwidth {
+    pub fn bytes(n: usize) -> Self {
+        Self(n)
+    }
+}

@@ -12,7 +12,7 @@ use tokio::task::{JoinError, JoinHandle};
 use crate::{StreamBuilder, StreamDone, StreamError, StreamHandle};
 
 mod pausable_server;
-pub use pausable_server::{pausable_server, Controls, Event, Action};
+pub use pausable_server::{pausable_server, Action, Controls, Event};
 
 mod static_file_server;
 pub use static_file_server::static_file_server;
@@ -31,7 +31,8 @@ pub fn gen_file_path() -> PathBuf {
 }
 
 pub fn test_data_range(range: Range<u32>) -> Vec<u8> {
-    range.into_iter()
+    range
+        .into_iter()
         .step_by(4)
         .flat_map(|n| n.to_ne_bytes())
         .collect()
@@ -57,7 +58,7 @@ pub fn setup_reader_test(
                 let (uri, server) = server(test_file_size as u64);
 
                 let builder = StreamBuilder::new(uri);
-                let (handle, stream) = configure(builder).start().await;
+                let (handle, stream) = configure(builder).start().await.unwrap();
                 tx.send(handle).unwrap();
 
                 let server = server.map(TestEnded::ServerCrashed);
