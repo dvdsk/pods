@@ -7,7 +7,7 @@ use http::{header, HeaderValue, StatusCode};
 use hyper::body::Incoming;
 use tracing::{debug, info};
 
-use crate::network::{Network, Bandwidth};
+use crate::network::{Bandwidth, Network};
 use crate::target::StreamTarget;
 mod io;
 mod read;
@@ -219,6 +219,7 @@ pub(crate) enum StreamingClient {
 pub(crate) struct ClientBuilder {
     restriction: Option<Network>,
     bandwidth_limit: Option<Bandwidth>,
+    start_paused: bool,
     url: hyper::Uri,
     cookies: Cookies,
     size: Size,
@@ -230,6 +231,7 @@ impl ClientBuilder {
         let Self {
             restriction,
             bandwidth_limit,
+            start_paused,
             mut url,
             mut cookies,
             mut size,
@@ -241,7 +243,7 @@ impl ClientBuilder {
             .expect("should be a range to get after seek or on connect");
         let first_range = format!("bytes={start}-{end}");
 
-        let mut conn = Connection::new(&url, &restriction).await?;
+        let mut conn = Connection::new(&url, &restriction, bandwidth_limit, start_paused).await?;
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
             .await?;
@@ -257,7 +259,7 @@ impl ClientBuilder {
             url = redirect_url(response)?;
             if url.host() != prev_url.host() {
                 prev_url = url.clone();
-                conn = Connection::new(&url, &restriction).await?;
+                conn = Connection::new(&url, &restriction, bandwidth_limit).await?;
             }
             response = conn
                 .send_initial_request(&url, &cookies, &first_range)
@@ -311,12 +313,14 @@ impl StreamingClient {
         url: hyper::Uri,
         restriction: Option<Network>,
         bandwidth_limit: Option<Bandwidth>,
+        start_paused: bool,
         size: Size,
         target: &StreamTarget,
     ) -> Result<Self, Error> {
         ClientBuilder {
             restriction,
             bandwidth_limit,
+            start_paused,
             url,
             cookies: Cookies::new(),
             size,

@@ -1,28 +1,129 @@
 //! Tokio IO integration for hyper
-//! example code taken from hyper-util and adjusted to include 
-//! download bandwith throttling
+//! example code taken from hyper-util and adjusted to include
+//! download bandwidth throttling
 use std::{
+    future::Future,
+    num::NonZeroU32,
     pin::Pin,
     task::{Context, Poll},
+    time::{Duration, Instant},
 };
 
+use governor::{
+    clock::MonotonicClock,
+    middleware::NoOpMiddleware,
+    state::{InMemoryState, NotKeyed},
+    Quota, RateLimiter,
+};
 use pin_project_lite::pin_project;
+use tokio::sync::mpsc::Receiver;
+
+use crate::Bandwidth;
 
 pin_project! {
-    /// A wrapping implementing hyper IO traits for a type that
-    /// implements Tokio's IO traits.
+    /// A wrapper adding rate limiting for a type that
+    /// implements Tokio's IO traits while implementing
+    /// the hyper::rt io traits.
+    ///
+    /// Note:
+    /// This is aimed at clients downloading. Rate limiting is
+    /// only applied to the read side.
+    ///
+    /// The rate limiting is always slightly behind as it does not
+    /// limit the amount of bytes that _can_ be received but acts after
+    /// the OS read call. There are quite some buffers, not only
+    /// on the system this is running on, between that read call and
+    /// the transmitter.
+    ///
+    /// After a (short) while the rate limit will effectively be
+    /// used by the transmitter.
     #[derive(Debug)]
     pub struct ThrottlableIo<T> {
         #[pin]
         inner: T,
+        limiter: RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
+        sleeping: Option<Pin<Box<tokio::time::Sleep>>>,
+        config_changes: Receiver<ConfigChange>,
+        config: Config,
+    }
+}
+
+#[derive(Debug)]
+struct Config {
+    paused: bool,
+    bandwidth_limit: Option<Bandwidth>,
+}
+
+#[derive(Debug)]
+enum ConfigChange {
+    Paused,
+    Resumed,
+    BandwidthLimitSet,
+    BandwidthLimitUpdated,
+    BandwidthLimitRemoved,
+}
+
+impl Config {
+    fn quota(&self) -> Quota {
+        let quota = self
+            .bandwidth_limit
+            .unwrap_or_else(Bandwidth::practically_infinite);
+        Quota::per_second(quota.bytes_per_second())
     }
 }
 
 impl<T> ThrottlableIo<T> {
     /// Wrap a type implementing Tokio's IO traits.
-    pub fn new(inner: T) -> Self {
-        Self { inner }
+    pub fn new(inner: T, config: Config, config_changes: Receiver<ConfigChange>) -> Self {
+        Self {
+            inner,
+            limiter: RateLimiter::direct_with_clock(config.quota(), &MonotonicClock::default()),
+            sleeping: None,
+            config_changes,
+            config,
+        }
     }
+}
+
+impl<T> ThrottlableIo<T> {
+    fn update_config(self: Pin<&mut Self>, cx: &mut Context<'_>, change: ConfigChange) {
+        match change {
+            ConfigChange::Paused => self.sleep(cx, forever()),
+            ConfigChange::Resumed => self.cancel_sleep(),
+            ConfigChange::BandwidthLimitSet => todo!(),
+            ConfigChange::BandwidthLimitUpdated => todo!(),
+            ConfigChange::BandwidthLimitRemoved => self.remove_bandwidth_limit(),
+        }
+    }
+
+    fn sleep(self: Pin<&mut Self>, cx: &mut Context<'_>, dur: Duration) {
+        let this = self.project();
+        let fut = tokio::time::sleep(dur);
+        let mut fut = Box::pin(fut);
+        // poll once to register sleep with context
+        match Future::poll(fut.as_mut(), cx) {
+            Poll::Ready(()) => (),
+            Poll::Pending => *this.sleeping = Some(fut),
+        };
+    }
+
+    fn cancel_sleep(self: Pin<&mut Self>) {
+        let this = self.project();
+        *this.sleeping = None;
+    }
+
+    fn remove_bandwidth_limit(self: Pin<&mut Self>) {
+        let this = self.project();
+        this.limiter
+    }
+}
+
+fn forever() -> Duration {
+    Duration::MAX
+}
+
+fn handle_gone_err() -> std::io::Error {
+    todo!()
 }
 
 impl<T> hyper::rt::Read for ThrottlableIo<T>
@@ -35,11 +136,45 @@ where
         mut buf: hyper::rt::ReadBufCursor<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
         let n = unsafe {
+            let this = self.project();
+
+            match this.config_changes.poll_recv(cx) {
+                Poll::Ready(None) => return Poll::Ready(Err(handle_gone_err())),
+                Poll::Ready(Some(change)) => self.update_config(cx, change),
+                Poll::Pending => (),
+            }
+
+            if let Some(fut) = this.sleeping.as_mut() {
+                match Future::poll(fut.as_mut(), cx) {
+                    Poll::Ready(()) => (),
+                    Poll::Pending => return Poll::Pending,
+                };
+            }
+
             let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
-            match tokio::io::AsyncRead::poll_read(self.project().inner, cx, &mut tbuf) {
+            let n = match tokio::io::AsyncRead::poll_read(this.inner, cx, &mut tbuf) {
                 Poll::Ready(Ok(())) => tbuf.filled().len(),
                 other => return other,
+            };
+
+            if let Some(n) = NonZeroU32::new(n as u32) {
+                if let Err(until) = this
+                    .limiter
+                    .check_n(n)
+                    .expect("There should always be enough capacity")
+                {
+                    let next_call_allowed = until.earliest_possible();
+                    let fut = tokio::time::sleep_until(next_call_allowed.into());
+                    let mut fut = Box::pin(fut);
+                    // poll once to register sleep with context
+                    match Future::poll(fut.as_mut(), cx) {
+                        Poll::Ready(()) => (),
+                        Poll::Pending => *this.sleeping = Some(fut),
+                    };
+                }
             }
+
+            n
         };
 
         unsafe {

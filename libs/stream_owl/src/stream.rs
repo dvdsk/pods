@@ -68,11 +68,15 @@ impl ManagedHandle {
     pub fn set_priority(&mut self, _arg: i32) {
         todo!()
     }
-
     pub fn id(&self) -> Id {
         todo!()
     }
-
+    pub fn pause(&mut self) {
+        self.handle.pause()
+    }
+    pub fn unpause(&mut self) {
+        self.handle.unpause()
+    }
     pub fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
         self.handle.limit_bandwidth(bandwidth)
     }
@@ -99,6 +103,14 @@ impl Handle {
     }
 
     pub fn remove_bandwidth_limit(&self) {
+        todo!()
+    }
+
+    pub fn pause(&mut self) {
+        todo!()
+    }
+
+    pub fn unpause(&mut self) {
         todo!()
     }
 

@@ -1,4 +1,5 @@
 use std::net::IpAddr;
+use std::num::NonZeroU32;
 
 use network_interface::{NetworkInterface, NetworkInterfaceConfig};
 
@@ -34,10 +35,20 @@ pub fn list_interfaces() -> Result<Vec<Network>, network_interface::Error> {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Bandwidth(usize);
+pub struct Bandwidth(NonZeroU32);
+#[derive(Debug)]
+pub struct IsZero;
 
 impl Bandwidth {
-    pub fn bytes(n: usize) -> Self {
-        Self(n)
+    pub fn bytes(n: u32) -> Result<Self, IsZero> {
+        Ok(Self(NonZeroU32::new(n).ok_or(IsZero)?))
+    }
+
+    pub fn bytes_per_second(&self) -> NonZeroU32 {
+        self.0
+    }
+
+    pub fn practically_infinite() -> Self {
+        Self(NonZeroU32::MAX)
     }
 }

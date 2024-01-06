@@ -2,7 +2,7 @@ use std::io::{Read, Seek};
 use std::sync::Arc;
 
 use stream_owl::testing::{Action, Controls, Event, TestEnded};
-use stream_owl::{testing, Bandwidth, StreamBuilder, StreamDone};
+use stream_owl::{testing, StreamBuilder, StreamDone};
 use tokio::sync::Notify;
 
 #[test]
@@ -13,7 +13,7 @@ fn after_seeking_forward_download_still_completes() {
         move |b: StreamBuilder<false>| {
             b.with_prefetch(0)
                 .to_disk(path)
-                .with_bandwidth_limit(Bandwidth::bytes(0))
+                .paused()
         }
     };
 
