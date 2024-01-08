@@ -2,11 +2,13 @@ use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
-use futures::FutureExt;
+use futures::{pin_mut, FutureExt};
+use futures_concurrency::future::Race;
 use std::future::Future;
 use tokio::sync::mpsc;
+use tracing::debug;
 
-use crate::http_client::Size;
+use crate::http_client::{BandwidthLim, Size, BandwidthAllowed};
 use crate::network::{Bandwidth, Network};
 use crate::store::SwitchableStore;
 use crate::{manager, StreamDone, StreamId};
@@ -26,7 +28,8 @@ pub struct StreamBuilder<const STORAGE_SET: bool> {
     storage: Option<StorageChoice>,
     initial_prefetch: usize,
     restriction: Option<Network>,
-    bandwidth_limit: Option<Bandwidth>,
+    start_paused: bool,
+    bandwidth: BandwidthAllowed,
 }
 
 impl StreamBuilder<false> {
@@ -36,7 +39,8 @@ impl StreamBuilder<false> {
             storage: None,
             initial_prefetch: 10_000,
             restriction: None,
-            bandwidth_limit: None,
+            start_paused: false,
+            bandwidth: BandwidthAllowed::UnLimited,
         }
     }
 }
@@ -49,7 +53,8 @@ impl StreamBuilder<false> {
             storage: self.storage,
             initial_prefetch: self.initial_prefetch,
             restriction: self.restriction,
-            bandwidth_limit: self.bandwidth_limit,
+            start_paused: self.start_paused,
+            bandwidth: self.bandwidth,
         }
     }
     pub fn to_limited_mem(mut self, max_size: NonZeroUsize) -> StreamBuilder<true> {
@@ -59,7 +64,8 @@ impl StreamBuilder<false> {
             storage: self.storage,
             initial_prefetch: self.initial_prefetch,
             restriction: self.restriction,
-            bandwidth_limit: self.bandwidth_limit,
+            start_paused: self.start_paused,
+            bandwidth: self.bandwidth,
         }
     }
     pub fn to_disk(mut self, path: PathBuf) -> StreamBuilder<true> {
@@ -69,12 +75,17 @@ impl StreamBuilder<false> {
             storage: self.storage,
             initial_prefetch: self.initial_prefetch,
             restriction: self.restriction,
-            bandwidth_limit: self.bandwidth_limit,
+            start_paused: self.start_paused,
+            bandwidth: self.bandwidth,
         }
     }
 }
 
 impl<const STORAGE_SET: bool> StreamBuilder<STORAGE_SET> {
+    pub fn start_paused(mut self, start_paused: bool) -> Self {
+        self.start_paused = start_paused;
+        self
+    }
     /// default is 10_000 bytes
     pub fn with_prefetch(mut self, prefetch: usize) -> Self {
         self.initial_prefetch = prefetch;
@@ -85,7 +96,7 @@ impl<const STORAGE_SET: bool> StreamBuilder<STORAGE_SET> {
         self
     }
     pub fn with_bandwidth_limit(mut self, bandwidth: Bandwidth) -> Self {
-        self.bandwidth_limit = Some(bandwidth);
+        self.bandwidth = BandwidthAllowed::Limited(bandwidth);
         self
     }
 }
@@ -95,10 +106,13 @@ impl StreamBuilder<true> {
     pub(crate) async fn start_managed(
         self,
         manager_tx: mpsc::Sender<manager::Command>,
-    ) -> Result<(
-        ManagedHandle,
-        impl Future<Output = StreamEnded> + Send + 'static,
-    ), crate::store::Error> {
+    ) -> Result<
+        (
+            ManagedHandle,
+            impl Future<Output = StreamEnded> + Send + 'static,
+        ),
+        crate::store::Error,
+    > {
         let id = StreamId::new();
         let (handle, stream_task) = self.start().await?;
         let stream_task = stream_task.map(|res| StreamEnded { res, id });
@@ -119,7 +133,6 @@ impl StreamBuilder<true> {
         ),
         crate::store::Error,
     > {
-        let (seek_tx, seek_rx) = mpsc::channel(12);
         let stream_size = Size::default();
         let store = match self.storage.expect("must chose storage option") {
             StorageChoice::Disk(path) => {
@@ -133,20 +146,61 @@ impl StreamBuilder<true> {
             }
         }?;
 
-        let handle = Handle {
+        let (seek_tx, seek_rx) = mpsc::channel(12);
+        let (pause_tx, pause_rx) = mpsc::channel(12);
+        let (bandwidth_lim, bandwidth_lim_tx) = BandwidthLim::from_init(self.bandwidth);
+
+        let mut handle = Handle {
             reader_in_use: Arc::new(Mutex::new(())),
             prefetch: self.initial_prefetch,
             seek_tx,
+            is_paused: false,
             store: store.clone(),
+            pause_tx,
+            bandwidth_lim_tx,
         };
+
+        if self.start_paused {
+            handle.pause().await;
+        }
+
         let stream_task = task::new(
             self.url,
             store.clone(),
             seek_rx,
             self.restriction,
-            self.bandwidth_limit,
+            bandwidth_lim,
             stream_size,
         );
+        let stream_task = pausable(stream_task, pause_rx);
         Ok((handle, stream_task))
+    }
+}
+
+async fn pausable<F>(task: F, mut pause_rx: mpsc::Receiver<bool>) -> Result<StreamDone, Error>
+where
+    F: Future<Output = Result<StreamDone, Error>>,
+{
+    enum Res {
+        Pause(Option<bool>),
+        Task(Result<StreamDone, Error>),
+    }
+
+    pin_mut!(task);
+    loop {
+        let get_pause = pause_rx.recv().map(Res::Pause);
+        let task_ends = task.as_mut().map(Res::Task);
+        match (get_pause, task_ends).race().await {
+            Res::Pause(None) => return Ok(StreamDone::Canceld),
+            Res::Pause(Some(true)) => loop {
+                match pause_rx.recv().await {
+                    Some(true) => debug!("already paused"),
+                    Some(false) => break,
+                    None => return Ok(StreamDone::Canceld),
+                }
+            },
+            Res::Pause(Some(false)) => debug!("not paused"),
+            Res::Task(result) => return result,
+        }
     }
 }

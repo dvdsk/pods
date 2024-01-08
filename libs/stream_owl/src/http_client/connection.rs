@@ -10,10 +10,9 @@ use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinSet;
 use tracing::instrument;
 
-use crate::Bandwidth;
 use crate::network::Network;
 
-use super::io::ThrottlableIo;
+use super::io::{ThrottlableIo, BandwidthLim};
 use super::{Cookies, Error};
 
 #[derive(Debug)]
@@ -28,11 +27,10 @@ impl Connection {
     pub(crate) async fn new(
         url: &hyper::Uri,
         restriction: &Option<Network>,
-        bandwidth_limit: Option<Bandwidth>,
-        start_paused: bool,
+        bandwidth_lim: &BandwidthLim,
     ) -> Result<Self, Error> {
         let tcp = new_tcp_stream(&url, &restriction).await?;
-        let io = ThrottlableIo::new(tcp, bandwidth_limit, start_paused);
+        let io = ThrottlableIo::new(tcp, bandwidth_lim);
         let (request_sender, conn) = http1::handshake(io).await.map_err(Error::Handshake)?;
 
         let mut connection = JoinSet::new();

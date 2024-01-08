@@ -7,7 +7,7 @@ use http::{header, HeaderValue, StatusCode};
 use hyper::body::Incoming;
 use tracing::{debug, info};
 
-use crate::network::{Bandwidth, Network};
+use crate::network::Network;
 use crate::target::StreamTarget;
 mod io;
 mod read;
@@ -23,6 +23,7 @@ use connection::Connection;
 use self::connection::HyperResponse;
 use self::read::InnerReader;
 use self::response::ValidResponse;
+pub(crate) use self::io::{BandwidthLim, BandwidthTx, BandwidthAllowed};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -135,7 +136,7 @@ impl RangeSupported {
     pub(crate) fn builder(&self) -> ClientBuilder {
         ClientBuilder {
             restriction: self.client.restriction.clone(),
-            bandwidth_limit: self.client.bandwidth_limit,
+            bandwidth_lim: self.client.bandwidth_lim.clone(),
             url: self.client.url.clone(),
             cookies: self.client.cookies.clone(),
             size: self.client.size.clone(),
@@ -169,7 +170,7 @@ impl RangeRefused {
     pub(crate) fn builder(&self) -> ClientBuilder {
         ClientBuilder {
             restriction: self.client.restriction.clone(),
-            bandwidth_limit: self.client.bandwidth_limit,
+            bandwidth_lim: self.client.bandwidth_lim.clone(),
             url: self.client.url.clone(),
             cookies: self.client.cookies.clone(),
             size: self.client.size.clone(),
@@ -186,7 +187,7 @@ impl RangeRefused {
 pub(crate) struct Client {
     host: HeaderValue,
     restriction: Option<Network>,
-    bandwidth_limit: Option<Bandwidth>,
+    bandwidth_lim: BandwidthLim,
     url: hyper::Uri,
     #[derivative(Debug = "ignore")]
     conn: Connection,
@@ -218,8 +219,7 @@ pub(crate) enum StreamingClient {
 #[derive(Debug, Clone)]
 pub(crate) struct ClientBuilder {
     restriction: Option<Network>,
-    bandwidth_limit: Option<Bandwidth>,
-    start_paused: bool,
+    bandwidth_lim: BandwidthLim,
     url: hyper::Uri,
     cookies: Cookies,
     size: Size,
@@ -230,8 +230,7 @@ impl ClientBuilder {
     pub(crate) async fn connect(self, target: &StreamTarget) -> Result<StreamingClient, Error> {
         let Self {
             restriction,
-            bandwidth_limit,
-            start_paused,
+            bandwidth_lim,
             mut url,
             mut cookies,
             mut size,
@@ -243,7 +242,7 @@ impl ClientBuilder {
             .expect("should be a range to get after seek or on connect");
         let first_range = format!("bytes={start}-{end}");
 
-        let mut conn = Connection::new(&url, &restriction, bandwidth_limit, start_paused).await?;
+        let mut conn = Connection::new(&url, &restriction, &bandwidth_lim).await?;
         let mut response = conn
             .send_initial_request(&url, &cookies, &first_range)
             .await?;
@@ -259,7 +258,7 @@ impl ClientBuilder {
             url = redirect_url(response)?;
             if url.host() != prev_url.host() {
                 prev_url = url.clone();
-                conn = Connection::new(&url, &restriction, bandwidth_limit).await?;
+                conn = Connection::new(&url, &restriction, &bandwidth_lim).await?;
             }
             response = conn
                 .send_initial_request(&url, &cookies, &first_range)
@@ -278,7 +277,7 @@ impl ClientBuilder {
         let client = Client {
             host,
             restriction,
-            bandwidth_limit,
+            bandwidth_lim,
             url,
             conn,
             cookies,
@@ -312,15 +311,13 @@ impl StreamingClient {
     pub(crate) async fn new(
         url: hyper::Uri,
         restriction: Option<Network>,
-        bandwidth_limit: Option<Bandwidth>,
-        start_paused: bool,
+        bandwidth_lim: BandwidthLim,
         size: Size,
         target: &StreamTarget,
     ) -> Result<Self, Error> {
         ClientBuilder {
             restriction,
-            bandwidth_limit,
-            start_paused,
+            bandwidth_lim,
             url,
             cookies: Cookies::new(),
             size,

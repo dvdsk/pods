@@ -6,7 +6,7 @@ use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::instrument;
 
-use crate::http_client;
+use crate::http_client::{self, BandwidthTx, BandwidthAllowed};
 use crate::manager::Command;
 use crate::network::Bandwidth;
 use crate::reader::{CouldNotCreateRuntime, Reader};
@@ -53,6 +53,9 @@ pub struct Handle {
     prefetch: usize,
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
+    pause_tx: mpsc::Sender<bool>,
+    bandwidth_lim_tx: BandwidthTx,
+    is_paused: bool,
     store: SwitchableStore,
     #[derivative(Debug = "ignore")]
     reader_in_use: Arc<Mutex<()>>,
@@ -71,17 +74,17 @@ impl ManagedHandle {
     pub fn id(&self) -> Id {
         todo!()
     }
-    pub fn pause(&mut self) {
-        self.handle.pause()
+    pub async fn pause(&mut self) {
+        self.handle.pause().await;
     }
-    pub fn unpause(&mut self) {
-        self.handle.unpause()
+    pub async fn unpause(&mut self) {
+        self.handle.unpause().await;
     }
-    pub fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
-        self.handle.limit_bandwidth(bandwidth)
+    pub async fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
+        self.handle.limit_bandwidth(bandwidth).await
     }
-    pub fn unlimit_bandwidth(&self) {
-        self.handle.remove_bandwidth_limit()
+    pub async fn unlimit_bandwidth(&self) {
+        self.handle.remove_bandwidth_limit().await
     }
     pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
         self.handle.try_get_reader()
@@ -98,20 +101,38 @@ impl ManagedHandle {
 }
 
 impl Handle {
-    pub fn limit_bandwidth(&mut self, _bandwidth: Bandwidth) {
-        todo!();
+    pub async fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
+        self.bandwidth_lim_tx
+            .send(BandwidthAllowed::Limited(bandwidth))
+            .await
+            .expect("rx is part of Task, which should not drop before Handle");
     }
 
-    pub fn remove_bandwidth_limit(&self) {
-        todo!()
+    pub async fn remove_bandwidth_limit(&self) {
+        self.bandwidth_lim_tx
+            .send(BandwidthAllowed::UnLimited)
+            .await
+            .expect("rx is part of Task, which should not drop before Handle");
     }
 
-    pub fn pause(&mut self) {
-        todo!()
+    pub async fn pause(&mut self) {
+        if !self.is_paused {
+            self.pause_tx
+                .send(true)
+                .await
+                .expect("rx is part of Task, which should not drop before Handle");
+            self.is_paused = true;
+        }
     }
 
-    pub fn unpause(&mut self) {
-        todo!()
+    pub async fn unpause(&mut self) {
+        if self.is_paused {
+            self.pause_tx
+                .send(false)
+                .await
+                .expect("rx is part of Task, which should not drop before Handle");
+            self.is_paused = false;
+        }
     }
 
     #[instrument(level = "debug", ret, err(Debug))]
@@ -140,7 +161,6 @@ impl Handle {
     pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
         self.store.to_disk(path).await
     }
-
 }
 
 impl Drop for ManagedHandle {

@@ -1,12 +1,15 @@
 //! Tokio IO integration for hyper
 //! example code taken from hyper-util and adjusted to include
 //! download bandwidth throttling
+use std::mem;
+use std::sync::Mutex;
 use std::{
     future::Future,
     num::NonZeroU32,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Instant,
 };
 
 use governor::{
@@ -16,9 +19,27 @@ use governor::{
     Quota, RateLimiter,
 };
 use pin_project_lite::pin_project;
-use tokio::sync::mpsc::Receiver;
+use tokio::sync::mpsc;
 
 use crate::Bandwidth;
+
+#[derive(Debug)]
+pub(crate) enum BandwidthAllowed {
+    Limited(Bandwidth),
+    UnLimited,
+}
+
+impl BandwidthAllowed {
+    fn bytes_per_second(&self) -> NonZeroU32 {
+        match self {
+            BandwidthAllowed::Limited(b) => b.bytes_per_second(),
+            BandwidthAllowed::UnLimited => NonZeroU32::MAX,
+        }
+    }
+}
+
+type BandwidthRx = mpsc::Receiver<BandwidthAllowed>;
+pub(crate) type BandwidthTx = mpsc::Sender<BandwidthAllowed>;
 
 pin_project! {
     /// A wrapper adding rate limiting for a type that
@@ -43,62 +64,80 @@ pin_project! {
         inner: T,
         limiter: RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
         sleeping: Option<Pin<Box<tokio::time::Sleep>>>,
-        config_changes: Receiver<ConfigChange>,
-        config: Config,
+        new_bandwidth_lim: Arc<Mutex<BandwidthRx>>,
     }
 }
 
-#[derive(Debug)]
-struct Config {
-    paused: bool,
-    bandwidth_limit: Option<Bandwidth>,
+#[derive(Debug, Clone)]
+pub(crate) struct BandwidthLim {
+    rx: Arc<Mutex<BandwidthRx>>,
 }
 
-#[derive(Debug)]
-enum ConfigChange {
-    Paused,
-    Resumed,
-    BandwidthLimitSet,
-    BandwidthLimitUpdated,
-    BandwidthLimitRemoved,
-}
+impl BandwidthLim {
+    pub(crate) fn from_init(init: BandwidthAllowed) -> (Self, BandwidthTx) {
+        let (tx, rx) = mpsc::channel(12);
+        let rx = Arc::new(Mutex::new(rx));
+        if let BandwidthAllowed::Limited(_) = init {
+            tx.try_send(init)
+                .expect("First send can not fail on non zero cap channel");
+        }
+        (Self { rx }, tx)
+    }
 
-impl Config {
-    fn quota(&self) -> Quota {
-        let quota = self
-            .bandwidth_limit
-            .unwrap_or_else(Bandwidth::practically_infinite);
-        Quota::per_second(quota.bytes_per_second())
+    fn init_quota(&self) -> Quota {
+        let init = self
+            .rx
+            .try_lock()
+            .expect("This conn is ended before new is started")
+            .try_recv()
+            .unwrap_or(BandwidthAllowed::UnLimited);
+        let quota = init.bytes_per_second();
+        Quota::per_second(quota)
     }
 }
 
 impl<T> ThrottlableIo<T> {
     /// Wrap a type implementing Tokio's IO traits.
-    pub fn new(inner: T, config: Config, config_changes: Receiver<ConfigChange>) -> Self {
+    pub fn new(inner: T, bandwidth_lim: &BandwidthLim) -> Self {
         Self {
             inner,
-            limiter: RateLimiter::direct_with_clock(config.quota(), &MonotonicClock::default()),
+            limiter: RateLimiter::direct_with_clock(
+                bandwidth_lim.init_quota(),
+                &MonotonicClock::default(),
+            ),
             sleeping: None,
-            config_changes,
-            config,
+            new_bandwidth_lim: bandwidth_lim.rx.clone(),
         }
+    }
+
+    unsafe fn perform_read(
+        mut self: Pin<&mut Self>,
+        mut buf: hyper::rt::ReadBufCursor<'_>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<usize, std::io::Error>>
+    where
+        T: tokio::io::AsyncRead,
+    {
+        let this = self.as_mut().project();
+        let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
+        let n = match tokio::io::AsyncRead::poll_read(this.inner, cx, &mut tbuf) {
+            Poll::Ready(Ok(())) => tbuf.filled().len(),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+            Poll::Pending => return Poll::Pending,
+        };
+        buf.advance(n);
+        Poll::Ready(Ok(n))
     }
 }
 
-impl<T> ThrottlableIo<T> {
-    fn update_config(self: Pin<&mut Self>, cx: &mut Context<'_>, change: ConfigChange) {
-        match change {
-            ConfigChange::Paused => self.sleep(cx, forever()),
-            ConfigChange::Resumed => self.cancel_sleep(),
-            ConfigChange::BandwidthLimitSet => todo!(),
-            ConfigChange::BandwidthLimitUpdated => todo!(),
-            ConfigChange::BandwidthLimitRemoved => self.remove_bandwidth_limit(),
-        }
-    }
+fn handle_gone_err() -> std::io::Error {
+    todo!()
+}
 
-    fn sleep(self: Pin<&mut Self>, cx: &mut Context<'_>, dur: Duration) {
+impl<T> ThrottlableIo<T> {
+    fn sleep(self: Pin<&mut Self>, cx: &mut Context<'_>, next_call_allowed: Instant) {
         let this = self.project();
-        let fut = tokio::time::sleep(dur);
+        let fut = tokio::time::sleep_until(next_call_allowed.into());
         let mut fut = Box::pin(fut);
         // poll once to register sleep with context
         match Future::poll(fut.as_mut(), cx) {
@@ -107,23 +146,63 @@ impl<T> ThrottlableIo<T> {
         };
     }
 
-    fn cancel_sleep(self: Pin<&mut Self>) {
-        let this = self.project();
+    fn remove_lim(self: &mut Pin<&mut Self>) {
+        self.set_lim(Bandwidth::practically_infinite());
+        // now drop the sleep so we resume immediately
+        let this = self.as_mut().project();
         *this.sleeping = None;
     }
 
-    fn remove_bandwidth_limit(self: Pin<&mut Self>) {
-        let this = self.project();
-        this.limiter
+    fn set_lim(self: &mut Pin<&mut Self>, limit: Bandwidth) {
+        let this = self.as_mut().project();
+        let new_quota = Quota::per_second(limit.bytes_per_second());
+        let mut new = RateLimiter::direct_with_clock(new_quota, &MonotonicClock::default());
+        mem::swap(this.limiter, &mut new);
     }
-}
 
-fn forever() -> Duration {
-    Duration::MAX
-}
+    fn handle_bandwidth_lim_changes(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Result<(), std::io::Error> {
+        let new_bandwidth_lim = {
+            let this = self.as_mut().project();
 
-fn handle_gone_err() -> std::io::Error {
-    todo!()
+            let mut new_bandwidth_lim = this
+                .new_bandwidth_lim
+                .try_lock()
+                .expect("Only one Io conn per bandwidth_lim_rx");
+            new_bandwidth_lim.poll_recv(cx)
+        };
+        match new_bandwidth_lim {
+            Poll::Ready(None) => return Err(handle_gone_err()),
+            Poll::Ready(Some(BandwidthAllowed::Limited(limit))) => self.set_lim(limit),
+            Poll::Ready(Some(BandwidthAllowed::UnLimited)) => self.remove_lim(),
+            Poll::Pending => (),
+        }
+        Ok(())
+    }
+
+    fn update_limiter(self: Pin<&mut Self>, n: usize, cx: &mut Context<'_>) {
+        if let Some(n) = NonZeroU32::new(n as u32) {
+            if let Err(until) = self
+                .limiter
+                .check_n(n)
+                .expect("There should always be enough capacity")
+            {
+                let next_call_allowed = until.earliest_possible();
+                self.sleep(cx, next_call_allowed);
+            }
+        }
+    }
+
+    fn do_sleep(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let this = self.as_mut().project();
+        if let Some(fut) = this.sleeping.as_mut() {
+            Future::poll(fut.as_mut(), cx)
+        } else {
+            Poll::Ready(())
+        }
+    }
 }
 
 impl<T> hyper::rt::Read for ThrottlableIo<T>
@@ -131,55 +210,29 @@ where
     T: tokio::io::AsyncRead,
 {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        mut buf: hyper::rt::ReadBufCursor<'_>,
+        buf: hyper::rt::ReadBufCursor<'_>,
     ) -> Poll<Result<(), std::io::Error>> {
-        let n = unsafe {
-            let this = self.project();
+        if let Err(e) = self.as_mut().handle_bandwidth_lim_changes(cx) {
+            return Poll::Ready(Err(e));
+        }
 
-            match this.config_changes.poll_recv(cx) {
-                Poll::Ready(None) => return Poll::Ready(Err(handle_gone_err())),
-                Poll::Ready(Some(change)) => self.update_config(cx, change),
-                Poll::Pending => (),
-            }
+        if let Poll::Pending = self.do_sleep(cx) {
+            return Poll::Pending;
+        }
 
-            if let Some(fut) = this.sleeping.as_mut() {
-                match Future::poll(fut.as_mut(), cx) {
-                    Poll::Ready(()) => (),
-                    Poll::Pending => return Poll::Pending,
-                };
-            }
-
-            let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
-            let n = match tokio::io::AsyncRead::poll_read(this.inner, cx, &mut tbuf) {
-                Poll::Ready(Ok(())) => tbuf.filled().len(),
-                other => return other,
-            };
-
-            if let Some(n) = NonZeroU32::new(n as u32) {
-                if let Err(until) = this
-                    .limiter
-                    .check_n(n)
-                    .expect("There should always be enough capacity")
-                {
-                    let next_call_allowed = until.earliest_possible();
-                    let fut = tokio::time::sleep_until(next_call_allowed.into());
-                    let mut fut = Box::pin(fut);
-                    // poll once to register sleep with context
-                    match Future::poll(fut.as_mut(), cx) {
-                        Poll::Ready(()) => (),
-                        Poll::Pending => *this.sleeping = Some(fut),
-                    };
-                }
-            }
-
-            n
+        let Poll::Ready(read_res) = (unsafe { self.as_mut().perform_read(buf, cx) }) else {
+            return Poll::Pending;
         };
 
-        unsafe {
-            buf.advance(n);
-        }
+        let n_read = match read_res {
+            Err(e) => return Poll::Ready(Err(e)),
+            Ok(n) => n,
+        };
+
+        self.update_limiter(n_read, cx);
+
         Poll::Ready(Ok(()))
     }
 }
