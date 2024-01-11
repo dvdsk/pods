@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use stream_owl::testing::{Action, Controls, Event, TestEnded};
 use stream_owl::{testing, StreamBuilder, StreamDone};
+use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 
 #[test]
@@ -10,11 +11,7 @@ fn after_seeking_forward_download_still_completes() {
     let test_dl_path = stream_owl::testing::gen_file_path();
     let configure = {
         let path = test_dl_path.clone();
-        move |b: StreamBuilder<false>| {
-            b.with_prefetch(0)
-                .to_disk(path)
-                .paused()
-        }
+        move |b: StreamBuilder<false>| b.with_prefetch(0).to_disk(path).start_paused(true)
     };
 
     let controls = Controls::new();
@@ -31,8 +28,9 @@ fn after_seeking_forward_download_still_completes() {
 
     let mut reader = handle.try_get_reader().unwrap();
     reader.seek(std::io::SeekFrom::Start(8_000)).unwrap();
-    handle.remove_bandwidth_limit();
-    controls.unpause();
+
+    let rt = Runtime::new().unwrap();
+    rt.block_on(handle.unpause());
 
     let test_ended = runtime_thread.join().unwrap();
     match test_ended {
@@ -61,17 +59,13 @@ fn resumes() {
 
         let (runtime_thread, mut handle) = {
             let controls = controls.clone();
-            testing::setup_reader_test(
-                &test_done,
-                test_file_size,
-                configure.clone(),
-                move |size| testing::pausable_server(size, controls),
-            )
+            testing::setup_reader_test(&test_done, test_file_size, configure.clone(), move |size| {
+                testing::pausable_server(size, controls)
+            })
         };
 
         let mut reader = handle.try_get_reader().unwrap();
         reader.seek(std::io::SeekFrom::Start(2_000)).unwrap();
-        handle.remove_bandwidth_limit();
         controls.push(Event::ByteRequested(5_000), Action::Pause);
         controls.unpause();
         // reading byte 2k + 3k will cause a crash
@@ -91,12 +85,9 @@ fn resumes() {
 
     let (runtime_thread, mut handle) = {
         let controls = controls.clone();
-        testing::setup_reader_test(
-            &test_done,
-            test_file_size,
-            configure,
-            move |size| testing::pausable_server(size, controls),
-        )
+        testing::setup_reader_test(&test_done, test_file_size, configure, move |size| {
+            testing::pausable_server(size, controls)
+        })
     };
 
     // if we can read 3k at 2k then the server saved the data to disk

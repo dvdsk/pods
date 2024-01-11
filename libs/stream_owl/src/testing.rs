@@ -8,6 +8,7 @@ use futures_concurrency::future::Race;
 use tokio::runtime::Runtime;
 use tokio::sync::Notify;
 use tokio::task::{JoinError, JoinHandle};
+use tracing_subscriber::fmt::time::uptime;
 
 use crate::{StreamBuilder, StreamDone, StreamError, StreamHandle};
 
@@ -90,13 +91,17 @@ pub fn setup_tracing() {
     use tracing_subscriber::fmt;
     use tracing_subscriber::prelude::*;
 
-    let filter = filter::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
-        filter::EnvFilter::builder()
-            .parse("stream_owl=trace,tower=debug,info")
-            .unwrap()
-    });
+    let filter = filter::EnvFilter::builder()
+        .with_regex(true)
+        .try_from_env()
+        .unwrap_or_else(|_| {
+            filter::EnvFilter::builder()
+                .parse("stream_owl=debug,tower=info,info")
+                .unwrap()
+        });
 
     let fmt = fmt::layer()
+        .with_timer(uptime())
         .pretty()
         .with_line_number(true)
         .with_test_writer();

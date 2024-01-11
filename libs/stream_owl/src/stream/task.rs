@@ -1,9 +1,9 @@
-use crate::http_client::BandwidthLim;
 use crate::http_client::Error as HttpError;
 use crate::http_client::RangeRefused;
 use crate::http_client::RangeSupported;
 use crate::http_client::Size;
 use crate::http_client::StreamingClient;
+use crate::network::BandwidthLim;
 use crate::network::Network;
 use crate::store::SwitchableStore;
 use crate::target::StreamTarget;

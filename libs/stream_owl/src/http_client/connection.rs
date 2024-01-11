@@ -10,9 +10,9 @@ use tokio::net::{TcpSocket, TcpStream};
 use tokio::task::JoinSet;
 use tracing::instrument;
 
-use crate::network::Network;
+use crate::network::{Network, BandwidthLim};
 
-use super::io::{ThrottlableIo, BandwidthLim};
+use super::io::ThrottlableIo;
 use super::{Cookies, Error};
 
 #[derive(Debug)]
@@ -30,19 +30,15 @@ impl Connection {
         bandwidth_lim: &BandwidthLim,
     ) -> Result<Self, Error> {
         let tcp = new_tcp_stream(&url, &restriction).await?;
-        let io = ThrottlableIo::new(tcp, bandwidth_lim);
+        let io = ThrottlableIo::new(tcp, bandwidth_lim).map_err(Error::SocketConfig)?;
         let (request_sender, conn) = http1::handshake(io).await.map_err(Error::Handshake)?;
 
         let mut connection = JoinSet::new();
-        connection
-            // .build_task()
-            // .name("stream tcp connection")
-            .spawn(async move {
-                if let Err(e) = conn.await {
-                    eprintln!("Error in connection: {}", e);
-                }
-            });
-            // .unwrap();
+        connection.spawn(async move {
+            if let Err(e) = conn.await {
+                eprintln!("Error in connection: {}", e);
+            }
+        });
         Ok(Self {
             request_sender,
             _connection: connection,

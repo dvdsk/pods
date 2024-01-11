@@ -1,8 +1,10 @@
 //! Tokio IO integration for hyper
 //! example code taken from hyper-util and adjusted to include
 //! download bandwidth throttling
-use std::mem;
-use std::sync::Mutex;
+use std::io;
+use std::sync::atomic::Ordering::Relaxed;
+use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::{Mutex, TryLockError};
 use std::{
     future::Future,
     num::NonZeroU32,
@@ -19,27 +21,14 @@ use governor::{
     Quota, RateLimiter,
 };
 use pin_project_lite::pin_project;
-use tokio::sync::mpsc;
+use tokio::net::TcpStream;
+use tracing::{debug, instrument, trace};
 
+use crate::network::{BandwidthAllowed, BandwidthLim, BandwidthRx};
 use crate::Bandwidth;
 
-#[derive(Debug)]
-pub(crate) enum BandwidthAllowed {
-    Limited(Bandwidth),
-    UnLimited,
-}
-
-impl BandwidthAllowed {
-    fn bytes_per_second(&self) -> NonZeroU32 {
-        match self {
-            BandwidthAllowed::Limited(b) => b.bytes_per_second(),
-            BandwidthAllowed::UnLimited => NonZeroU32::MAX,
-        }
-    }
-}
-
-type BandwidthRx = mpsc::Receiver<BandwidthAllowed>;
-pub(crate) type BandwidthTx = mpsc::Sender<BandwidthAllowed>;
+mod tcpstream_ext;
+use tcpstream_ext::TcpStreamExt;
 
 pin_project! {
     /// A wrapper adding rate limiting for a type that
@@ -59,65 +48,36 @@ pin_project! {
     /// After a (short) while the rate limit will effectively be
     /// used by the transmitter.
     #[derive(Debug)]
-    pub struct ThrottlableIo<T> {
+    pub struct ThrottlableIo {
         #[pin]
-        inner: T,
-        limiter: RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>,
+        inner: TcpStream,
+        limiter: Option<RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>>,
         sleeping: Option<Pin<Box<tokio::time::Sleep>>>,
+        // limiter still needs to accept these
+        still_pending_bytes: u32,
         new_bandwidth_lim: Arc<Mutex<BandwidthRx>>,
+        os_socket_buf_size: usize,
     }
 }
 
-#[derive(Debug, Clone)]
-pub(crate) struct BandwidthLim {
-    rx: Arc<Mutex<BandwidthRx>>,
-}
-
-impl BandwidthLim {
-    pub(crate) fn from_init(init: BandwidthAllowed) -> (Self, BandwidthTx) {
-        let (tx, rx) = mpsc::channel(12);
-        let rx = Arc::new(Mutex::new(rx));
-        if let BandwidthAllowed::Limited(_) = init {
-            tx.try_send(init)
-                .expect("First send can not fail on non zero cap channel");
-        }
-        (Self { rx }, tx)
-    }
-
-    fn init_quota(&self) -> Quota {
-        let init = self
-            .rx
-            .try_lock()
-            .expect("This conn is ended before new is started")
-            .try_recv()
-            .unwrap_or(BandwidthAllowed::UnLimited);
-        let quota = init.bytes_per_second();
-        Quota::per_second(quota)
-    }
-}
-
-impl<T> ThrottlableIo<T> {
+impl ThrottlableIo {
     /// Wrap a type implementing Tokio's IO traits.
-    pub fn new(inner: T, bandwidth_lim: &BandwidthLim) -> Self {
-        Self {
+    pub fn new(inner: TcpStream, bandwidth_lim: &BandwidthLim) -> Result<Self, io::Error> {
+        Ok(Self {
+            os_socket_buf_size: inner.send_buf_size()?,
             inner,
-            limiter: RateLimiter::direct_with_clock(
-                bandwidth_lim.init_quota(),
-                &MonotonicClock::default(),
-            ),
+            limiter: None,
+            still_pending_bytes: 0,
             sleeping: None,
             new_bandwidth_lim: bandwidth_lim.rx.clone(),
-        }
+        })
     }
 
     unsafe fn perform_read(
         mut self: Pin<&mut Self>,
         mut buf: hyper::rt::ReadBufCursor<'_>,
         cx: &mut Context<'_>,
-    ) -> Poll<Result<usize, std::io::Error>>
-    where
-        T: tokio::io::AsyncRead,
-    {
+    ) -> Poll<Result<usize, std::io::Error>> {
         let this = self.as_mut().project();
         let mut tbuf = tokio::io::ReadBuf::uninit(buf.as_mut());
         let n = match tokio::io::AsyncRead::poll_read(this.inner, cx, &mut tbuf) {
@@ -134,8 +94,13 @@ fn handle_gone_err() -> std::io::Error {
     todo!()
 }
 
-impl<T> ThrottlableIo<T> {
+static SLEEP_DUR: AtomicU64 = AtomicU64::new(0);
+
+impl ThrottlableIo {
     fn sleep(self: Pin<&mut Self>, cx: &mut Context<'_>, next_call_allowed: Instant) {
+        let dur = next_call_allowed.duration_since(Instant::now()).as_micros();
+        SLEEP_DUR.store(dur as u64, Relaxed);
+
         let this = self.project();
         let fut = tokio::time::sleep_until(next_call_allowed.into());
         let mut fut = Box::pin(fut);
@@ -146,18 +111,30 @@ impl<T> ThrottlableIo<T> {
         };
     }
 
-    fn remove_lim(self: &mut Pin<&mut Self>) {
-        self.set_lim(Bandwidth::practically_infinite());
-        // now drop the sleep so we resume immediately
+    #[instrument(level = "debug", skip(self))]
+    fn remove_lim(self: &mut Pin<&mut Self>) -> Result<(), std::io::Error> {
+        self.set_lim(Bandwidth::practically_infinite())?;
         let this = self.as_mut().project();
+        // drop the sleep so we resume immediately
         *this.sleeping = None;
+        *this.limiter = None;
+        debug!("rate limiter removed");
+        Ok(())
     }
 
-    fn set_lim(self: &mut Pin<&mut Self>, limit: Bandwidth) {
+    #[instrument(level = "debug", skip(self))]
+    fn set_lim(self: &mut Pin<&mut Self>, limit: Bandwidth) -> Result<(), std::io::Error> {
         let this = self.as_mut().project();
-        let new_quota = Quota::per_second(limit.bytes_per_second());
-        let mut new = RateLimiter::direct_with_clock(new_quota, &MonotonicClock::default());
-        mem::swap(this.limiter, &mut new);
+        let send_buf_size = limit.optimal_send_buf_size(*this.os_socket_buf_size);
+        this.inner.set_send_buf_size(send_buf_size)?;
+
+        let burst_size = limit.optimal_burst_size(send_buf_size);
+        let limit = NonZeroU32::new(limit.0.get() / 2).unwrap();
+        let quota = Quota::per_second(limit); //.allow_burst(burst_size);
+        debug!("New ratelimiter quota: {quota:?}, socket send_buf size is: {send_buf_size}");
+        let new = RateLimiter::direct_with_clock(quota, &MonotonicClock::default());
+        *this.limiter = Some(new);
+        Ok(())
     }
 
     fn handle_bandwidth_lim_changes(
@@ -167,48 +144,85 @@ impl<T> ThrottlableIo<T> {
         let new_bandwidth_lim = {
             let this = self.as_mut().project();
 
-            let mut new_bandwidth_lim = this
-                .new_bandwidth_lim
-                .try_lock()
-                .expect("Only one Io conn per bandwidth_lim_rx");
+            let mut new_bandwidth_lim = match this.new_bandwidth_lim.try_lock() {
+                Ok(guard) => guard,
+                Err(TryLockError::WouldBlock) => return Ok(()),
+                Err(err @ TryLockError::Poisoned(_)) => panic!("{err}"),
+            };
             new_bandwidth_lim.poll_recv(cx)
         };
         match new_bandwidth_lim {
             Poll::Ready(None) => return Err(handle_gone_err()),
-            Poll::Ready(Some(BandwidthAllowed::Limited(limit))) => self.set_lim(limit),
-            Poll::Ready(Some(BandwidthAllowed::UnLimited)) => self.remove_lim(),
+            Poll::Ready(Some(BandwidthAllowed::Limited(limit))) => self.set_lim(limit)?,
+            Poll::Ready(Some(BandwidthAllowed::UnLimited)) => self.remove_lim()?,
             Poll::Pending => (),
         }
         Ok(())
     }
 
-    fn update_limiter(self: Pin<&mut Self>, n: usize, cx: &mut Context<'_>) {
-        if let Some(n) = NonZeroU32::new(n as u32) {
-            if let Err(until) = self
-                .limiter
-                .check_n(n)
-                .expect("There should always be enough capacity")
-            {
-                let next_call_allowed = until.earliest_possible();
-                self.sleep(cx, next_call_allowed);
-            }
+    fn update_limiter(mut self: Pin<&mut Self>, n: usize, cx: &mut Context<'_>) {
+        let Some(limiter) = self.limiter.as_mut() else {
+            return;
+        };
+
+        let Some(n) = NonZeroU32::new(n as u32) else {
+            return;
+        };
+
+        if let Err(until) = limiter.check_n(n).expect(&format!(
+            "There should always be enough capacity, needed: {n}"
+        )) {
+            let next_call_allowed = until.earliest_possible();
+            self.still_pending_bytes = n.get();
+            self.sleep(cx, next_call_allowed);
+            let dur = next_call_allowed.duration_since(Instant::now());
+            trace!("next read is let through in {dur:?}");
         }
     }
 
-    fn do_sleep(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
-        let this = self.as_mut().project();
-        if let Some(fut) = this.sleeping.as_mut() {
-            Future::poll(fut.as_mut(), cx)
+    fn recheck_limiter(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let Some(pending) = NonZeroU32::new(self.still_pending_bytes) else {
+            return Poll::Ready(())
+        };
+
+        let Some(limiter) = self.limiter.as_mut() else {
+            return Poll::Ready(());
+        };
+
+        if let Err(until) = limiter.check_n(pending).expect(&format!(
+            "There should always be enough capacity, needed: {}",
+            pending
+        )) {
+            let next_call_allowed = until.earliest_possible();
+            self.as_mut().sleep(cx, next_call_allowed);
+            let dur = next_call_allowed.duration_since(Instant::now());
+            trace!("next read is let through in {dur:?}");
+            Poll::Pending
         } else {
             Poll::Ready(())
         }
     }
+
+    fn do_sleep(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let poll_res = {
+            let Some(fut) = self.sleeping.as_mut() else {
+                return Poll::Ready(());
+            };
+
+            Future::poll(fut.as_mut(), cx)
+        };
+
+        if poll_res.is_ready() {
+            self.sleeping = None;
+
+            let dur = SLEEP_DUR.load(Relaxed);
+            trace!("slept for: {dur}μ");
+        }
+        poll_res
+    }
 }
 
-impl<T> hyper::rt::Read for ThrottlableIo<T>
-where
-    T: tokio::io::AsyncRead,
-{
+impl hyper::rt::Read for ThrottlableIo {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -222,6 +236,10 @@ where
             return Poll::Pending;
         }
 
+        if let Poll::Pending = self.recheck_limiter(cx) {
+            return Poll::Pending;
+        }
+
         let Poll::Ready(read_res) = (unsafe { self.as_mut().perform_read(buf, cx) }) else {
             return Poll::Pending;
         };
@@ -230,6 +248,9 @@ where
             Err(e) => return Poll::Ready(Err(e)),
             Ok(n) => n,
         };
+        static TOTAL: AtomicUsize = AtomicUsize::new(0);
+        let prev = TOTAL.fetch_add(n_read, Relaxed);
+        trace!("total fetched: {}", prev + n_read);
 
         self.update_limiter(n_read, cx);
 
@@ -237,10 +258,7 @@ where
     }
 }
 
-impl<T> hyper::rt::Write for ThrottlableIo<T>
-where
-    T: tokio::io::AsyncWrite,
-{
+impl hyper::rt::Write for ThrottlableIo {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context<'_>,
@@ -270,72 +288,5 @@ where
         bufs: &[std::io::IoSlice<'_>],
     ) -> Poll<Result<usize, std::io::Error>> {
         tokio::io::AsyncWrite::poll_write_vectored(self.project().inner, cx, bufs)
-    }
-}
-
-impl<T> tokio::io::AsyncRead for ThrottlableIo<T>
-where
-    T: hyper::rt::Read,
-{
-    fn poll_read(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        tbuf: &mut tokio::io::ReadBuf<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        let filled = tbuf.filled().len();
-        let sub_filled = unsafe {
-            let mut buf = hyper::rt::ReadBuf::uninit(tbuf.unfilled_mut());
-
-            match hyper::rt::Read::poll_read(self.project().inner, cx, buf.unfilled()) {
-                Poll::Ready(Ok(())) => buf.filled().len(),
-                other => return other,
-            }
-        };
-
-        let n_filled = filled + sub_filled;
-        // At least sub_filled bytes had to have been initialized.
-        let n_init = sub_filled;
-        unsafe {
-            tbuf.assume_init(n_init);
-            tbuf.set_filled(n_filled);
-        }
-
-        Poll::Ready(Ok(()))
-    }
-}
-
-impl<T> tokio::io::AsyncWrite for ThrottlableIo<T>
-where
-    T: hyper::rt::Write,
-{
-    fn poll_write(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        hyper::rt::Write::poll_write(self.project().inner, cx, buf)
-    }
-
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), std::io::Error>> {
-        hyper::rt::Write::poll_flush(self.project().inner, cx)
-    }
-
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), std::io::Error>> {
-        hyper::rt::Write::poll_shutdown(self.project().inner, cx)
-    }
-
-    fn is_write_vectored(&self) -> bool {
-        hyper::rt::Write::is_write_vectored(&self.inner)
-    }
-
-    fn poll_write_vectored(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        bufs: &[std::io::IoSlice<'_>],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        hyper::rt::Write::poll_write_vectored(self.project().inner, cx, bufs)
     }
 }

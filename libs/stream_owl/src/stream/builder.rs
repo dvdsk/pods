@@ -8,8 +8,8 @@ use std::future::Future;
 use tokio::sync::mpsc;
 use tracing::debug;
 
-use crate::http_client::{BandwidthLim, Size, BandwidthAllowed};
-use crate::network::{Bandwidth, Network};
+use crate::http_client::Size;
+use crate::network::{Bandwidth, Network, BandwidthAllowed, BandwidthLim};
 use crate::store::SwitchableStore;
 use crate::{manager, StreamDone, StreamId};
 
@@ -148,7 +148,7 @@ impl StreamBuilder<true> {
 
         let (seek_tx, seek_rx) = mpsc::channel(12);
         let (pause_tx, pause_rx) = mpsc::channel(12);
-        let (bandwidth_lim, bandwidth_lim_tx) = BandwidthLim::from_init(self.bandwidth);
+        let (bandwidth_lim, bandwidth_lim_tx) = BandwidthLim::new(self.bandwidth);
 
         let mut handle = Handle {
             reader_in_use: Arc::new(Mutex::new(())),

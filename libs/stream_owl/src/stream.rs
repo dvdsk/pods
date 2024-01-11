@@ -6,9 +6,9 @@ use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
 use tracing::instrument;
 
-use crate::http_client::{self, BandwidthTx, BandwidthAllowed};
+use crate::http_client;
 use crate::manager::Command;
-use crate::network::Bandwidth;
+use crate::network::{Bandwidth, BandwidthTx, BandwidthAllowed};
 use crate::reader::{CouldNotCreateRuntime, Reader};
 use crate::store::{MigrationHandle, SwitchableStore};
 

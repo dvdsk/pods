@@ -7,7 +7,7 @@ use http::{header, HeaderValue, StatusCode};
 use hyper::body::Incoming;
 use tracing::{debug, info};
 
-use crate::network::Network;
+use crate::network::{Network, BandwidthLim};
 use crate::target::StreamTarget;
 mod io;
 mod read;
@@ -23,7 +23,6 @@ use connection::Connection;
 use self::connection::HyperResponse;
 use self::read::InnerReader;
 use self::response::ValidResponse;
-pub(crate) use self::io::{BandwidthLim, BandwidthTx, BandwidthAllowed};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -37,6 +36,8 @@ pub enum Error {
     Restricting(std::io::Error),
     #[error("Could not connect to server, {0}")]
     Connecting(std::io::Error),
+    #[error("Could not configure socket, {0}")]
+    SocketConfig(std::io::Error),
     #[error("Could not resolve dns, resolve error, {0}")]
     DnsResolve(#[from] hickory_resolver::error::ResolveError),
     #[error("Could not resolve dns, no ip addresses for server")]
@@ -187,6 +188,7 @@ impl RangeRefused {
 pub(crate) struct Client {
     host: HeaderValue,
     restriction: Option<Network>,
+    #[derivative(Debug = "ignore")]
     bandwidth_lim: BandwidthLim,
     url: hyper::Uri,
     #[derivative(Debug = "ignore")]
@@ -216,9 +218,11 @@ pub(crate) enum StreamingClient {
     RangesRefused(RangeRefused),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Derivative, Clone)]
+#[derivative(Debug)]
 pub(crate) struct ClientBuilder {
     restriction: Option<Network>,
+    #[derivative(Debug = "ignore")]
     bandwidth_lim: BandwidthLim,
     url: hyper::Uri,
     cookies: Cookies,
