@@ -129,8 +129,8 @@ impl ThrottlableIo {
         this.inner.set_send_buf_size(send_buf_size)?;
 
         let burst_size = limit.optimal_burst_size(send_buf_size);
-        let limit = NonZeroU32::new(limit.0.get() / 2).unwrap();
-        let quota = Quota::per_second(limit); //.allow_burst(burst_size);
+        let limit = NonZeroU32::new(limit.0.get()).unwrap();
+        let quota = Quota::per_second(limit).allow_burst(burst_size);
         debug!("New ratelimiter quota: {quota:?}, socket send_buf size is: {send_buf_size}");
         let new = RateLimiter::direct_with_clock(quota, &MonotonicClock::default());
         *this.limiter = Some(new);
@@ -182,7 +182,7 @@ impl ThrottlableIo {
 
     fn recheck_limiter(self: &mut Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let Some(pending) = NonZeroU32::new(self.still_pending_bytes) else {
-            return Poll::Ready(())
+            return Poll::Ready(());
         };
 
         let Some(limiter) = self.limiter.as_mut() else {

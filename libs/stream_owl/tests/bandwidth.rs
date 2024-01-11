@@ -12,7 +12,7 @@ fn stream_not_faster_then_limit() {
         move |b: StreamBuilder<false>| {
             b.with_prefetch(0)
                 .to_unlimited_mem()
-                .with_bandwidth_limit(Bandwidth::kbytes(5).unwrap())
+                .with_bandwidth_limit(Bandwidth::kbytes(20).unwrap())
         }
     };
 
@@ -30,7 +30,7 @@ fn stream_not_faster_then_limit() {
     reader.read_exact(&mut vec![0; 100_000]).unwrap();
 
     assert!(
-        start.elapsed() > Duration::from_secs(20),
+        start.elapsed() > Duration::from_secs(4),
         "elapsed: {:?}",
         start.elapsed()
     );
