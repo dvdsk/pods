@@ -160,7 +160,7 @@ impl Read for Reader {
             };
 
             self.curr_pos += bytes as u64;
-            tracing::info!("actual read: {bytes}");
+            tracing::trace!("reader read: {bytes} bytes");
 
             self.prefetch
                 .perform_if_needed(&mut self.store, self.curr_pos, n_read1 + bytes)

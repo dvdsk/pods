@@ -148,6 +148,10 @@ impl SwitchableStore {
     pub(crate) fn size(&self) -> Size {
         self.stream_size.clone()
     }
+
+    pub(crate) async fn flush(&self) -> Result<(), Error> {
+        self.curr_store.lock().await.flush().await
+    }
 }
 
 #[derive(Debug)]

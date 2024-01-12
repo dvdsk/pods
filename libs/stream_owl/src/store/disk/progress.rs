@@ -1,6 +1,7 @@
 use derivative::Derivative;
 use std::ops::Range;
 use std::path::PathBuf;
+use std::time::{Duration, Instant};
 use std::{io, mem};
 use tokio::fs::{self, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -41,13 +42,14 @@ pub(super) struct Progress {
     #[derivative(Debug = "ignore")]
     file: File,
     next_record_start: u64,
+    last_flush: Instant,
     pub(super) ranges: RangeSet<u64>,
     #[derivative(Debug = "ignore")]
     pub(super) range_tx: range_watch::Sender,
 }
 
 impl Progress {
-    #[instrument(level = "debug", skip(range_tx))]
+    #[instrument(level = "debug", skip(range_tx), ret)]
     pub(super) async fn new(
         file_path: PathBuf,
         range_tx: range_watch::Sender,
@@ -69,6 +71,7 @@ impl Progress {
         Ok(Progress {
             file,
             ranges: ranges_from_file_bytes(&buf),
+            last_flush: Instant::now(),
             next_record_start: start_pos,
             range_tx,
         })
@@ -77,7 +80,9 @@ impl Progress {
     #[instrument(level = "debug", ret, err)]
     pub(super) async fn finish_section(&mut self, end: u64, new_starts_at: u64) -> Result<()> {
         let start = self.next_record_start;
-        self.record_section(start, end).await?;
+        if !(start..end).is_empty() {
+            self.record_section(start, end).await?;
+        }
         self.next_record_start = new_starts_at;
         Ok(())
     }
@@ -87,22 +92,17 @@ impl Progress {
         let new_range = self.next_record_start..writer_pos;
         self.range_tx.send(new_range);
 
-        let written_since_recorded = writer_pos - self.next_record_start;
-        match written_since_recorded {
-            0..=4_999 => Ok(()),
-            5_000..=9_999 => self.file.flush().await.map_err(Error::Flushing),
-            10_000.. => {
-                let start = self.next_record_start;
-                self.record_section(start, writer_pos).await
-            }
+        if self.last_flush.elapsed() > Duration::from_millis(500) {
+            let start = self.next_record_start;
+            self.record_section(start, writer_pos).await
+        } else {
+            Ok(())
         }
     }
 
-    #[instrument(level="debug", skip(self))]
+    #[instrument(level = "debug", skip(self))]
     async fn record_section(&mut self, start: u64, end: u64) -> Result<()> {
-        if start != end {
-            self.ranges.insert(start..end);
-        }
+        self.ranges.insert(start..end);
 
         let mut final_section = [0u8; SECTION_LEN];
         final_section[..8].copy_from_slice(&start.to_le_bytes());
@@ -111,6 +111,8 @@ impl Progress {
             .write_all(&final_section)
             .await
             .map_err(Error::AppendingSection)?;
+        self.file.flush().await.map_err(Error::Flushing)?;
+        self.last_flush = Instant::now();
         Ok(())
     }
 }
@@ -121,9 +123,11 @@ fn progress_path(mut file_path: PathBuf) -> PathBuf {
     file_path
 }
 
+#[instrument(level = "trace", skip_all, fields(buf_len= buf.len()))]
 fn ranges_from_file_bytes(buf: &[u8]) -> RangeSet<u64> {
     buf.chunks_exact(SECTION_LEN)
         .map(|section| section.split_at(SECTION_LEN / 2))
+        .inspect(|(start, stop)| println!("section: {start:?} -> {stop:?}"))
         .map(|(a, b)| {
             (
                 u64::from_le_bytes(a.try_into().unwrap()),

@@ -20,7 +20,7 @@ struct ControllableServer {
     pause_controls: Controls,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     Any,
     ByteRequested(u64),
@@ -40,10 +40,16 @@ pub enum Action {
     Cut { at: u64 },
     Crash,
     Pause,
+    Drop,
 }
 
+struct DropRequest;
 impl Action {
-    async fn perform(&self, state: &ControllableServer, range: &mut Range<u64>) {
+    async fn perform(
+        &self,
+        state: &ControllableServer,
+        range: &mut Range<u64>,
+    ) -> Result<(), DropRequest> {
         match self {
             Action::Crash => {
                 panic!("Crash requested from test server")
@@ -53,7 +59,10 @@ impl Action {
                 tracing::warn!("Test server waiting to be unpaused");
                 state.pause_controls.notify.notified().await;
             }
+            Action::Drop => return Err(DropRequest),
         }
+
+        Ok(())
     }
 }
 
@@ -99,7 +108,9 @@ impl Controls {
             .on_event
             .iter()
             .enumerate()
-            .filter(|(_, (_, action))| *action == Action::Pause)
+            .filter(|(_, (event, action))| {
+                (*action == Action::Pause || *action == Action::Drop) && *event == Event::Any
+            })
             .map(|(idx, _)| idx)
             .collect();
         for to_remove in to_remove.into_iter().rev() {
@@ -128,24 +139,26 @@ async fn handler(
     let start = range.0.parse().unwrap();
     let stop = range.1.parse().unwrap();
 
-    let action = {
+    let actions: Vec<_> = {
         let range = start..stop;
         let inner = state.pause_controls.inner.lock().unwrap();
-        if let Some((idx, (_, _))) = inner
+        inner
             .on_event
             .iter()
-            .enumerate()
-            .find(|(_, (event, _))| event.active(&range))
-        {
-            Some(inner.on_event.get(idx).unwrap().1.clone())
-        } else {
-            None
-        }
+            .filter(|(event, _)| event.active(&range))
+            .map(|(_, action)| action)
+            .cloned()
+            .collect()
     };
 
     let mut range = start..stop;
-    if let Some(action) = action {
-        action.perform(&state, &mut range).await;
+    for action in actions {
+        if let Err(DropRequest) = action.perform(&state, &mut range).await {
+            return Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::empty())
+                .unwrap();
+        }
     }
 
     let data = state.test_data[range.start as usize..range.end as usize].to_owned();

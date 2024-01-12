@@ -23,5 +23,6 @@ pub use stream::StreamDone as StreamDone;
 pub use stream::Error as StreamError;
 pub use stream::Id as StreamId;
 pub use stream::Handle as StreamHandle;
+pub use stream::ManagedHandle as ManagedStreamHandle;
 pub use reader::Reader;
 pub use network::{list_interfaces, Bandwidth};

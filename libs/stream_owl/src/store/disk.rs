@@ -8,6 +8,7 @@ use rangemap::RangeSet;
 use tokio::fs;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt, BufReader, BufWriter};
+use tracing::instrument;
 
 use self::progress::Progress;
 
@@ -108,6 +109,7 @@ impl Disk {
         Ok(())
     }
 
+    #[instrument(level="trace", skip(buf), fields(buf_len = buf.len()), ret)]
     pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
         if pos != self.writer_pos {
             self.writer_seek(pos).await?;

@@ -8,7 +8,7 @@ use tracing::instrument;
 
 use crate::http_client;
 use crate::manager::Command;
-use crate::network::{Bandwidth, BandwidthTx, BandwidthAllowed};
+use crate::network::{Bandwidth, BandwidthAllowed, BandwidthTx};
 use crate::reader::{CouldNotCreateRuntime, Reader};
 use crate::store::{MigrationHandle, SwitchableStore};
 
@@ -67,41 +67,75 @@ pub enum GetReaderError {
     CreationFailed(CouldNotCreateRuntime),
 }
 
+macro_rules! managed_async {
+    ($fn_name:ident $($param:ident: $t:ty),*$(; $returns:ty)?) => {
+        pub async fn $fn_name(&mut self, $($param: $t),*) $(-> $returns)? {
+            self.handle.$fn_name($($param),*).await
+        }
+    };
+}
+
+macro_rules! managed {
+    ($fn_name:ident $($param:ident: $t:ty),*$(; $returns:ty)?) => {
+        pub fn $fn_name(&mut self, $($param: $t),*) $(-> $returns)? {
+            self.handle.$fn_name($($param),*)
+        }
+    };
+}
+
+macro_rules! blocking {
+    ($name:ident - $new_name:ident $($param:ident: $t:ty),* $(; $ret:ty)?) => {
+        /// blocking variant
+        ///
+        /// # Panics
+        ///
+        /// This function panics if called within an asynchronous execution
+        /// context.
+        pub fn $new_name(&mut self, $($param: $t),*) $(-> $ret)? {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(self.$name($($param),*))
+        }
+    };
+}
+
 impl ManagedHandle {
     pub fn set_priority(&mut self, _arg: i32) {
         todo!()
     }
+
     pub fn id(&self) -> Id {
         todo!()
     }
-    pub async fn pause(&mut self) {
-        self.handle.pause().await;
-    }
-    pub async fn unpause(&mut self) {
-        self.handle.unpause().await;
-    }
-    pub async fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
-        self.handle.limit_bandwidth(bandwidth).await
-    }
-    pub async fn unlimit_bandwidth(&self) {
-        self.handle.remove_bandwidth_limit().await
-    }
-    pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
-        self.handle.try_get_reader()
-    }
-    pub fn get_downloaded(&self) -> () {
-        self.handle.get_downloaded()
-    }
-    pub async fn use_mem_backend(&mut self) -> Option<MigrationHandle> {
-        self.handle.use_mem_backend().await
-    }
-    pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
-        self.handle.use_disk_backend(path).await
+
+    managed_async! {pause}
+    managed_async! {unpause}
+    managed_async! {limit_bandwidth bandwidth: Bandwidth}
+    managed_async! {remove_bandwidth_limit}
+    managed_async! {use_mem_backend; Option<MigrationHandle>}
+    managed_async! {use_disk_backend path: PathBuf; Option<MigrationHandle>}
+
+    managed! {try_get_reader; Result<crate::reader::Reader, GetReaderError>}
+    managed! {get_downloaded; ()}
+}
+impl ManagedHandle {
+    blocking! {pause - pause_blocking}
+    blocking! {unpause - unpause_blocking}
+    blocking! {limit_bandwidth - limit_bandwidth_blocking bandwidth: Bandwidth}
+    blocking! {remove_bandwidth_limit - remove_bandwidth_limit_blocking}
+    blocking! {use_mem_backend - use_mem_backend_blocking; Option<MigrationHandle>}
+    blocking! {use_disk_backend - use_disk_backend_blocking path: PathBuf; Option<MigrationHandle>}
+}
+
+impl Drop for ManagedHandle {
+    fn drop(&mut self) {
+        self.cmd_manager
+            .try_send(Command::CancelStream(self.id()))
+            .expect("could not cancel stream task when handle was dropped")
     }
 }
 
 impl Handle {
-    pub async fn limit_bandwidth(&mut self, bandwidth: Bandwidth) {
+    pub async fn limit_bandwidth(&self, bandwidth: Bandwidth) {
         self.bandwidth_lim_tx
             .send(BandwidthAllowed::Limited(bandwidth))
             .await
@@ -163,11 +197,23 @@ impl Handle {
     }
 }
 
-impl Drop for ManagedHandle {
+/// blocking implementations of the async functions above
+impl Handle {
+    blocking! {pause - pause_blocking}
+    blocking! {unpause - unpause_blocking}
+    blocking! {limit_bandwidth - limit_bandwidth_blocking bandwidth: Bandwidth}
+    blocking! {remove_bandwidth_limit - remove_bandwidth_limit_blocking}
+    blocking! {use_mem_backend - use_mem_backend_blocking; Option<MigrationHandle>}
+    blocking! {use_disk_backend - use_disk_backend_blocking path: PathBuf; Option<MigrationHandle>}
+}
+
+impl Drop for Handle {
     fn drop(&mut self) {
-        self.cmd_manager
-            .try_send(Command::CancelStream(self.id()))
-            .expect("could not cancel stream task when handle was dropped")
+        if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.block_on(self.store.flush())
+        } else {
+            self.store.blocking_flush();
+        }
     }
 }
 

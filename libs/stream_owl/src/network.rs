@@ -104,7 +104,7 @@ pub(crate) enum BandwidthAllowed {
     UnLimited,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct BandwidthLim {
     pub(crate) rx: Arc<Mutex<BandwidthRx>>,
 }

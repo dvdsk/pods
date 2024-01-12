@@ -1,7 +1,7 @@
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use tracing::{info, instrument};
+use tracing::{instrument, trace};
 
 macro_rules! tracing_record {
     ($range:ident) => {
@@ -40,18 +40,18 @@ impl StreamTarget {
     }
 
     pub(crate) fn set_pos(&self, pos: u64) {
-        info!("setting stream writer (target) position to {pos}");
-        self.pos.store(pos, Ordering::Release)
+        self.pos.store(pos, Ordering::Release);
+        trace!("set stream target position to: {pos}");
     }
 
     pub(crate) fn increase_pos(&self, bytes: usize) {
         let prev = self.pos.fetch_add(bytes as u64, Ordering::Release);
         let new = prev + bytes as u64;
-        info!("increasing target current pos {prev} -> {new}");
+        trace!("increased target pos: {prev} -> {new}");
     }
 
     #[instrument(
-        level = "info",
+        level = "debug",
         skip(self),
         fields(closest_beyond_curr_pos, closest_to_start),
         ret
@@ -84,7 +84,6 @@ impl StreamTarget {
             .map(limit_to_chunk_size);
         tracing_record!(closest_beyond_curr_pos);
 
-        info!("ranges: {ranges:?}");
         let closest_to_start = ranges
             .gaps(&(0..stream_end))
             .next()

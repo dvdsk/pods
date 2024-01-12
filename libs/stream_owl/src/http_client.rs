@@ -311,7 +311,7 @@ impl ClientBuilder {
 }
 
 impl StreamingClient {
-    #[tracing::instrument(level = "debug", ret)]
+    #[tracing::instrument(level = "debug", skip(bandwidth_lim), ret)]
     pub(crate) async fn new(
         url: hyper::Uri,
         restriction: Option<Network>,
