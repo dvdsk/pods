@@ -1,45 +1,31 @@
 use derivative::Derivative;
+use rangemap::RangeSet;
 use std::ops::Range;
-use tokio::sync::broadcast;
-use tokio::sync::broadcast::error::RecvError;
+use tokio::sync::mpsc;
 use tracing::{instrument, trace};
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(super) struct Receiver {
+pub(crate) struct Receiver {
     #[derivative(Debug = "ignore")]
-    rx: broadcast::Receiver<Range<u64>>,
+    rx: mpsc::UnboundedReceiver<Range<u64>>,
     #[derivative(Debug = "ignore")]
-    subscribe_handle: broadcast::Sender<Range<u64>>,
-    last: Range<u64>,
-}
-
-impl Clone for Receiver {
-    fn clone(&self) -> Self {
-        Self {
-            // field order matters! its critical that subscribe happens before
-            // self.last.clone otherwise we could miss a message
-            rx: self.subscribe_handle.subscribe(),
-            subscribe_handle: self.subscribe_handle.clone(),
-            last: self.last.clone(),
-        }
-    }
+    ranges: RangeSet<u64>,
 }
 
 #[derive(Clone)]
 pub(super) struct Sender {
-    tx: broadcast::Sender<Range<u64>>,
+    tx: mpsc::UnboundedSender<Range<u64>>,
 }
 
 // initial range is 0..0
 pub(super) fn channel() -> (Sender, Receiver) {
-    let (tx, rx) = broadcast::channel(16);
+    let (tx, rx) = mpsc::unbounded_channel();
     (
         Sender { tx: tx.clone() },
         Receiver {
             rx,
-            subscribe_handle: tx,
-            last: 0..0,
+            ranges: RangeSet::new(),
         },
     )
 }
@@ -48,16 +34,15 @@ impl Receiver {
     /// blocks till at least one byte is available at `needed_pos`.
     #[instrument(level = "trace")]
     pub(super) async fn wait_for(&mut self, needed_pos: u64) {
-        while !self.last.contains(&needed_pos) {
+        while !self.ranges.contains(&needed_pos) {
             trace!("blocking read until range available");
             match self.rx.recv().await {
-                Err(RecvError::Closed) => {
+                None => {
                     unreachable!("Receiver and Sender should drop at the same time")
                 }
-                Err(RecvError::Lagged(_)) => continue,
-                Ok(range) => {
+                Some(range) => {
                     trace!("new range available: {range:?}");
-                    self.last = range;
+                    self.ranges.insert(range);
                 }
             }
         }

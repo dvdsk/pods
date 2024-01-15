@@ -7,7 +7,7 @@ use tracing::instrument;
 
 use crate::reader::handle_read_error;
 use crate::store::ReadError;
-use crate::store::SwitchableStore;
+use crate::store::StoreReader;
 use crate::vecd;
 use crate::vecdeque::VecDequeExt;
 
@@ -53,7 +53,7 @@ impl Prefetch {
         &self,
         already_read: usize,
         curr_pos: u64,
-        store: &SwitchableStore,
+        store: &StoreReader,
     ) -> usize {
         let mut to_prefetch = self.buf.len() - already_read;
         if let Some(stream_size) = store.size().known() {
@@ -66,7 +66,7 @@ impl Prefetch {
     #[instrument(level = "debug", ret)]
     pub(crate) async fn perform_if_needed(
         &mut self,
-        store: &mut SwitchableStore,
+        store: &mut StoreReader,
         reader_pos: u64,
         already_read: usize,
     ) -> Result<(), std::io::Error> {
@@ -113,7 +113,7 @@ impl Prefetch {
 struct Prefetching<'a> {
     pos: u64,
     still_needed: usize,
-    store: &'a mut SwitchableStore,
+    store: &'a mut StoreReader,
 }
 
 impl<'a> Prefetching<'a> {

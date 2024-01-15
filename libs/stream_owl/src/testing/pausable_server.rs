@@ -101,7 +101,7 @@ impl Controls {
     }
 
     /// unpauses and remove any future plain pauses
-    pub fn unpause(&self) {
+    pub fn unpause_all(&self) {
         tracing::warn!("Unpausing debug server");
         let mut inner = self.inner.lock().unwrap();
         let to_remove: Vec<_> = inner

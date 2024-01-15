@@ -5,7 +5,7 @@ use http::header::InvalidHeaderValue;
 use http::uri::InvalidUri;
 use http::{header, HeaderValue, StatusCode};
 use hyper::body::Incoming;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::network::{Network, BandwidthLim};
 use crate::target::StreamTarget;
@@ -232,6 +232,7 @@ pub(crate) struct ClientBuilder {
 impl ClientBuilder {
     #[tracing::instrument(level = "debug")]
     pub(crate) async fn connect(self, target: &StreamTarget) -> Result<StreamingClient, Error> {
+        debug!("(re)connecting, will try to start stream at: {}", target.pos());
         let Self {
             restriction,
             bandwidth_lim,

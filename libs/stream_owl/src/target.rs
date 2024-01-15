@@ -15,19 +15,19 @@ macro_rules! tracing_record {
 }
 
 use crate::http_client::Size;
-use crate::store::{self, SwitchableStore};
+use crate::store::{self, StoreWriter};
 
 #[derive(Debug)]
 pub(crate) struct StreamTarget {
     /// on seek this pos is updated, in between seeks
     /// it increments with the number of bytes written
     pos: AtomicU64,
-    store: SwitchableStore,
+    store: StoreWriter,
     pub(crate) chunk_size: u64,
 }
 
 impl StreamTarget {
-    pub(crate) fn new(store: SwitchableStore, start_pos: u64, chunk_size: usize) -> Self {
+    pub(crate) fn new(store: StoreWriter, start_pos: u64, chunk_size: usize) -> Self {
         Self {
             store,
             pos: AtomicU64::new(start_pos),
@@ -51,7 +51,7 @@ impl StreamTarget {
     }
 
     #[instrument(
-        level = "debug",
+        level = "trace",
         skip(self),
         fields(closest_beyond_curr_pos, closest_to_start),
         ret

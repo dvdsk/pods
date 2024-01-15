@@ -1,9 +1,12 @@
 use std::io::{Read, Seek};
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use stream_owl::testing::{test_data_range, Action, Controls, Event, TestEnded};
 use stream_owl::{testing, StreamBuilder, StreamDone};
 use tokio::sync::Notify;
+use tracing::info;
 
 #[test]
 fn after_seeking_forward_download_still_completes() {
@@ -26,7 +29,7 @@ fn after_seeking_forward_download_still_completes() {
 
     let mut reader = handle.try_get_reader().unwrap();
     reader.seek(std::io::SeekFrom::Start(8_000)).unwrap();
-    controls.unpause();
+    controls.unpause_all();
 
     handle.unpause_blocking();
 
@@ -50,6 +53,7 @@ fn resumes() {
 
     {
         let controls = Controls::new();
+        controls.push(Event::Any, Action::Pause);
 
         let test_file_size = 5_000u32;
         let test_done = Arc::new(Notify::new());
@@ -64,6 +68,11 @@ fn resumes() {
         let mut reader = handle.try_get_reader().unwrap();
         reader.seek(std::io::SeekFrom::Start(2_000)).unwrap();
         handle.unpause_blocking();
+        // seek is not instant, make sure the stream task has
+        // processed it.
+        thread::sleep(Duration::from_secs(1));
+        controls.unpause_all();
+
         controls.push(Event::ByteRequested(5_000), Action::Cut { at: 5_000 });
         // when this reads the last byte (byte 5k in the stream). The
         // test server will crash, making sure we do not read further.
@@ -74,6 +83,7 @@ fn resumes() {
         assert!(matches!(test_ended, TestEnded::TestDone));
     }
     assert_read_part_downloaded(test_dl_path);
+    info!("Part 2 of test, checking if read uses made progress");
 
     let controls = Controls::new();
     let test_file_size = 5_000u32;
@@ -90,7 +100,9 @@ fn resumes() {
     let mut reader = handle.try_get_reader().unwrap();
     reader.seek(std::io::SeekFrom::Start(2_000)).unwrap();
     let mut buf = vec![0u8; 3_000];
+    info!("hi");
     reader.read_exact(&mut buf).unwrap();
+    info!("hi");
 
     assert_eq!(buf, testing::test_data_range(2_000..5_000));
     test_done.notify_one();

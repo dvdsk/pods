@@ -45,7 +45,7 @@ impl Connection {
         })
     }
 
-    #[instrument(level = "Debug", skip(self), ret, err)]
+    #[instrument(level = "trace", skip(self), ret, err)]
     pub(crate) async fn send_initial_request(
         &mut self,
         url: &hyper::Uri,

@@ -1,4 +1,3 @@
-use derivative::Derivative;
 use futures::FutureExt;
 use futures_concurrency::future::Race;
 use rangemap::RangeSet;
@@ -11,12 +10,12 @@ use tracing::instrument;
 mod capacity;
 mod disk;
 mod limited_mem;
-mod migrate;
-mod range_watch;
+pub(crate) mod migrate;
+pub(crate) mod range_watch;
 mod unlimited_mem;
 
 pub(crate) use capacity::Bounds as CapacityBounds;
-pub use migrate::{MigrationError, MigrationHandle};
+pub use migrate::MigrationHandle;
 
 use capacity::CapacityWatcher;
 
@@ -24,13 +23,17 @@ use crate::http_client::Size;
 
 use self::capacity::Capacity;
 
-#[derive(Derivative, Clone)]
-#[derivative(Debug)]
-pub(crate) struct SwitchableStore {
+#[derive(Debug)]
+pub(crate) struct StoreReader {
     pub(crate) curr_store: Arc<Mutex<Store>>,
     curr_range: range_watch::Receiver,
-    capacity_watcher: CapacityWatcher,
     stream_size: Size,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct StoreWriter {
+    pub(crate) curr_store: Arc<Mutex<Store>>,
+    capacity_watcher: CapacityWatcher,
 }
 
 #[derive(Debug)]
@@ -60,62 +63,87 @@ pub enum Error {
     Disk(#[from] disk::Error),
 }
 
-impl SwitchableStore {
-    #[tracing::instrument]
-    pub(crate) async fn new_disk_backed(path: PathBuf, stream_size: Size) -> Result<Self, Error> {
-        let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
-        let (tx, rx) = range_watch::channel();
-        let disk = disk::Disk::new(path, capacity, tx).await?;
-        Ok(Self {
+fn store_handles(
+    store: Store,
+    rx: range_watch::Receiver,
+    capacity_watcher: CapacityWatcher,
+    stream_size: Size,
+) -> (StoreReader, StoreWriter) {
+    let curr_store = Arc::new(Mutex::new(store));
+    (
+        StoreReader {
             curr_range: rx,
+            curr_store: curr_store.clone(),
+            stream_size: stream_size.clone(),
+        },
+        StoreWriter {
+            curr_store,
             capacity_watcher,
-            curr_store: Arc::new(Mutex::new(Store::Disk(disk))),
-            stream_size,
-        })
-    }
+        },
+    )
+}
 
-    #[tracing::instrument]
-    pub(crate) fn new_limited_mem_backed(
-        max_cap: NonZeroUsize,
-        stream_size: Size,
-    ) -> Result<Self, Error> {
-        let max_cap = NonZeroU64::new(max_cap.get() as u64).expect("already nonzero");
-        let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Limited(max_cap));
-        let (tx, rx) = range_watch::channel();
-        let mem = limited_mem::Memory::new(capacity, tx)?;
-        Ok(Self {
-            curr_range: rx,
-            capacity_watcher,
-            curr_store: Arc::new(Mutex::new(Store::MemLimited(mem))),
-            stream_size,
-        })
-    }
+#[tracing::instrument]
+pub(crate) async fn new_disk_backed(
+    path: PathBuf,
+    stream_size: Size,
+) -> Result<(StoreReader, StoreWriter), Error> {
+    let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
+    let (tx, rx) = range_watch::channel();
+    let disk = disk::Disk::new(path, capacity, tx).await?;
+    Ok(store_handles(
+        Store::Disk(disk),
+        rx,
+        capacity_watcher,
+        stream_size,
+    ))
+}
 
-    #[tracing::instrument]
-    pub(crate) fn new_unlimited_mem_backed(stream_size: Size) -> Result<Self, Error> {
-        let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Unlimited);
-        let (tx, rx) = range_watch::channel();
-        let mem = unlimited_mem::Memory::new(capacity, tx)?;
-        Ok(Self {
-            curr_range: rx,
-            capacity_watcher,
-            curr_store: Arc::new(Mutex::new(Store::MemUnlimited(mem))),
-            stream_size,
-        })
-    }
+#[tracing::instrument]
+pub(crate) fn new_limited_mem_backed(
+    max_cap: NonZeroUsize,
+    stream_size: Size,
+) -> Result<(StoreReader, StoreWriter), Error> {
+    let max_cap = NonZeroU64::new(max_cap.get() as u64).expect("already nonzero");
+    let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Limited(max_cap));
+    let (tx, rx) = range_watch::channel();
+    let mem = limited_mem::Memory::new(capacity, tx)?;
+    Ok(store_handles(
+        Store::MemLimited(mem),
+        rx,
+        capacity_watcher,
+        stream_size,
+    ))
+}
 
-    pub(crate) async fn variant(&self) -> StoreVariant {
-        match *self.curr_store.lock().await {
-            Store::Disk(_) => StoreVariant::Disk,
-            Store::MemLimited(_) => StoreVariant::MemLimited,
-            Store::MemUnlimited(_) => StoreVariant::MemUnlimited,
-        }
-    }
+#[tracing::instrument]
+pub(crate) fn new_unlimited_mem_backed(
+    stream_size: Size,
+) -> Result<(StoreReader, StoreWriter), Error> {
+    let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Unlimited);
+    let (tx, rx) = range_watch::channel();
+    let mem = unlimited_mem::Memory::new(capacity, tx)?;
+    Ok(store_handles(
+        Store::MemUnlimited(mem),
+        rx,
+        capacity_watcher,
+        stream_size,
+    ))
+}
 
+impl StoreWriter {
+    #[instrument(level = "trace", skip(self, buf))]
+    pub(crate) async fn write_at(&self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
+        self.capacity_watcher.wait_for_space().await;
+        self.curr_store.lock().await.write_at(buf, pos).await
+    }
+}
+
+impl StoreReader {
     /// Returns number of bytes read, 0 means end of file.
     /// This reads as soon as bytes are available.
     #[tracing::instrument(level = "trace", skip(buf), fields(buf_len = buf.len()), ret)]
-    pub(super) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, ReadError> {
+    pub(crate) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, ReadError> {
         enum Res {
             RangeReady,
             PosBeyondEOF,
@@ -138,19 +166,26 @@ impl SwitchableStore {
         }
     }
 
-    #[instrument(level = "trace", skip(self, buf))]
-    pub(crate) async fn write_at(&self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
-        self.capacity_watcher.wait_for_space().await;
-        self.curr_store.lock().await.write_at(buf, pos).await
-    }
-
     /// refers to the size of the stream if it was complete
     pub(crate) fn size(&self) -> Size {
         self.stream_size.clone()
     }
+}
 
-    pub(crate) async fn flush(&self) -> Result<(), Error> {
-        self.curr_store.lock().await.flush().await
+impl Store {
+    pub(crate) async fn variant(&self) -> StoreVariant {
+        match self {
+            Self::Disk(_) => StoreVariant::Disk,
+            Self::MemLimited(_) => StoreVariant::MemLimited,
+            Self::MemUnlimited(_) => StoreVariant::MemUnlimited,
+        }
+    }
+    pub(crate) async fn flush(&mut self) -> Result<(), Error> {
+        if let Store::Disk(disk_store) = self {
+            disk_store.flush().await.map_err(Error::Disk)
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -227,7 +262,7 @@ impl Store {
             }),
         }
     }
-    async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, Error> {
+    pub(crate) async fn read_at(&mut self, buf: &mut [u8], pos: u64) -> Result<usize, Error> {
         match self {
             Self::Disk(inner) => inner.read_at(buf, pos).await.map_err(Error::Disk),
             Self::MemLimited(inner) => Ok(inner.read_at(buf, pos)),

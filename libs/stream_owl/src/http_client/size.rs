@@ -92,7 +92,7 @@ impl Size {
         let new = var.encode();
         let previous = self.0.value.swap(new, Ordering::Release);
         if previous != new {
-            tracing::debug!(
+            tracing::info!(
                 "stream size changed: {:?} -> {:?}",
                 SizeVariant::decode(previous),
                 var

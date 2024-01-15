@@ -3,7 +3,7 @@
 //! download bandwidth throttling
 use std::io;
 use std::sync::atomic::Ordering::Relaxed;
-use std::sync::atomic::{AtomicU64, AtomicUsize};
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Mutex, TryLockError};
 use std::{
     future::Future,
@@ -90,17 +90,8 @@ impl ThrottlableIo {
     }
 }
 
-fn handle_gone_err() -> std::io::Error {
-    todo!()
-}
-
-static SLEEP_DUR: AtomicU64 = AtomicU64::new(0);
-
 impl ThrottlableIo {
     fn sleep(self: Pin<&mut Self>, cx: &mut Context<'_>, next_call_allowed: Instant) {
-        let dur = next_call_allowed.duration_since(Instant::now()).as_micros();
-        SLEEP_DUR.store(dur as u64, Relaxed);
-
         let this = self.project();
         let fut = tokio::time::sleep_until(next_call_allowed.into());
         let mut fut = Box::pin(fut);
@@ -152,7 +143,10 @@ impl ThrottlableIo {
             new_bandwidth_lim.poll_recv(cx)
         };
         match new_bandwidth_lim {
-            Poll::Ready(None) => return Err(handle_gone_err()),
+            Poll::Ready(None) => {
+                debug!("Stream handle dropped");
+                return Ok(())
+            }
             Poll::Ready(Some(BandwidthAllowed::Limited(limit))) => self.set_lim(limit)?,
             Poll::Ready(Some(BandwidthAllowed::UnLimited)) => self.remove_lim()?,
             Poll::Pending => (),
@@ -214,9 +208,6 @@ impl ThrottlableIo {
 
         if poll_res.is_ready() {
             self.sleeping = None;
-
-            let dur = SLEEP_DUR.load(Relaxed);
-            trace!("slept for: {dur}μ");
         }
         poll_res
     }
@@ -248,6 +239,7 @@ impl hyper::rt::Read for ThrottlableIo {
             Err(e) => return Poll::Ready(Err(e)),
             Ok(n) => n,
         };
+        // TODO: remove/replace with bandwidth tracking <13-01-24, dvdsk> 
         static TOTAL: AtomicUsize = AtomicUsize::new(0);
         let prev = TOTAL.fetch_add(n_read, Relaxed);
         trace!("total fetched: {}", prev + n_read);

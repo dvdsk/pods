@@ -1,5 +1,4 @@
 use std::io::{self, Read, Seek};
-use std::sync::MutexGuard;
 use std::time::Duration;
 
 use derivative::Derivative;
@@ -7,7 +6,7 @@ use tokio::runtime::Runtime;
 use tokio::sync::{mpsc, OwnedMutexGuard};
 use tracing::instrument;
 
-use crate::store::{self, ReadError, Store, SwitchableStore};
+use crate::store::{self, ReadError, Store, StoreReader};
 
 mod prefetch;
 use prefetch::Prefetch;
@@ -22,7 +21,8 @@ pub struct Reader {
     seek_tx: mpsc::Sender<u64>,
     last_seek: u64,
     minimum_size: u64,
-    store: SwitchableStore,
+    #[derivative(Debug = "ignore")]
+    store: OwnedMutexGuard<StoreReader>,
     curr_pos: u64,
 }
 
@@ -31,10 +31,9 @@ pub struct CouldNotCreateRuntime(io::Error);
 
 impl Reader {
     pub(crate) fn new(
-        _guard: MutexGuard<()>,
         prefetch: usize,
         seek_tx: mpsc::Sender<u64>,
-        store: SwitchableStore,
+        store: OwnedMutexGuard<StoreReader>,
     ) -> Result<Self, CouldNotCreateRuntime> {
         Ok(Self {
             rt: Runtime::new().map_err(CouldNotCreateRuntime)?,

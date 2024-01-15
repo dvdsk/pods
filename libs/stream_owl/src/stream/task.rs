@@ -5,7 +5,7 @@ use crate::http_client::Size;
 use crate::http_client::StreamingClient;
 use crate::network::BandwidthLim;
 use crate::network::Network;
-use crate::store::SwitchableStore;
+use crate::store::StoreWriter;
 use crate::target::StreamTarget;
 
 use futures::FutureExt;
@@ -30,7 +30,7 @@ pub enum StreamDone {
 #[instrument(ret, skip_all)]
 pub(crate) async fn new(
     url: http::Uri,
-    storage: SwitchableStore,
+    storage: StoreWriter,
     mut seek_rx: mpsc::Receiver<u64>,
     restriction: Option<Network>,
     bandwidth_lim: BandwidthLim,
@@ -106,13 +106,11 @@ async fn receive_actionable_seek(
     seek_rx: &mut mpsc::Receiver<u64>,
     target: &StreamTarget,
 ) -> Option<u64> {
-    tracing::error!(
-        "is actionable seek needed? no right? sending correct 
-          seeks should be the readers responsibility right?"
-    );
     loop {
+        // TODO: remove if panic does not trigger <dvdsk noreply@davidsk.dev>
         let pos = seek_rx.recv().await?;
         if pos < target.pos() {
+            panic!("thought this was not needed, ooeps");
             return Some(pos);
         }
     }

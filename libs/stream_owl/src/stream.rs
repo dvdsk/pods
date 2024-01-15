@@ -1,16 +1,17 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
-use tracing::instrument;
+use tokio::sync::Mutex as TokioMutex;
+use tracing::{info, instrument, warn};
 
-use crate::http_client;
 use crate::manager::Command;
 use crate::network::{Bandwidth, BandwidthAllowed, BandwidthTx};
 use crate::reader::{CouldNotCreateRuntime, Reader};
-use crate::store::{MigrationHandle, SwitchableStore};
+use crate::store::{migrate, MigrationHandle, Store, StoreReader};
+use crate::{http_client, store};
 
 mod builder;
 pub use builder::StreamBuilder;
@@ -19,10 +20,12 @@ mod task;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Error communicating with server")]
+    #[error("Communicating with stream server ran into an issue: {0}")]
     HttpClient(#[from] http_client::Error),
-    #[error("Error writing to storage")]
+    #[error("Could not write to storage, io error: {0:?}")]
     Writing(std::io::Error),
+    #[error("Error flushing store to durable storage: {0:?}")]
+    Flushing(store::Error),
 }
 
 #[derive(Debug, PartialEq, Eq, Hash)]
@@ -53,12 +56,26 @@ pub struct Handle {
     prefetch: usize,
     #[derivative(Debug = "ignore")]
     seek_tx: mpsc::Sender<u64>,
+    #[derivative(Debug = "ignore")]
     pause_tx: mpsc::Sender<bool>,
+    #[derivative(Debug = "ignore")]
     bandwidth_lim_tx: BandwidthTx,
     is_paused: bool,
-    store: SwitchableStore,
-    #[derivative(Debug = "ignore")]
-    reader_in_use: Arc<Mutex<()>>,
+    #[derivative(Debug(format_with = "fmt_reader_in_use"))]
+    store_reader: Arc<TokioMutex<StoreReader>>,
+    store: Arc<TokioMutex<Store>>,
+}
+
+fn fmt_reader_in_use(
+    store: &Arc<TokioMutex<StoreReader>>,
+    fmt: &mut std::fmt::Formatter,
+) -> std::result::Result<(), std::fmt::Error> {
+    let reader_in_use = store.try_lock().is_err();
+    if reader_in_use {
+        fmt.write_str("yes")
+    } else {
+        fmt.write_str("no")
+    }
 }
 
 #[derive(Debug)]
@@ -113,6 +130,7 @@ impl ManagedHandle {
     managed_async! {remove_bandwidth_limit}
     managed_async! {use_mem_backend; Option<MigrationHandle>}
     managed_async! {use_disk_backend path: PathBuf; Option<MigrationHandle>}
+    managed_async! {flush ; Result<(), Error>}
 
     managed! {try_get_reader; Result<crate::reader::Reader, GetReaderError>}
     managed! {get_downloaded; ()}
@@ -124,6 +142,7 @@ impl ManagedHandle {
     blocking! {remove_bandwidth_limit - remove_bandwidth_limit_blocking}
     blocking! {use_mem_backend - use_mem_backend_blocking; Option<MigrationHandle>}
     blocking! {use_disk_backend - use_disk_backend_blocking path: PathBuf; Option<MigrationHandle>}
+    blocking! {flush - flush_blocking; Result<(), Error>}
 }
 
 impl Drop for ManagedHandle {
@@ -156,6 +175,7 @@ impl Handle {
                 .await
                 .expect("rx is part of Task, which should not drop before Handle");
             self.is_paused = true;
+            info!("pausing stream")
         }
     }
 
@@ -167,21 +187,18 @@ impl Handle {
                 .expect("rx is part of Task, which should not drop before Handle");
             self.is_paused = false;
         }
+        info!("unpausing stream")
     }
 
     #[instrument(level = "debug", ret, err(Debug))]
     pub fn try_get_reader(&mut self) -> Result<crate::reader::Reader, GetReaderError> {
-        let guard = self
-            .reader_in_use
-            .try_lock()
+        let store = self
+            .store_reader
+            .clone()
+            .try_lock_owned()
             .map_err(|_| GetReaderError::ReaderInUse)?;
-        Reader::new(
-            guard,
-            self.prefetch,
-            self.seek_tx.clone(),
-            self.store.clone(),
-        )
-        .map_err(GetReaderError::CreationFailed)
+        Reader::new(self.prefetch, self.seek_tx.clone(), store)
+            .map_err(GetReaderError::CreationFailed)
     }
 
     pub fn get_downloaded(&self) -> () {
@@ -189,11 +206,21 @@ impl Handle {
     }
 
     pub async fn use_mem_backend(&mut self) -> Option<MigrationHandle> {
-        self.store.to_mem().await
+        migrate::to_mem(self.store.clone()).await
     }
 
     pub async fn use_disk_backend(&mut self, path: PathBuf) -> Option<MigrationHandle> {
-        self.store.to_disk(path).await
+        migrate::to_disk(self.store.clone(), path).await
+    }
+
+    /// Only does something when the store actually supports flush
+    pub async fn flush(&mut self) -> Result<(), Error> {
+        self.store
+            .lock()
+            .await
+            .flush()
+            .await
+            .map_err(Error::Flushing)
     }
 }
 
@@ -205,14 +232,27 @@ impl Handle {
     blocking! {remove_bandwidth_limit - remove_bandwidth_limit_blocking}
     blocking! {use_mem_backend - use_mem_backend_blocking; Option<MigrationHandle>}
     blocking! {use_disk_backend - use_disk_backend_blocking path: PathBuf; Option<MigrationHandle>}
+    blocking! {flush - flush_blocking ; Result<(), Error>}
 }
 
 impl Drop for Handle {
+    #[instrument]
     fn drop(&mut self) {
-        if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.block_on(self.store.flush())
+        let flush_res = if let Ok(rt) = tokio::runtime::Handle::try_current() {
+            rt.block_on(self.flush())
         } else {
-            self.store.blocking_flush();
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    warn!("Could not flush storage as Runtime creation failed, error: {e}");
+                    return;
+                }
+            };
+            rt.block_on(self.flush())
+        };
+
+        if let Err(err) = flush_res {
+            warn!("Lost some progress, flushing storage failed: {err}")
         }
     }
 }

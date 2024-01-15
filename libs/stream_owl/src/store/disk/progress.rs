@@ -7,7 +7,7 @@ use tokio::fs::{self, File};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use rangemap::RangeSet;
-use tracing::instrument;
+use tracing::{debug, instrument};
 
 use crate::store::range_watch;
 
@@ -42,14 +42,28 @@ pub(super) struct Progress {
     #[derivative(Debug = "ignore")]
     file: File,
     next_record_start: u64,
+    #[derivative(Debug(format_with = "fmt_last_flush"))]
     last_flush: Instant,
     pub(super) ranges: RangeSet<u64>,
     #[derivative(Debug = "ignore")]
     pub(super) range_tx: range_watch::Sender,
 }
 
+fn fmt_last_flush(
+    instant: &Instant,
+    fmt: &mut std::fmt::Formatter,
+) -> std::result::Result<(), std::fmt::Error> {
+    fmt.write_fmt(format_args!("{}ms ago", instant.elapsed().as_millis()))
+}
+
+#[derive(Debug)]
+pub(super) enum FlushNeeded {
+    Yes,
+    No,
+}
+
 impl Progress {
-    #[instrument(level = "debug", skip(range_tx), ret)]
+    #[instrument(level = "debug", skip(range_tx))]
     pub(super) async fn new(
         file_path: PathBuf,
         range_tx: range_watch::Sender,
@@ -68,40 +82,63 @@ impl Progress {
             .await
             .map_err(Error::ReadingProgress)?;
 
+        let ranges = ranges_from_file_bytes(&buf);
+        if !ranges.is_empty() {
+            debug!("loaded existing progress from file, sections already downloaded: {ranges:?}");
+        }
+
+        for range in ranges.iter().cloned() {
+            range_tx.send(range);
+        }
+
         Ok(Progress {
             file,
-            ranges: ranges_from_file_bytes(&buf),
+            ranges,
             last_flush: Instant::now(),
             next_record_start: start_pos,
             range_tx,
         })
     }
 
-    #[instrument(level = "debug", ret, err)]
-    pub(super) async fn finish_section(&mut self, end: u64, new_starts_at: u64) -> Result<()> {
-        let start = self.next_record_start;
-        if !(start..end).is_empty() {
-            self.record_section(start, end).await?;
-        }
+    /// Data needs to be already flushed before this is called
+    #[instrument(level = "debug", skip(self))]
+    pub(super) async fn end_section(&mut self, end: u64, new_starts_at: u64) -> FlushNeeded {
+        let res = self.update(end).await;
         self.next_record_start = new_starts_at;
-        Ok(())
+        debug!("ended section");
+        res
     }
 
-    #[instrument(level = "trace", ret, err)]
-    pub(super) async fn update(&mut self, writer_pos: u64) -> Result<()> {
+    #[instrument(level = "trace", skip(self), ret)]
+    pub(super) async fn update(&mut self, writer_pos: u64) -> FlushNeeded {
         let new_range = self.next_record_start..writer_pos;
+        if new_range.is_empty() {
+            return FlushNeeded::No;
+        }
+        self.ranges.insert(new_range.clone());
         self.range_tx.send(new_range);
 
         if self.last_flush.elapsed() > Duration::from_millis(500) {
-            let start = self.next_record_start;
-            self.record_section(start, writer_pos).await
+            FlushNeeded::Yes
         } else {
-            Ok(())
+            FlushNeeded::No
         }
     }
 
-    #[instrument(level = "debug", skip(self))]
-    async fn record_section(&mut self, start: u64, end: u64) -> Result<()> {
+    /// Data needs to be already flushed before this is called
+    #[instrument(level = "trace", ret, err)]
+    pub(super) async fn flush(&mut self) -> Result<()> {
+        let start = self.next_record_start;
+        if let Some(non_empty_range) = self.ranges.get(&start).cloned() {
+            self.record_section(non_empty_range.clone()).await?;
+            self.next_record_start = non_empty_range.end;
+        }
+        Ok(())
+    }
+
+    #[instrument(level = "debug", skip(self), ret)]
+    async fn record_section(&mut self, Range { start, end }: Range<u64>) -> Result<()> {
+        tracing::debug!("recording section: {start}-{end}");
         self.ranges.insert(start..end);
 
         let mut final_section = [0u8; SECTION_LEN];
@@ -117,17 +154,16 @@ impl Progress {
     }
 }
 
-#[instrument(level = "debug", ret)]
+#[instrument(level = "trace", ret)]
 fn progress_path(mut file_path: PathBuf) -> PathBuf {
     file_path.as_mut_os_string().push(".progress");
     file_path
 }
 
-#[instrument(level = "trace", skip_all, fields(buf_len= buf.len()))]
+#[instrument(level = "debug", skip_all, fields(buf_len= buf.len()))]
 fn ranges_from_file_bytes(buf: &[u8]) -> RangeSet<u64> {
     buf.chunks_exact(SECTION_LEN)
         .map(|section| section.split_at(SECTION_LEN / 2))
-        .inspect(|(start, stop)| println!("section: {start:?} -> {stop:?}"))
         .map(|(a, b)| {
             (
                 u64::from_le_bytes(a.try_into().unwrap()),

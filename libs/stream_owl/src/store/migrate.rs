@@ -8,60 +8,58 @@ use rangemap::set::RangeSet;
 use tokio::sync::{oneshot, Mutex};
 
 use super::disk::Disk;
-use super::limited_mem::{Memory, self};
-use super::{capacity, range_watch, CapacityBounds, Store, StoreVariant, SwitchableStore};
+use super::limited_mem::{self, Memory};
+use super::{capacity, range_watch, CapacityBounds, Store, StoreVariant};
 use super::{disk, Error as StoreError};
 use crate::store;
 
 mod range_list;
 
-impl SwitchableStore {
-    pub(crate) async fn to_mem(&self) -> Option<MigrationHandle> {
-        if let StoreVariant::MemLimited = self.variant().await {
-            return None;
-        }
-
-        let (handle, tx) = MigrationHandle::new();
-
-        // is swapped out before migration finishes
-        let (watch_placeholder, _) = range_watch::channel();
-        let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
-        let mem = match Memory::new(capacity_placeholder, watch_placeholder) {
-            Err(e) => {
-                tx.send(Err(MigrationError::MemLimited(e)))
-                    .expect("cant have dropped rx");
-                return Some(handle);
-            }
-            Ok(mem) => mem,
-        };
-        let migration = migrate(self.curr_store.clone(), Store::MemLimited(mem), tx);
-
-        tokio::spawn(migration);
-        Some(handle)
+pub(crate) async fn to_mem(store: Arc<Mutex<Store>>) -> Option<MigrationHandle> {
+    if let StoreVariant::MemLimited = store.lock().await.variant().await {
+        return None;
     }
 
-    pub(crate) async fn to_disk(&self, path: PathBuf) -> Option<MigrationHandle> {
-        if let StoreVariant::Disk = self.variant().await {
-            return None;
+    let (handle, tx) = MigrationHandle::new();
+
+    // is swapped out before migration finishes
+    let (watch_placeholder, _) = range_watch::channel();
+    let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
+    let mem = match Memory::new(capacity_placeholder, watch_placeholder) {
+        Err(e) => {
+            tx.send(Err(MigrationError::MemLimited(e)))
+                .expect("cant have dropped rx");
+            return Some(handle);
         }
+        Ok(mem) => mem,
+    };
+    let migration = migrate(store.clone(), Store::MemLimited(mem), tx);
 
-        let (handle, tx) = MigrationHandle::new();
+    tokio::spawn(migration);
+    Some(handle)
+}
 
-        // is swapped out before migration finishes
-        let (watch_placeholder, _) = range_watch::channel();
-        let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
-        let disk = match Disk::new(path, capacity_placeholder, watch_placeholder).await {
-            Err(e) => {
-                tx.send(Err(MigrationError::DiskCreation(e)))
-                    .expect("cant have dropped rx");
-                return Some(handle);
-            }
-            Ok(disk) => disk,
-        };
-        let migration = migrate(self.curr_store.clone(), Store::Disk(disk), tx);
-        tokio::spawn(migration);
-        Some(handle)
+pub(crate) async fn to_disk(store: Arc<Mutex<Store>>, path: PathBuf) -> Option<MigrationHandle> {
+    if let StoreVariant::Disk = store.lock().await.variant().await {
+        return None;
     }
+
+    let (handle, tx) = MigrationHandle::new();
+
+    // is swapped out before migration finishes
+    let (watch_placeholder, _) = range_watch::channel();
+    let (_, capacity_placeholder) = capacity::new(CapacityBounds::Unlimited);
+    let disk = match Disk::new(path, capacity_placeholder, watch_placeholder).await {
+        Err(e) => {
+            tx.send(Err(MigrationError::DiskCreation(e)))
+                .expect("cant have dropped rx");
+            return Some(handle);
+        }
+        Ok(disk) => disk,
+    };
+    let migration = migrate(store.clone(), Store::Disk(disk), tx);
+    tokio::spawn(migration);
+    Some(handle)
 }
 
 #[derive(thiserror::Error, Debug)]

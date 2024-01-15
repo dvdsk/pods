@@ -1,16 +1,16 @@
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use futures::{pin_mut, FutureExt};
 use futures_concurrency::future::Race;
 use std::future::Future;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tracing::debug;
 
 use crate::http_client::Size;
-use crate::network::{Bandwidth, Network, BandwidthAllowed, BandwidthLim};
-use crate::store::SwitchableStore;
+use crate::network::{Bandwidth, BandwidthAllowed, BandwidthLim, Network};
+use crate::store;
 use crate::{manager, StreamDone, StreamId};
 
 use super::{task, Error, Handle, ManagedHandle, StreamEnded};
@@ -134,16 +134,12 @@ impl StreamBuilder<true> {
         crate::store::Error,
     > {
         let stream_size = Size::default();
-        let store = match self.storage.expect("must chose storage option") {
-            StorageChoice::Disk(path) => {
-                SwitchableStore::new_disk_backed(path, stream_size.clone()).await
-            }
+        let (store_reader, store_writer) = match self.storage.expect("must chose storage option") {
+            StorageChoice::Disk(path) => store::new_disk_backed(path, stream_size.clone()).await,
             StorageChoice::MemLimited(limit) => {
-                SwitchableStore::new_limited_mem_backed(limit, stream_size.clone())
+                store::new_limited_mem_backed(limit, stream_size.clone())
             }
-            StorageChoice::MemUnlimited => {
-                SwitchableStore::new_unlimited_mem_backed(stream_size.clone())
-            }
+            StorageChoice::MemUnlimited => store::new_unlimited_mem_backed(stream_size.clone()),
         }?;
 
         let (seek_tx, seek_rx) = mpsc::channel(12);
@@ -151,11 +147,11 @@ impl StreamBuilder<true> {
         let (bandwidth_lim, bandwidth_lim_tx) = BandwidthLim::new(self.bandwidth);
 
         let mut handle = Handle {
-            reader_in_use: Arc::new(Mutex::new(())),
             prefetch: self.initial_prefetch,
             seek_tx,
             is_paused: false,
-            store: store.clone(),
+            store: store_reader.curr_store.clone(),
+            store_reader: Arc::new(Mutex::new(store_reader)),
             pause_tx,
             bandwidth_lim_tx,
         };
@@ -166,7 +162,7 @@ impl StreamBuilder<true> {
 
         let stream_task = task::new(
             self.url,
-            store.clone(),
+            store_writer,
             seek_rx,
             self.restriction,
             bandwidth_lim,
