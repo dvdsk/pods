@@ -5,7 +5,7 @@ use std::sync::Arc;
 use derivative::Derivative;
 use tokio::sync::mpsc::{self, Sender};
 use tokio::sync::Mutex as TokioMutex;
-use tracing::{info, instrument, warn};
+use tracing::{info, instrument};
 
 use crate::manager::Command;
 use crate::network::{Bandwidth, BandwidthAllowed, BandwidthTx};
@@ -17,6 +17,7 @@ mod builder;
 pub use builder::StreamBuilder;
 pub use task::StreamDone;
 mod task;
+mod drop;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -235,27 +236,6 @@ impl Handle {
     blocking! {flush - flush_blocking ; Result<(), Error>}
 }
 
-impl Drop for Handle {
-    #[instrument]
-    fn drop(&mut self) {
-        let flush_res = if let Ok(rt) = tokio::runtime::Handle::try_current() {
-            rt.block_on(self.flush())
-        } else {
-            let rt = match tokio::runtime::Runtime::new() {
-                Ok(rt) => rt,
-                Err(e) => {
-                    warn!("Could not flush storage as Runtime creation failed, error: {e}");
-                    return;
-                }
-            };
-            rt.block_on(self.flush())
-        };
-
-        if let Err(err) = flush_res {
-            warn!("Lost some progress, flushing storage failed: {err}")
-        }
-    }
-}
 
 #[must_use]
 pub struct StreamEnded {

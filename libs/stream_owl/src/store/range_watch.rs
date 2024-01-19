@@ -52,6 +52,10 @@ impl Receiver {
 impl Sender {
     #[instrument(level = "info", skip(self))]
     pub(super) fn send(&self, range: Range<u64>) {
+        if range.is_empty() {
+            return
+        }
+
         tracing::trace!("sending new range available: {range:?}");
         if let Err(e) = self.tx.send(range) {
             tracing::warn!("Could not send new range: {e:?}");

@@ -135,12 +135,12 @@ impl StreamBuilder<true> {
     > {
         let stream_size = Size::default();
         let (store_reader, store_writer) = match self.storage.expect("must chose storage option") {
-            StorageChoice::Disk(path) => store::new_disk_backed(path, stream_size.clone()).await,
+            StorageChoice::Disk(path) => store::new_disk_backed(path, stream_size.clone()).await?,
             StorageChoice::MemLimited(limit) => {
-                store::new_limited_mem_backed(limit, stream_size.clone())
+                store::new_limited_mem_backed(limit, stream_size.clone())?
             }
             StorageChoice::MemUnlimited => store::new_unlimited_mem_backed(stream_size.clone()),
-        }?;
+        };
 
         let (seek_tx, seek_rx) = mpsc::channel(12);
         let (pause_tx, pause_rx) = mpsc::channel(12);

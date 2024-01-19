@@ -1,4 +1,5 @@
 use rangemap::set::RangeSet;
+use tracing::instrument;
 
 use super::super::Store;
 
@@ -41,7 +42,10 @@ impl RangeLen for Range<u64> {
     }
 }
 
-pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mut Store) -> RangeSet<u64> {
+pub(crate) fn correct_for_capacity(
+    needed_from_src: Vec<Range<u64>>,
+    target: &mut Store,
+) -> RangeSet<u64> {
     use crate::store::CapacityBounds;
     let CapacityBounds::Limited(capacity) = target.capacity().total() else {
         return RangeSet::from_iter(needed_from_src.into_iter());
@@ -51,7 +55,7 @@ pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mu
     let mut res = RangeSet::new();
 
     for mut range in iter_by_importance(needed_from_src) {
-        if range.len() >= free_capacity {
+        if range.len() <= free_capacity {
             res.insert(range.clone());
             free_capacity -= range.len();
         } else {
@@ -63,72 +67,30 @@ pub(crate) fn correct_for_capacity(needed_from_src: Vec<Range<u64>>, target: &mu
     res
 }
 
-/// List is ordered by range start. The center element, calculated using
-/// normal (flooring) division by 2 is the current read pos.
-pub(super) fn needed_ranges(src: &Store, target: &Store) -> Vec<Range<u64>> {
+/// Get up to the number of ranges supported by the target around the
+/// currently being read range. Prioritizes the currently being read range
+/// and the ranges after it.
+#[instrument(level="trace", skip_all, ret)]
+pub(super) fn ranges_we_can_take(src: &Store, target: &Store) -> Vec<Range<u64>> {
     let range_list: Vec<Range<u64>> = src.ranges().iter().cloned().collect();
 
-    let search_res = range_list.binary_search_by_key(&src.last_read_pos(), |range| range.start);
-    let idx = match search_res {
+    let res = range_list.binary_search_by_key(&src.last_read_pos(), |range| range.start);
+    let range_currently_being_read = match res {
         Ok(pos_is_range_start) => pos_is_range_start,
         Err(pos_is_after_range_start) => pos_is_after_range_start,
     };
 
-    let needed_ranges = fixed_window(&range_list, target.n_supported_ranges(), idx);
-    needed_ranges.to_vec()
-}
+    let mut taking = Vec::with_capacity(range_list.len());
 
-fn fixed_window<T>(slice: &[T], center: usize, window: usize) -> &[T] {
-    let space_before = center;
-    let space_ahead = slice.len() - center - 1;
+    let center = range_currently_being_read;
+    let start = center;
+    let end = range_list.len().min(center + target.n_supported_ranges());
+    taking.extend_from_slice(&range_list[start..end]);
 
-    let n_before;
-    let n_after;
+    let n_left = target.n_supported_ranges().saturating_sub(taking.len());
+    let end = center;
+    let start = center.saturating_sub(n_left);
+    taking.extend_from_slice(&range_list[start..end]);
 
-    let half_window = window.div_ceil(2);
-    if center < slice.len() / 2 {
-        // bigger chance that there is space ahead of the center then before
-        n_before = usize::min(space_before, half_window - 1);
-        n_after = usize::min(space_ahead, window - n_before - 1);
-    } else {
-        n_after = usize::min(space_ahead, half_window - 1);
-        n_before = usize::min(space_before, window - n_after - 1);
-    }
-
-    &slice[center - n_before..=center + n_after]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_squishy_window() {
-        let big = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
-        let res = fixed_window(&big, 5, 5);
-        assert_eq!(res, &[3, 4, 5, 6, 7]);
-        let res = fixed_window(&big, 0, 5);
-        assert_eq!(res, &[0, 1, 2, 3, 4]);
-        let res = fixed_window(&big, 10, 5);
-        assert_eq!(res, &[6, 7, 8, 9, 10]);
-
-        let res = fixed_window(&big, 10, 1);
-        assert_eq!(res, &[10]);
-        let res = fixed_window(&big, 0, 1);
-        assert_eq!(res, &[0]);
-        let res = fixed_window(&big, 5, 1);
-        assert_eq!(res, &[5]);
-
-        let tiny = [0, 1, 2];
-        let res = fixed_window(&tiny, 1, 1);
-        assert_eq!(res, &[1]);
-        let res = fixed_window(&tiny, 0, 1);
-        assert_eq!(res, &[0]);
-        let res = fixed_window(&tiny, 2, 1);
-        assert_eq!(res, &[2]);
-
-        let res = fixed_window(&tiny, 1, 10);
-        assert_eq!(res, &[0, 1, 2]);
-    }
+    taking
 }

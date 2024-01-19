@@ -32,18 +32,24 @@ pub enum Error {
     #[error("Refusing write while in the middle of a seek")]
     SeekInProgress,
     #[error("Could not get enough memory from the OS")]
-    CouldNotAllocate(#[from] TryReserveError),
+    CouldNotAllocate(#[from] CouldNotAllocate),
 }
 
+// needed in store::Error as SeekInProgress is separated from
+// all other errors there
+#[derive(thiserror::Error, Debug)]
+#[error("Could not get enough memory from the OS")]
+pub struct CouldNotAllocate(#[from] TryReserveError);
+
 impl Memory {
-    pub(super) fn new(capacity: Capacity, range_tx: range_watch::Sender) -> Result<Self, Error> {
-        Ok(Self {
+    pub(super) fn new(capacity: Capacity, range_tx: range_watch::Sender) -> Self {
+        Self {
             last_read_pos: 0,
             capacity,
             buffer: RangeStore::new(),
             active_range: 0..0,
             range_tx,
-        })
+        }
     }
 
     #[tracing::instrument(level="trace", skip(buf), fields(buf_len = buf.len()))]
@@ -54,7 +60,7 @@ impl Memory {
             return Err(Error::SeekInProgress);
         }
 
-        self.buffer.append_at(pos, buf);
+        self.buffer.append_at(pos, buf).map_err(CouldNotAllocate)?;
         let written = buf.len();
 
         self.active_range.end += written as u64;

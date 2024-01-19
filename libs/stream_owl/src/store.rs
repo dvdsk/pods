@@ -55,12 +55,14 @@ pub enum Error {
     /// Not critical
     #[error("Refusing write while in the middle of a seek")]
     SeekInProgress,
-    #[error("Error in memory backend")]
-    MemoryLimited(#[from] limited_mem::Error),
-    #[error("Error in memory backend")]
-    MemoryUnlimited(#[from] unlimited_mem::Error),
-    #[error("Error in disk backend")]
+    #[error("Could not create limited mem store: {0}")]
+    CreatingMemoryLimited(#[from] limited_mem::CouldNotAllocate),
+    #[error("Error working with limited mem store: {0}")]
+    MemoryUnlimited(unlimited_mem::CouldNotAllocate),
+    #[error("Error in disk store: {0}")]
     Disk(#[from] disk::Error),
+    #[error("Could not create disk store: {0}")]
+    OpeningDisk(#[from] disk::OpenError),
 }
 
 fn store_handles(
@@ -87,7 +89,7 @@ fn store_handles(
 pub(crate) async fn new_disk_backed(
     path: PathBuf,
     stream_size: Size,
-) -> Result<(StoreReader, StoreWriter), Error> {
+) -> Result<(StoreReader, StoreWriter), disk::OpenError> {
     let (capacity_watcher, capacity) = capacity::new(capacity::Bounds::Unlimited);
     let (tx, rx) = range_watch::channel();
     let disk = disk::Disk::new(path, capacity, tx).await?;
@@ -103,7 +105,7 @@ pub(crate) async fn new_disk_backed(
 pub(crate) fn new_limited_mem_backed(
     max_cap: NonZeroUsize,
     stream_size: Size,
-) -> Result<(StoreReader, StoreWriter), Error> {
+) -> Result<(StoreReader, StoreWriter), limited_mem::CouldNotAllocate> {
     let max_cap = NonZeroU64::new(max_cap.get() as u64).expect("already nonzero");
     let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Limited(max_cap));
     let (tx, rx) = range_watch::channel();
@@ -117,18 +119,11 @@ pub(crate) fn new_limited_mem_backed(
 }
 
 #[tracing::instrument]
-pub(crate) fn new_unlimited_mem_backed(
-    stream_size: Size,
-) -> Result<(StoreReader, StoreWriter), Error> {
+pub(crate) fn new_unlimited_mem_backed(stream_size: Size) -> (StoreReader, StoreWriter) {
     let (capacity_watcher, capacity) = capacity::new(CapacityBounds::Unlimited);
     let (tx, rx) = range_watch::channel();
-    let mem = unlimited_mem::Memory::new(capacity, tx)?;
-    Ok(store_handles(
-        Store::MemUnlimited(mem),
-        rx,
-        capacity_watcher,
-        stream_size,
-    ))
+    let mem = unlimited_mem::Memory::new(capacity, tx);
+    store_handles(Store::MemUnlimited(mem), rx, capacity_watcher, stream_size)
 }
 
 impl StoreWriter {
@@ -253,12 +248,11 @@ impl Store {
         match self {
             Store::Disk(inner) => inner.write_at(buf, pos).await.map_err(Error::Disk),
             Store::MemLimited(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
-                limited_mem::Error::SeekInProgress => Error::SeekInProgress,
-                other => Error::MemoryLimited(other),
+                limited_mem::SeekInProgress => Error::SeekInProgress,
             }),
             Store::MemUnlimited(inner) => inner.write_at(buf, pos).await.map_err(|e| match e {
                 unlimited_mem::Error::SeekInProgress => Error::SeekInProgress,
-                other => Error::MemoryUnlimited(other),
+                unlimited_mem::Error::CouldNotAllocate(e) => Error::MemoryUnlimited(e),
             }),
         }
     }

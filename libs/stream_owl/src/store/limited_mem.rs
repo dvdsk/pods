@@ -28,16 +28,18 @@ pub(crate) struct Memory {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum Error {
-    /// Not critical
-    #[error("Refusing write while in the middle of a seek")]
-    SeekInProgress,
-    #[error("Could not get enough memory from the OS")]
-    CouldNotAllocate(#[from] TryReserveError),
-}
+#[error("Refusing write while in the middle of a seek")]
+pub struct SeekInProgress;
+
+#[derive(thiserror::Error, Debug)]
+#[error("Could not get enough memory from the OS")]
+pub struct CouldNotAllocate(#[from] TryReserveError);
 
 impl Memory {
-    pub(super) fn new(capacity: Capacity, range_tx: range_watch::Sender) -> Result<Self, Error> {
+    pub(super) fn new(
+        capacity: Capacity,
+        range_tx: range_watch::Sender,
+    ) -> Result<Self, CouldNotAllocate> {
         let mut buffer = VecDeque::new();
         let buffer_cap = match capacity.total() {
             CapacityBounds::Unlimited => 0,
@@ -64,11 +66,15 @@ impl Memory {
     /// `pos` must be the position of the first byte in buf in the stream.
     /// For the first write at the start this should be 0
     #[tracing::instrument(level="trace", skip(buf), fields(buf_len = buf.len()))]
-    pub(super) async fn write_at(&mut self, buf: &[u8], pos: u64) -> Result<NonZeroUsize, Error> {
+    pub(super) async fn write_at(
+        &mut self,
+        buf: &[u8],
+        pos: u64,
+    ) -> Result<NonZeroUsize, SeekInProgress> {
         assert!(!buf.is_empty());
         if pos != self.range.end {
             debug!("refusing write: position not at current range end, seek must be in progress");
-            return Err(Error::SeekInProgress);
+            return Err(SeekInProgress);
         }
 
         let to_write = buf.len().min(self.capacity.available());

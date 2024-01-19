@@ -39,8 +39,9 @@ fn after_seeking_forward_download_still_completes() {
         other => panic!("runtime should return with StreamReturned, it returned with {other:?}"),
     }
 
+    std::mem::drop(handle); // triggers flush, could also call flush on handle
     let downloaded = std::fs::read(test_dl_path).unwrap();
-    assert_eq!(downloaded, testing::test_data(test_file_size as u32));
+    assert!(downloaded == testing::test_data(test_file_size as u32));
 }
 
 #[test]

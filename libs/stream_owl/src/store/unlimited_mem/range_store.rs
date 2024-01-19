@@ -1,3 +1,4 @@
+use std::collections::TryReserveError;
 use std::ops::Range;
 
 use rangemap::RangeSet;
@@ -34,10 +35,12 @@ impl RangeStore {
     }
 
     #[instrument(skip(self, bytes), fields(n_bytes = bytes.len() ))]
-    pub fn append_at(&mut self, pos: u64, bytes: &[u8]) {
+    pub fn append_at(&mut self, pos: u64, bytes: &[u8]) -> Result<(), TryReserveError> {
         let entry = self.buffers.iter_mut().find(|e| e.range().end == pos);
 
         if let Some(entry) = entry {
+            let needed = bytes.len().saturating_sub(entry.data.capacity());
+            entry.data.try_reserve(needed)?;
             entry.data.extend_from_slice(bytes)
         } else {
             debug!("Adding new buffer");
@@ -46,6 +49,7 @@ impl RangeStore {
                 data: bytes.to_vec(),
             })
         }
+        Ok(())
     }
 
     pub(crate) fn copy_at(&self, pos: u64, buf: &mut [u8]) -> usize {

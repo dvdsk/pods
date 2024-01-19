@@ -35,28 +35,32 @@ pub(crate) struct Disk {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("Could not write downloaded data to disk: {0}")]
+    WritingData(std::io::Error),
+    #[error("Could not read downloaded data from disk: {0}")]
+    ReadingData(std::io::Error),
+    #[error("Could not store download/stream progress to disk: {0}")]
+    UpdatingProgress(progress::Error),
+    #[error("Could not seek while preparing write: {0}")]
+    SeekForWriting(std::io::Error),
+    #[error("Could not seek while preparing read: {0}")]
+    SeekForReading(std::io::Error),
+    #[error("Could not flush data to disk: {0}")]
+    FlushingData(std::io::Error),
+    #[error("Could not flush progress info to disk: {0}")]
+    FlushingProgress(progress::Error),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum OpenError {
     #[error("Could not open file to write stream to as writable")]
     OpenForWriting(std::io::Error),
     #[error("Could not open file to write stream to as readable")]
     OpenForReading(std::io::Error),
     #[error("Path may not end with .progress")]
     InvalidPath,
-    #[error("Could not write downloaded data to disk")]
-    WritingData(std::io::Error),
-    #[error("Could not read downloaded data from disk")]
-    ReadingData(std::io::Error),
     #[error("Could not load progress from disk or prepare for storing it")]
     OpeningProgress(progress::Error),
-    #[error("Could not store download/stream progress to disk")]
-    UpdatingProgress(progress::Error),
-    #[error("Could not seek while preparing write")]
-    SeekForWriting(std::io::Error),
-    #[error("Could not seek while preparing read")]
-    SeekForReading(std::io::Error),
-    #[error("Could not flush data to disk")]
-    FlushingData(std::io::Error),
-    #[error("Could not flush progress info to disk")]
-    FlushingProgress(progress::Error),
 }
 
 impl Disk {
@@ -64,9 +68,9 @@ impl Disk {
         path: PathBuf,
         capacity: Capacity,
         range_tx: range_watch::Sender,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, OpenError> {
         if path.extension() == Some(OsStr::new("progress")) {
-            return Err(Error::InvalidPath);
+            return Err(OpenError::InvalidPath);
         }
 
         let file = fs::OpenOptions::new()
@@ -76,12 +80,12 @@ impl Disk {
             .truncate(false)
             .open(&path)
             .await
-            .map_err(Error::OpenForWriting)?;
+            .map_err(OpenError::OpenForWriting)?;
         let file = BufStream::new(file);
 
         let progress = Progress::new(path, range_tx, 0)
             .await
-            .map_err(Error::OpeningProgress)?;
+            .map_err(OpenError::OpeningProgress)?;
 
         Ok(Self {
             capacity,
